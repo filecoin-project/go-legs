@@ -61,8 +61,8 @@ func Publish(ctx context.Context, dataStore datastore.Batching, host host.Host, 
 		return nil, err
 	}
 
-	v := &legsVoucher{}
-	lvr := &legsVoucherResult{}
+	v := &LegsVoucher{}
+	lvr := &LegsVoucherResult{}
 	val := &legsValidator{}
 	if err := dt.RegisterVoucherType(v, val); err != nil {
 		return nil, err

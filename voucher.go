@@ -10,37 +10,21 @@ import (
 	peer "github.com/libp2p/go-libp2p-peer"
 )
 
-type legsVoucher struct {
-	head cid.Cid
+//go:generate cbor-gen-for --map-encoding LegsVoucher LegsVoucherResult
+
+type LegsVoucher struct {
+	Head *cid.Cid
 }
 
-func (v *legsVoucher) ToBytes() ([]byte, error) {
-	return v.head.Bytes(), nil
-}
-
-func (v *legsVoucher) FromBytes(data []byte) (err error) {
-	v.head, err = cid.Cast(data)
-	return
-}
-
-func (v *legsVoucher) Type() datatransfer.TypeIdentifier {
+func (v *LegsVoucher) Type() datatransfer.TypeIdentifier {
 	return "LegsVoucher"
 }
 
-type legsVoucherResult struct {
-	code uint8
+type LegsVoucherResult struct {
+	Code uint64
 }
 
-func (v *legsVoucherResult) ToBytes() ([]byte, error) {
-	return []byte{v.code}, nil
-}
-
-func (v *legsVoucherResult) FromBytes(data []byte) error {
-	v.code = data[0]
-	return nil
-}
-
-func (v *legsVoucherResult) Type() datatransfer.TypeIdentifier {
+func (v *LegsVoucherResult) Type() datatransfer.TypeIdentifier {
 	return "LegsVoucherResult"
 }
 
@@ -67,11 +51,11 @@ func (vl *legsValidator) ValidatePull(
 	baseCid cid.Cid,
 	selector ipld.Node) (datatransfer.VoucherResult, error) {
 
-	v := voucher.(*legsVoucher)
+	v := voucher.(*LegsVoucher)
 
-	if v.head == cid.Undef {
+	if v.Head == nil {
 		return nil, errors.New("invalid")
 	}
 
-	return &legsVoucherResult{0}, nil
+	return &LegsVoucherResult{0}, nil
 }
