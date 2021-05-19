@@ -45,7 +45,7 @@ func TestRoundTrip(t *testing.T) {
 
 	watcher, cncl := ls.OnChange()
 
-	itm := basicnode.NewBytes([]byte("hello world"))
+	itm := basicnode.NewString("hello world")
 	linkproto := cidlink.LinkBuilder{
 		Prefix: cid.Prefix{
 			Version:  1,

@@ -18,6 +18,7 @@ import (
 	"github.com/ipld/go-ipld-prime"
 	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
 	basicnode "github.com/ipld/go-ipld-prime/node/basic"
+	"github.com/ipld/go-ipld-prime/traversal/selector"
 	selectorbuilder "github.com/ipld/go-ipld-prime/traversal/selector/builder"
 	"github.com/libp2p/go-libp2p-core/host"
 	"github.com/libp2p/go-libp2p-core/peer"
@@ -70,8 +71,8 @@ func Subscribe(ctx context.Context, dataStore datastore.Batching, host host.Host
 		return nil, err
 	}
 
-	v := &legsVoucher{}
-	lvr := &legsVoucherResult{}
+	v := &LegsVoucher{}
+	lvr := &LegsVoucherResult{}
 	val := &legsValidator{}
 	if err := dt.RegisterVoucherType(v, val); err != nil {
 		return nil, err
@@ -137,10 +138,10 @@ func (ls *legSubscriber) watch(ctx context.Context, sub *pubsub.Subscription) {
 		if err != nil {
 			continue
 		}
-		v := legsVoucher{c}
+		v := LegsVoucher{&c}
 		np := basicnode.Prototype__Any{}
 		ssb := selectorbuilder.NewSelectorSpecBuilder(np)
-		sn := ssb.ExploreRecursiveEdge().Node()
+		sn := ssb.ExploreRecursive(selector.RecursionLimitNone(), ssb.ExploreAll(ssb.ExploreRecursiveEdge())).Node()
 		_, err = ls.transfer.OpenPullDataChannel(ctx, src, &v, c, sn)
 		if err != nil {
 			// retry?
