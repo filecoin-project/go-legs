@@ -37,11 +37,20 @@ func TestRoundTrip(t *testing.T) {
 	}
 
 	dstHost := mkTestHost()
+	srcHost.Peerstore().AddAddrs(dstHost.ID(), dstHost.Addrs(), time.Hour)
+	dstHost.Peerstore().AddAddrs(srcHost.ID(), srcHost.Addrs(), time.Hour)
+	if err := srcHost.Connect(context.Background(), dstHost.Peerstore().PeerInfo(dstHost.ID())); err != nil {
+		t.Fatal(err)
+	}
 	dstStore := ds.NewMapDatastore()
 	ls, err := legs.Subscribe(context.Background(), dstStore, dstHost, "legs/testtopic")
 	if err != nil {
 		t.Fatal(err)
 	}
+
+	// per https://github.com/libp2p/go-libp2p-pubsub/blob/e6ad80cf4782fca31f46e3a8ba8d1a450d562f49/gossipsub_test.go#L103
+	// we don't seem to have a way to manually trigger needed gossip-sub heartbeats for mesh establishment.
+	time.Sleep(time.Second)
 
 	watcher, cncl := ls.OnChange()
 
@@ -83,7 +92,7 @@ func TestRoundTrip(t *testing.T) {
 		if !downstream.Equals(lnk.(cidlink.Link).Cid) {
 			t.Fatalf("sync'd sid unexpected %s vs %s", downstream, lnk)
 		}
-		if _, err := dstStore.Get(ds.RawKey(downstream.String())); err != nil {
+		if _, err := dstStore.Get(ds.NewKey(downstream.String())); err != nil {
 			t.Fatalf("data not in receiver store: %v", err)
 		}
 	}

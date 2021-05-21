@@ -112,7 +112,7 @@ func Subscribe(ctx context.Context, dataStore datastore.Batching, host host.Host
 }
 
 func (ls *legSubscriber) onEvent(event dt.Event, channelState dt.ChannelState) {
-	if event.Code == dt.Complete {
+	if event.Code == dt.FinishTransfer {
 		ls.updates <- channelState.BaseCID()
 	}
 }
