@@ -10,21 +10,25 @@ import (
 	peer "github.com/libp2p/go-libp2p-peer"
 )
 
-//go:generate cbor-gen-for --map-encoding LegsVoucher LegsVoucherResult
+//go:generate go run -tags cbg ./tools
 
-type LegsVoucher struct {
+// A Voucher is used to communicate a new DAG head
+type Voucher struct {
 	Head *cid.Cid
 }
 
-func (v *LegsVoucher) Type() datatransfer.TypeIdentifier {
+// Type provides an identifier for the voucher to go-data-transfer
+func (v *Voucher) Type() datatransfer.TypeIdentifier {
 	return "LegsVoucher"
 }
 
-type LegsVoucherResult struct {
+// A VoucherResult responds to a voucher
+type VoucherResult struct {
 	Code uint64
 }
 
-func (v *LegsVoucherResult) Type() datatransfer.TypeIdentifier {
+// Type provides an identifier for the voucher result to go-data-transfer
+func (v *VoucherResult) Type() datatransfer.TypeIdentifier {
 	return "LegsVoucherResult"
 }
 
@@ -51,11 +55,11 @@ func (vl *legsValidator) ValidatePull(
 	baseCid cid.Cid,
 	selector ipld.Node) (datatransfer.VoucherResult, error) {
 
-	v := voucher.(*LegsVoucher)
+	v := voucher.(*Voucher)
 
 	if v.Head == nil {
 		return nil, errors.New("invalid")
 	}
 
-	return &LegsVoucherResult{0}, nil
+	return &VoucherResult{0}, nil
 }

@@ -16,7 +16,7 @@ var _ = xerrors.Errorf
 var _ = cid.Undef
 var _ = sort.Sort
 
-func (t *LegsVoucher) MarshalCBOR(w io.Writer) error {
+func (t *Voucher) MarshalCBOR(w io.Writer) error {
 	if t == nil {
 		_, err := w.Write(cbg.CborNull)
 		return err
@@ -52,8 +52,8 @@ func (t *LegsVoucher) MarshalCBOR(w io.Writer) error {
 	return nil
 }
 
-func (t *LegsVoucher) UnmarshalCBOR(r io.Reader) error {
-	*t = LegsVoucher{}
+func (t *Voucher) UnmarshalCBOR(r io.Reader) error {
+	*t = Voucher{}
 
 	br := cbg.GetPeeker(r)
 	scratch := make([]byte, 8)
@@ -117,7 +117,7 @@ func (t *LegsVoucher) UnmarshalCBOR(r io.Reader) error {
 
 	return nil
 }
-func (t *LegsVoucherResult) MarshalCBOR(w io.Writer) error {
+func (t *VoucherResult) MarshalCBOR(w io.Writer) error {
 	if t == nil {
 		_, err := w.Write(cbg.CborNull)
 		return err
@@ -147,8 +147,8 @@ func (t *LegsVoucherResult) MarshalCBOR(w io.Writer) error {
 	return nil
 }
 
-func (t *LegsVoucherResult) UnmarshalCBOR(r io.Reader) error {
-	*t = LegsVoucherResult{}
+func (t *VoucherResult) UnmarshalCBOR(r io.Reader) error {
+	*t = VoucherResult{}
 
 	br := cbg.GetPeeker(r)
 	scratch := make([]byte, 8)

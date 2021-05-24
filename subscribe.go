@@ -71,8 +71,8 @@ func Subscribe(ctx context.Context, dataStore datastore.Batching, host host.Host
 		return nil, err
 	}
 
-	v := &LegsVoucher{}
-	lvr := &LegsVoucherResult{}
+	v := &Voucher{}
+	lvr := &VoucherResult{}
 	val := &legsValidator{}
 	if err := dt.RegisterVoucherType(v, val); err != nil {
 		return nil, err
@@ -138,7 +138,7 @@ func (ls *legSubscriber) watch(ctx context.Context, sub *pubsub.Subscription) {
 		if err != nil {
 			continue
 		}
-		v := LegsVoucher{&c}
+		v := Voucher{&c}
 		np := basicnode.Prototype__Any{}
 		ssb := selectorbuilder.NewSelectorSpecBuilder(np)
 		sn := ssb.ExploreRecursive(selector.RecursionLimitNone(), ssb.ExploreAll(ssb.ExploreRecursiveEdge())).Node()
