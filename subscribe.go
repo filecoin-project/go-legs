@@ -44,7 +44,8 @@ func Subscribe(ctx context.Context, dataStore datastore.Batching, host host.Host
 		return nil, err
 	}
 
-	loader := func(lnk ipld.Link, _ ipld.LinkContext) (io.Reader, error) {
+	lsys := cidlink.DefaultLinkSystem()
+	lsys.StorageReadOpener = func(lctx ipld.LinkContext, lnk ipld.Link) (io.Reader, error) {
 		c := lnk.(cidlink.Link).Cid
 		val, err := dataStore.Get(datastore.NewKey(c.String()))
 		if err != nil {
@@ -52,15 +53,16 @@ func Subscribe(ctx context.Context, dataStore datastore.Batching, host host.Host
 		}
 		return bytes.NewBuffer(val), nil
 	}
-	storer := func(_ ipld.LinkContext) (io.Writer, ipld.StoreCommitter, error) {
+	lsys.StorageWriteOpener = func(_ ipld.LinkContext) (io.Writer, ipld.BlockWriteCommitter, error) {
 		buf := bytes.NewBuffer(nil)
 		return buf, func(lnk ipld.Link) error {
 			c := lnk.(cidlink.Link).Cid
 			return dataStore.Put(datastore.NewKey(c.String()), buf.Bytes())
 		}, nil
 	}
+
 	gsnet := gsnet.NewFromLibp2pHost(host)
-	gs := gsimpl.New(ctx, gsnet, loader, storer)
+	gs := gsimpl.New(ctx, gsnet, lsys)
 	tp := gstransport.NewTransport(host.ID(), gs)
 	dtNet := dtnetwork.NewFromLibp2pHost(host)
 

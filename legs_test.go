@@ -55,7 +55,7 @@ func TestRoundTrip(t *testing.T) {
 	watcher, cncl := ls.OnChange()
 
 	itm := basicnode.NewString("hello world")
-	linkproto := cidlink.LinkBuilder{
+	linkproto := cidlink.LinkPrototype{
 		Prefix: cid.Prefix{
 			Version:  1,
 			Codec:    uint64(multicodec.DagJson),
@@ -63,14 +63,16 @@ func TestRoundTrip(t *testing.T) {
 			MhLength: 16,
 		},
 	}
-	storer := func(_ ipld.LinkContext) (io.Writer, ipld.StoreCommitter, error) {
+	lsys := cidlink.DefaultLinkSystem()
+	lsys.StorageWriteOpener = func(_ ipld.LinkContext) (io.Writer, ipld.BlockWriteCommitter, error) {
 		buf := bytes.NewBuffer(nil)
 		return buf, func(lnk ipld.Link) error {
 			c := lnk.(cidlink.Link).Cid
 			return srcStore.Put(datastore.NewKey(c.String()), buf.Bytes())
 		}, nil
 	}
-	lnk, err := linkproto.Build(context.Background(), ipld.LinkContext{}, itm, storer)
+
+	lnk, err := lsys.Store(ipld.LinkContext{}, linkproto, itm)
 	if err != nil {
 		t.Fatal(err)
 	}

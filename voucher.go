@@ -5,12 +5,15 @@ import (
 	"errors"
 
 	datatransfer "github.com/filecoin-project/go-data-transfer"
+	dt "github.com/filecoin-project/go-data-transfer"
 	"github.com/ipfs/go-cid"
 	"github.com/ipld/go-ipld-prime"
-	peer "github.com/libp2p/go-libp2p-peer"
+	peer "github.com/libp2p/go-libp2p-core/peer"
 )
 
 //go:generate go run -tags cbg ./tools
+
+var _ dt.RequestValidator = &legsValidator{}
 
 // A Voucher is used to communicate a new DAG head
 type Voucher struct {
