@@ -17,6 +17,8 @@ import (
 	_ "github.com/ipld/go-ipld-prime/codec/dagjson"
 	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
 	basicnode "github.com/ipld/go-ipld-prime/node/basic"
+	"github.com/ipld/go-ipld-prime/traversal/selector"
+	selectorbuilder "github.com/ipld/go-ipld-prime/traversal/selector/builder"
 	"github.com/libp2p/go-libp2p"
 	"github.com/libp2p/go-libp2p-core/host"
 	"github.com/multiformats/go-multicodec"
@@ -28,10 +30,30 @@ func mkTestHost() host.Host {
 	return h
 }
 
-func TestRoundTrip(t *testing.T) {
+func mkLinkSystem(ds datastore.Batching) ipld.LinkSystem {
+	lsys := cidlink.DefaultLinkSystem()
+	lsys.StorageReadOpener = func(lctx ipld.LinkContext, lnk ipld.Link) (io.Reader, error) {
+		c := lnk.(cidlink.Link).Cid
+		val, err := ds.Get(datastore.NewKey(c.String()))
+		if err != nil {
+			return nil, err
+		}
+		return bytes.NewBuffer(val), nil
+	}
+	lsys.StorageWriteOpener = func(_ ipld.LinkContext) (io.Writer, ipld.BlockWriteCommitter, error) {
+		buf := bytes.NewBuffer(nil)
+		return buf, func(lnk ipld.Link) error {
+			c := lnk.(cidlink.Link).Cid
+			return ds.Put(datastore.NewKey(c.String()), buf.Bytes())
+		}, nil
+	}
+	return lsys
+}
+
+func initPubSub(t *testing.T, srcStore, dstStore datastore.Batching) (legs.LegPublisher, legs.LegSubscriber) {
 	srcHost := mkTestHost()
-	srcStore := ds.NewMapDatastore()
-	lp, err := legs.Publish(context.Background(), srcStore, srcHost, "legs/testtopic")
+	srcLnkS := mkLinkSystem(srcStore)
+	lp, err := legs.NewPublisher(context.Background(), srcStore, srcHost, "legs/testtopic", srcLnkS)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -42,19 +64,15 @@ func TestRoundTrip(t *testing.T) {
 	if err := srcHost.Connect(context.Background(), dstHost.Peerstore().PeerInfo(dstHost.ID())); err != nil {
 		t.Fatal(err)
 	}
-	dstStore := ds.NewMapDatastore()
-	ls, err := legs.Subscribe(context.Background(), dstStore, dstHost, "legs/testtopic")
+	dstLnkS := mkLinkSystem(dstStore)
+	ls, err := legs.NewSubscriber(context.Background(), dstStore, dstHost, "legs/testtopic", dstLnkS)
 	if err != nil {
 		t.Fatal(err)
 	}
+	return lp, ls
+}
 
-	// per https://github.com/libp2p/go-libp2p-pubsub/blob/e6ad80cf4782fca31f46e3a8ba8d1a450d562f49/gossipsub_test.go#L103
-	// we don't seem to have a way to manually trigger needed gossip-sub heartbeats for mesh establishment.
-	time.Sleep(time.Second)
-
-	watcher, cncl := ls.OnChange()
-
-	itm := basicnode.NewString("hello world")
+func mkRoot(srcStore datastore.Batching, n ipld.Node) (ipld.Link, error) {
 	linkproto := cidlink.LinkPrototype{
 		Prefix: cid.Prefix{
 			Version:  1,
@@ -72,7 +90,109 @@ func TestRoundTrip(t *testing.T) {
 		}, nil
 	}
 
-	lnk, err := lsys.Store(ipld.LinkContext{}, linkproto, itm)
+	return lsys.Store(ipld.LinkContext{}, linkproto, n)
+}
+
+func TestRoundTrip(t *testing.T) {
+	// Init legs publisher and subscriber
+	srcStore := ds.NewMapDatastore()
+	dstStore := ds.NewMapDatastore()
+	lp, ls := initPubSub(t, srcStore, dstStore)
+
+	// Fetch-all recursively selector
+	np := basicnode.Prototype__Any{}
+	ssb := selectorbuilder.NewSelectorSpecBuilder(np)
+	sn := ssb.ExploreRecursive(selector.RecursionLimitNone(), ssb.ExploreAll(ssb.ExploreRecursiveEdge())).Node()
+
+	// Subscription handler to perform a plain exchange
+	handler, err := legs.PlainExchangeWithSelector(ls, sn)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = ls.Subscribe(context.Background(), handler)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// per https://github.com/libp2p/go-libp2p-pubsub/blob/e6ad80cf4782fca31f46e3a8ba8d1a450d562f49/gossipsub_test.go#L103
+	// we don't seem to have a way to manually trigger needed gossip-sub heartbeats for mesh establishment.
+	time.Sleep(time.Second)
+
+	watcher, cncl := ls.OnChange()
+
+	// Update root with item
+	itm := basicnode.NewString("hello world")
+	lnk, err := mkRoot(srcStore, itm)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	defer func() {
+		cncl()
+		lp.Close(context.Background())
+		ls.Close(context.Background())
+	}()
+
+	if err := lp.UpdateRoot(context.Background(), lnk.(cidlink.Link).Cid); err != nil {
+		t.Fatal(err)
+	}
+
+	select {
+	case <-time.After(time.Second * 5):
+		t.Fatal("timed out waiting for sync to propogate")
+	case downstream := <-watcher:
+		if !downstream.Equals(lnk.(cidlink.Link).Cid) {
+			t.Fatalf("sync'd sid unexpected %s vs %s", downstream, lnk)
+		}
+		if _, err := dstStore.Get(ds.NewKey(downstream.String())); err != nil {
+			t.Fatalf("data not in receiver store: %v", err)
+		}
+	}
+}
+
+func TestSubscribeTwice(t *testing.T) {
+	// Init legs publisher and subscriber
+	srcStore := ds.NewMapDatastore()
+	dstStore := ds.NewMapDatastore()
+	lp, ls := initPubSub(t, srcStore, dstStore)
+
+	// Fetch-all recursively selector
+	np := basicnode.Prototype__Any{}
+	ssb := selectorbuilder.NewSelectorSpecBuilder(np)
+	sn := ssb.ExploreRecursive(selector.RecursionLimitNone(), ssb.ExploreAll(ssb.ExploreRecursiveEdge())).Node()
+
+	// Subscription handler to perform a plain exchange
+	handler, err := legs.PlainExchangeWithSelector(ls, sn)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = ls.Subscribe(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = ls.Subscribe(context.Background(), handler)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// per https://github.com/libp2p/go-libp2p-pubsub/blob/e6ad80cf4782fca31f46e3a8ba8d1a450d562f49/gossipsub_test.go#L103
+	// we don't seem to have a way to manually trigger needed gossip-sub heartbeats for mesh establishment.
+	time.Sleep(time.Second)
+
+	watcher, cncl := ls.OnChange()
+
+	// Update root with item
+	nb := np.NewBuilder()
+	ma, _ := nb.BeginMap(2)
+	ma.AssembleKey().AssignString("hey")
+	ma.AssembleValue().AssignString("it works!")
+	ma.AssembleKey().AssignString("yes")
+	ma.AssembleValue().AssignBool(true)
+	ma.Finish()
+	n := nb.Build()
+	lnk, err := mkRoot(srcStore, n)
 	if err != nil {
 		t.Fatal(err)
 	}

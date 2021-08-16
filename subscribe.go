@@ -1,9 +1,8 @@
 package legs
 
 import (
-	"bytes"
 	"context"
-	"io"
+	"errors"
 	"os"
 	"sync"
 
@@ -16,10 +15,6 @@ import (
 	gsimpl "github.com/ipfs/go-graphsync/impl"
 	gsnet "github.com/ipfs/go-graphsync/network"
 	"github.com/ipld/go-ipld-prime"
-	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
-	basicnode "github.com/ipld/go-ipld-prime/node/basic"
-	"github.com/ipld/go-ipld-prime/traversal/selector"
-	selectorbuilder "github.com/ipld/go-ipld-prime/traversal/selector/builder"
 	"github.com/libp2p/go-libp2p-core/host"
 	"github.com/libp2p/go-libp2p-core/peer"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
@@ -29,36 +24,23 @@ type legSubscriber struct {
 	ds     datastore.Datastore
 	tmpDir string
 	*pubsub.Topic
-	updates  chan cid.Cid
-	transfer dt.Manager
+	isSubscribed bool
+	updates      chan cid.Cid
+	transfer     dt.Manager
 
 	submtx sync.Mutex
 	subs   []chan cid.Cid
 	cancel context.CancelFunc
+
+	hndmtx  sync.RWMutex
+	handler SubFnHandler
 }
 
-// Subscribe will sync an IPLD dag of data from a publisher
-func Subscribe(ctx context.Context, dataStore datastore.Batching, host host.Host, topic string) (LegSubscriber, error) {
+// NewSubscriber creates a new leg subscriber listening to a specific pubsub topic
+func NewSubscriber(ctx context.Context, ds datastore.Batching, host host.Host, topic string, lsys ipld.LinkSystem) (LegSubscriber, error) {
 	t, err := makePubsub(ctx, host, topic)
 	if err != nil {
 		return nil, err
-	}
-
-	lsys := cidlink.DefaultLinkSystem()
-	lsys.StorageReadOpener = func(lctx ipld.LinkContext, lnk ipld.Link) (io.Reader, error) {
-		c := lnk.(cidlink.Link).Cid
-		val, err := dataStore.Get(datastore.NewKey(c.String()))
-		if err != nil {
-			return nil, err
-		}
-		return bytes.NewBuffer(val), nil
-	}
-	lsys.StorageWriteOpener = func(_ ipld.LinkContext) (io.Writer, ipld.BlockWriteCommitter, error) {
-		buf := bytes.NewBuffer(nil)
-		return buf, func(lnk ipld.Link) error {
-			c := lnk.(cidlink.Link).Cid
-			return dataStore.Put(datastore.NewKey(c.String()), buf.Bytes())
-		}, nil
 	}
 
 	gsnet := gsnet.NewFromLibp2pHost(host)
@@ -68,7 +50,7 @@ func Subscribe(ctx context.Context, dataStore datastore.Batching, host host.Host
 
 	tmpDir := os.TempDir()
 
-	dt, err := datatransfer.NewDataTransfer(dataStore, tmpDir, dtNet, tp)
+	dt, err := datatransfer.NewDataTransfer(ds, tmpDir, dtNet, tp)
 	if err != nil {
 		return nil, err
 	}
@@ -86,31 +68,46 @@ func Subscribe(ctx context.Context, dataStore datastore.Batching, host host.Host
 		return nil, err
 	}
 
-	psub, err := t.Subscribe()
-	if err != nil {
-		return nil, err
-	}
-	cctx, cancel := context.WithCancel(context.Background())
-
-	sub := legSubscriber{
-		ds:       dataStore,
+	return &legSubscriber{
+		ds:       ds,
 		tmpDir:   tmpDir,
 		Topic:    t,
 		transfer: dt,
 		updates:  make(chan cid.Cid, 5),
 		subs:     make([]chan cid.Cid, 0),
-		cancel:   nil}
-	unsub := sub.transfer.SubscribeToEvents(sub.onEvent)
-	sub.cancel = func() {
-		unsub()
-		psub.Cancel()
-		cancel()
+		cancel:   nil}, nil
+}
+
+// Subscribe will subscribe for update to a pubsub topic and trigger handler with
+// every DAG root update being synced. If we are already subscribed to the topic,
+// subscribe updates the handler.
+func (ls *legSubscriber) Subscribe(ctx context.Context, handler SubFnHandler) error {
+	ls.hndmtx.Lock()
+	defer ls.hndmtx.Unlock()
+
+	// Set up handler.
+	ls.handler = handler
+
+	if !ls.isSubscribed {
+		psub, err := ls.Topic.Subscribe()
+		if err != nil {
+			return err
+		}
+		cctx, cancel := context.WithCancel(ctx)
+
+		unsub := ls.transfer.SubscribeToEvents(ls.onEvent)
+		ls.cancel = func() {
+			unsub()
+			psub.Cancel()
+			cancel()
+		}
+
+		go ls.watch(cctx, psub)
+		go ls.distribute(cctx)
+		ls.isSubscribed = true
 	}
 
-	go sub.watch(cctx, psub)
-	go sub.distribute(cctx)
-
-	return &sub, nil
+	return nil
 }
 
 func (ls *legSubscriber) onEvent(event dt.Event, channelState dt.ChannelState) {
@@ -129,22 +126,9 @@ func (ls *legSubscriber) watch(ctx context.Context, sub *pubsub.Subscription) {
 			// todo: restart subscription.
 			return
 		}
-
-		// TODO: validate msg.from
-		src, err := peer.IDFromBytes(msg.From)
-		if err != nil {
-			continue
-		}
-
-		c, err := cid.Cast(msg.Data)
-		if err != nil {
-			continue
-		}
-		v := Voucher{&c}
-		np := basicnode.Prototype__Any{}
-		ssb := selectorbuilder.NewSelectorSpecBuilder(np)
-		sn := ssb.ExploreRecursive(selector.RecursionLimitNone(), ssb.ExploreAll(ssb.ExploreRecursiveEdge())).Node()
-		_, err = ls.transfer.OpenPullDataChannel(ctx, src, &v, c, sn)
+		ls.hndmtx.RLock()
+		defer ls.hndmtx.RUnlock()
+		err = ls.handler(ctx, msg)
 		if err != nil {
 			// retry?
 		}
@@ -198,4 +182,30 @@ func (ls *legSubscriber) Close(ctx context.Context) error {
 		return err2
 	}
 	return err3
+}
+
+// PlainExchangeWithSelector returns a subscription handler that triggers a new
+// data-transfer exchange using the specified selector for the new root CID.
+func PlainExchangeWithSelector(ls LegSubscriber, sel ipld.Node) (SubFnHandler, error) {
+	lsub, ok := ls.(*legSubscriber)
+	if !ok {
+		return nil, errors.New("legSubscriber is not of the right type")
+	}
+	return func(ctx context.Context, msg *pubsub.Message) error {
+		// TODO: validate msg.from
+		src, err := peer.IDFromBytes(msg.From)
+		if err != nil {
+			// continue
+			return nil
+		}
+
+		c, err := cid.Cast(msg.Data)
+		if err != nil {
+			// continue
+			return nil
+		}
+		v := Voucher{&c}
+		_, err = lsub.transfer.OpenPullDataChannel(ctx, src, &v, c, sel)
+		return err
+	}, nil
 }
