@@ -4,6 +4,8 @@ import (
 	"context"
 
 	"github.com/ipfs/go-cid"
+	"github.com/ipld/go-ipld-prime"
+	"github.com/libp2p/go-libp2p-core/peer"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 )
 
@@ -21,11 +23,23 @@ type LegPublisher interface {
 
 // LegSubscriber is an interface for watching a published dag.
 type LegSubscriber interface {
-	Subscribe(context.Context, SubFnHandler) error
+	Subscribe(ctx context.Context, selector ipld.Node, policy PolicyHandler) error
 	OnChange() (chan cid.Cid, context.CancelFunc)
+	SetPolicyHandler(PolicyHandler) error
 	Close(context.Context) error
 }
 
-// SubFnHandler is the function handler to run every time a root is updated
-// in subscribed topic
-type SubFnHandler func(context.Context, *pubsub.Message) error
+// PolicyHandler make some preliminary checks before running the exchange
+type PolicyHandler func(*pubsub.Message) (bool, error)
+
+// FilterPeerPolicy is a sample policy that only triggers exchanges
+// if the update is generated from a specific peer.
+func FilterPeerPolicy(p peer.ID) PolicyHandler {
+	return func(msg *pubsub.Message) (bool, error) {
+		src, err := peer.IDFromBytes(msg.From)
+		if err != nil {
+			return false, err
+		}
+		return src == p, nil
+	}
+}

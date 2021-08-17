@@ -32,8 +32,8 @@ type legSubscriber struct {
 	subs   []chan cid.Cid
 	cancel context.CancelFunc
 
-	hndmtx  sync.RWMutex
-	handler SubFnHandler
+	hndmtx sync.RWMutex
+	policy PolicyHandler
 }
 
 // NewSubscriber creates a new leg subscriber listening to a specific pubsub topic
@@ -78,15 +78,16 @@ func NewSubscriber(ctx context.Context, ds datastore.Batching, host host.Host, t
 		cancel:   nil}, nil
 }
 
-// Subscribe will subscribe for update to a pubsub topic and trigger handler with
+// Subscribe will subscribe for update to a pubsub topic. Every update triggers
+// the policyHandler and trigger handler with
 // every DAG root update being synced. If we are already subscribed to the topic,
 // subscribe updates the handler.
-func (ls *legSubscriber) Subscribe(ctx context.Context, handler SubFnHandler) error {
-	ls.hndmtx.Lock()
-	defer ls.hndmtx.Unlock()
-
-	// Set up handler.
-	ls.handler = handler
+func (ls *legSubscriber) Subscribe(ctx context.Context, selector ipld.Node, policy PolicyHandler) error {
+	if selector == nil {
+		return errors.New("cannot subscribe without a selector")
+	}
+	// Set specified policy
+	ls.SetPolicyHandler(policy)
 
 	if !ls.isSubscribed {
 		psub, err := ls.Topic.Subscribe()
@@ -102,11 +103,19 @@ func (ls *legSubscriber) Subscribe(ctx context.Context, handler SubFnHandler) er
 			cancel()
 		}
 
-		go ls.watch(cctx, psub)
+		go ls.watch(cctx, psub, selector)
 		go ls.distribute(cctx)
 		ls.isSubscribed = true
 	}
 
+	return nil
+}
+
+// SetPolicyHandler sets a new policyHandler to leg subscription.
+func (ls *legSubscriber) SetPolicyHandler(policy PolicyHandler) error {
+	ls.hndmtx.Lock()
+	defer ls.hndmtx.Unlock()
+	ls.policy = policy
 	return nil
 }
 
@@ -116,21 +125,40 @@ func (ls *legSubscriber) onEvent(event dt.Event, channelState dt.ChannelState) {
 	}
 }
 
-func (ls *legSubscriber) watch(ctx context.Context, sub *pubsub.Subscription) {
+func (ls *legSubscriber) watch(ctx context.Context, sub *pubsub.Subscription, sel ipld.Node) {
 	for {
 		msg, err := sub.Next(ctx)
 		if ctx.Err() != nil {
 			return
 		}
 		if err != nil {
-			// todo: restart subscription.
+			// TODO: restart subscription.
 			return
 		}
-		ls.hndmtx.RLock()
-		defer ls.hndmtx.RUnlock()
-		err = ls.handler(ctx, msg)
-		if err != nil {
-			// retry?
+
+		// Run policy from pubsub message to see if exchange needs to be run
+		allow := true
+		if ls.policy != nil {
+			ls.hndmtx.RLock()
+			allow, err = ls.policy(msg)
+			ls.hndmtx.RUnlock()
+		}
+
+		if allow {
+			src, err := peer.IDFromBytes(msg.From)
+			if err != nil {
+				continue
+			}
+
+			c, err := cid.Cast(msg.Data)
+			if err != nil {
+				continue
+			}
+			v := Voucher{&c}
+			_, err = ls.transfer.OpenPullDataChannel(ctx, src, &v, c, sel)
+			if err != nil {
+				// retry?
+			}
 		}
 	}
 }
@@ -182,30 +210,4 @@ func (ls *legSubscriber) Close(ctx context.Context) error {
 		return err2
 	}
 	return err3
-}
-
-// PlainExchangeWithSelector returns a subscription handler that triggers a new
-// data-transfer exchange using the specified selector for the new root CID.
-func PlainExchangeWithSelector(ls LegSubscriber, sel ipld.Node) (SubFnHandler, error) {
-	lsub, ok := ls.(*legSubscriber)
-	if !ok {
-		return nil, errors.New("legSubscriber is not of the right type")
-	}
-	return func(ctx context.Context, msg *pubsub.Message) error {
-		// TODO: validate msg.from
-		src, err := peer.IDFromBytes(msg.From)
-		if err != nil {
-			// continue
-			return nil
-		}
-
-		c, err := cid.Cast(msg.Data)
-		if err != nil {
-			// continue
-			return nil
-		}
-		v := Voucher{&c}
-		_, err = lsub.transfer.OpenPullDataChannel(ctx, src, &v, c, sel)
-		return err
-	}, nil
 }
