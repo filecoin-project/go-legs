@@ -1,9 +1,7 @@
 package legs
 
 import (
-	"bytes"
 	"context"
-	"io"
 	"os"
 
 	dt "github.com/filecoin-project/go-data-transfer"
@@ -15,7 +13,6 @@ import (
 	gsimpl "github.com/ipfs/go-graphsync/impl"
 	gsnet "github.com/ipfs/go-graphsync/network"
 	"github.com/ipld/go-ipld-prime"
-	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
 	"github.com/libp2p/go-libp2p-core/host"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 )
@@ -27,30 +24,16 @@ type legPublisher struct {
 	transfer dt.Manager
 }
 
-// Publish will export an IPLD dag of data publicly for consumption.
-func Publish(ctx context.Context, dataStore datastore.Batching, host host.Host, topic string) (LegPublisher, error) {
+// NewPublisher creates a new legs publisher
+func NewPublisher(ctx context.Context, dataStore datastore.Batching, host host.Host, topic string, lsys ipld.LinkSystem) (LegPublisher, error) {
+
 	t, err := makePubsub(ctx, host, topic)
 	if err != nil {
 		return nil, err
 	}
 
-	loader := func(lnk ipld.Link, _ ipld.LinkContext) (io.Reader, error) {
-		c := lnk.(cidlink.Link).Cid
-		val, err := dataStore.Get(datastore.NewKey(c.String()))
-		if err != nil {
-			return nil, err
-		}
-		return bytes.NewBuffer(val), nil
-	}
-	storer := func(_ ipld.LinkContext) (io.Writer, ipld.StoreCommitter, error) {
-		buf := bytes.NewBuffer(nil)
-		return buf, func(lnk ipld.Link) error {
-			c := lnk.(cidlink.Link).Cid
-			return dataStore.Put(datastore.NewKey(c.String()), buf.Bytes())
-		}, nil
-	}
 	gsnet := gsnet.NewFromLibp2pHost(host)
-	gs := gsimpl.New(ctx, gsnet, loader, storer)
+	gs := gsimpl.New(ctx, gsnet, lsys)
 	tp := gstransport.NewTransport(host.ID(), gs)
 	dtNet := dtnetwork.NewFromLibp2pHost(host)
 
