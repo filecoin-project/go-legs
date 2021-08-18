@@ -4,7 +4,6 @@ import (
 	"context"
 
 	"github.com/ipfs/go-cid"
-	"github.com/ipld/go-ipld-prime"
 	"github.com/libp2p/go-libp2p-core/peer"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 )
@@ -23,7 +22,6 @@ type LegPublisher interface {
 
 // LegSubscriber is an interface for watching a published dag.
 type LegSubscriber interface {
-	Subscribe(ctx context.Context, selector ipld.Node, policy PolicyHandler) error
 	OnChange() (chan cid.Cid, context.CancelFunc)
 	SetPolicyHandler(PolicyHandler) error
 	Close(context.Context) error

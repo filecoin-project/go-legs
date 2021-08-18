@@ -37,7 +37,11 @@ type legSubscriber struct {
 }
 
 // NewSubscriber creates a new leg subscriber listening to a specific pubsub topic
-func NewSubscriber(ctx context.Context, ds datastore.Batching, host host.Host, topic string, lsys ipld.LinkSystem) (LegSubscriber, error) {
+func NewSubscriber(ctx context.Context, ds datastore.Batching, host host.Host, topic string, lsys ipld.LinkSystem, selector ipld.Node, policy PolicyHandler) (LegSubscriber, error) {
+	if selector == nil {
+		return nil, errors.New("cannot create subscriber without a selector")
+	}
+
 	t, err := makePubsub(ctx, host, topic)
 	if err != nil {
 		return nil, err
@@ -68,47 +72,45 @@ func NewSubscriber(ctx context.Context, ds datastore.Batching, host host.Host, t
 		return nil, err
 	}
 
-	return &legSubscriber{
+	ls := &legSubscriber{
 		ds:       ds,
 		tmpDir:   tmpDir,
 		Topic:    t,
 		transfer: dt,
 		updates:  make(chan cid.Cid, 5),
 		subs:     make([]chan cid.Cid, 0),
-		cancel:   nil}, nil
+		cancel:   nil,
+		policy:   policy,
+	}
+
+	// Start subscription
+	err = ls.subscribe(ctx, selector)
+	if err != nil {
+		return nil, err
+	}
+
+	return ls, nil
 }
 
-// Subscribe will subscribe for update to a pubsub topic. Every update triggers
-// the policyHandler and trigger handler with
-// every DAG root update being synced. If we are already subscribed to the topic,
-// subscribe updates the handler.
-func (ls *legSubscriber) Subscribe(ctx context.Context, selector ipld.Node, policy PolicyHandler) error {
-	if selector == nil {
-		return errors.New("cannot subscribe without a selector")
+func (ls *legSubscriber) subscribe(ctx context.Context, selector ipld.Node) error {
+	psub, err := ls.Topic.Subscribe()
+	if err != nil {
+		return err
 	}
-	// Set specified policy
-	ls.SetPolicyHandler(policy)
+	cctx, cancel := context.WithCancel(ctx)
 
-	if !ls.isSubscribed {
-		psub, err := ls.Topic.Subscribe()
-		if err != nil {
-			return err
-		}
-		cctx, cancel := context.WithCancel(ctx)
-
-		unsub := ls.transfer.SubscribeToEvents(ls.onEvent)
-		ls.cancel = func() {
-			unsub()
-			psub.Cancel()
-			cancel()
-		}
-
-		go ls.watch(cctx, psub, selector)
-		go ls.distribute(cctx)
-		ls.isSubscribed = true
+	unsub := ls.transfer.SubscribeToEvents(ls.onEvent)
+	ls.cancel = func() {
+		unsub()
+		psub.Cancel()
+		cancel()
 	}
 
+	go ls.watch(cctx, psub, selector)
+	go ls.distribute(cctx)
+	ls.isSubscribed = true
 	return nil
+
 }
 
 // SetPolicyHandler sets a new policyHandler to leg subscription.
