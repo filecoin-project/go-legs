@@ -2,7 +2,6 @@ package legs
 
 import (
 	"context"
-	"errors"
 	"os"
 	"sync"
 
@@ -14,19 +13,22 @@ import (
 	"github.com/ipfs/go-datastore"
 	gsimpl "github.com/ipfs/go-graphsync/impl"
 	gsnet "github.com/ipfs/go-graphsync/network"
+	logging "github.com/ipfs/go-log/v2"
 	"github.com/ipld/go-ipld-prime"
+	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
 	"github.com/libp2p/go-libp2p-core/host"
 	"github.com/libp2p/go-libp2p-core/peer"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 )
 
+var log = logging.Logger("go-legs")
+
 type legSubscriber struct {
 	ds     datastore.Datastore
 	tmpDir string
 	*pubsub.Topic
-	isSubscribed bool
-	updates      chan cid.Cid
-	transfer     dt.Manager
+	updates  chan cid.Cid
+	transfer dt.Manager
 
 	submtx sync.Mutex
 	subs   []chan cid.Cid
@@ -34,14 +36,37 @@ type legSubscriber struct {
 
 	hndmtx sync.RWMutex
 	policy PolicyHandler
+
+	syncmtx    sync.Mutex
+	latestSync ipld.Link
 }
 
 // NewSubscriber creates a new leg subscriber listening to a specific pubsub topic
-func NewSubscriber(ctx context.Context, ds datastore.Batching, host host.Host, topic string, lsys ipld.LinkSystem, selector ipld.Node, policy PolicyHandler) (LegSubscriber, error) {
-	if selector == nil {
-		return nil, errors.New("cannot create subscriber without a selector")
-	}
+// with a specific policyHandle to determine when to perform exchanges
+func NewSubscriber(ctx context.Context, ds datastore.Batching, host host.Host,
+	topic string, lsys ipld.LinkSystem,
+	policy PolicyHandler) (LegSubscriber, error) {
+	return newSubscriber(ctx, ds, host, topic, lsys, policy)
+}
 
+// NewSubscriberPartiallySynced creates a new leg subscriber with a specific latestSync.
+// LegSubscribers don't persist their latestSync. With this, users are able to
+// start a new subscriber with knowledge about what has already been synced.
+func NewSubscriberPartiallySynced(
+	ctx context.Context, ds datastore.Batching, host host.Host,
+	topic string, lsys ipld.LinkSystem,
+	policy PolicyHandler, latestSync cid.Cid) (LegSubscriber, error) {
+	l, err := newSubscriber(ctx, ds, host, topic, lsys, policy)
+	if err != nil {
+		return nil, err
+	}
+	if latestSync != cid.Undef {
+		l.latestSync = cidlink.Link{Cid: latestSync}
+	}
+	return l, nil
+}
+
+func newSubscriber(ctx context.Context, ds datastore.Batching, host host.Host, topic string, lsys ipld.LinkSystem, policy PolicyHandler) (*legSubscriber, error) {
 	t, err := makePubsub(ctx, host, topic)
 	if err != nil {
 		return nil, err
@@ -84,7 +109,7 @@ func NewSubscriber(ctx context.Context, ds datastore.Batching, host host.Host, t
 	}
 
 	// Start subscription
-	err = ls.subscribe(ctx, selector)
+	err = ls.subscribe(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -92,7 +117,7 @@ func NewSubscriber(ctx context.Context, ds datastore.Batching, host host.Host, t
 	return ls, nil
 }
 
-func (ls *legSubscriber) subscribe(ctx context.Context, selector ipld.Node) error {
+func (ls *legSubscriber) subscribe(ctx context.Context) error {
 	psub, err := ls.Topic.Subscribe()
 	if err != nil {
 		return err
@@ -106,9 +131,8 @@ func (ls *legSubscriber) subscribe(ctx context.Context, selector ipld.Node) erro
 		cancel()
 	}
 
-	go ls.watch(cctx, psub, selector)
+	go ls.watch(cctx, psub)
 	go ls.distribute(cctx)
-	ls.isSubscribed = true
 	return nil
 
 }
@@ -124,10 +148,18 @@ func (ls *legSubscriber) SetPolicyHandler(policy PolicyHandler) error {
 func (ls *legSubscriber) onEvent(event dt.Event, channelState dt.ChannelState) {
 	if event.Code == dt.FinishTransfer {
 		ls.updates <- channelState.BaseCID()
+		// Update latest head seen.
+		// NOTE: This is not persisted anywhere. Is the top-level user's
+		// responsability to persisted if needed to intialize a
+		// partiallySynced subscriber.
+		ls.latestSync = cidlink.Link{Cid: channelState.BaseCID()}
+		// This Unlocks the syncMutex that was locked in watch(),
+		// refer to that function for the lock functionality.
+		ls.syncmtx.Unlock()
 	}
 }
 
-func (ls *legSubscriber) watch(ctx context.Context, sub *pubsub.Subscription, sel ipld.Node) {
+func (ls *legSubscriber) watch(ctx context.Context, sub *pubsub.Subscription) {
 	for {
 		msg, err := sub.Next(ctx)
 		if ctx.Err() != nil {
@@ -157,9 +189,20 @@ func (ls *legSubscriber) watch(ctx context.Context, sub *pubsub.Subscription, se
 				continue
 			}
 			v := Voucher{&c}
-			_, err = ls.transfer.OpenPullDataChannel(ctx, src, &v, c, sel)
+
+			// Locking latestSync to avoid data races by several updates
+			// This sync is unlocked when the transfer is finished or if
+			// there is an error in the channel.
+			ls.syncmtx.Lock()
+			_, err = ls.transfer.OpenPullDataChannel(ctx, src, &v, c, legSelector(ls.latestSync))
 			if err != nil {
-				// retry?
+				// Log error for now.
+				log.Errorf("Error in data channel: %v", err)
+				// There has been an error, no FinishTransfer event will be triggered,
+				// so we need to release the lock here.
+				ls.syncmtx.Unlock()
+
+				// TODO: Should we retry if there's an error in the exchange?
 			}
 		}
 	}
