@@ -6,7 +6,6 @@ require (
 	github.com/filecoin-project/go-data-transfer v1.6.1-0.20210608092034-e4f40bc3a685
 	github.com/ipfs/go-cid v0.0.7
 	github.com/ipfs/go-datastore v0.4.6
-	github.com/ipfs/go-ds-leveldb v0.4.2
 	github.com/ipfs/go-graphsync v0.8.1-rc1
 	github.com/ipfs/go-log/v2 v2.1.3
 	github.com/ipld/go-ipld-prime v0.11.1-0.20210814231128-df94e6a99727
