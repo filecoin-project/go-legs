@@ -16,8 +16,6 @@ import (
 	_ "github.com/ipld/go-ipld-prime/codec/dagjson"
 	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
 	basicnode "github.com/ipld/go-ipld-prime/node/basic"
-	"github.com/ipld/go-ipld-prime/traversal/selector"
-	selectorbuilder "github.com/ipld/go-ipld-prime/traversal/selector/builder"
 	"github.com/libp2p/go-libp2p"
 	"github.com/libp2p/go-libp2p-core/host"
 	"github.com/multiformats/go-multicodec"
@@ -64,11 +62,7 @@ func initPubSub(t *testing.T, srcStore, dstStore datastore.Batching) (host.Host,
 		t.Fatal(err)
 	}
 	dstLnkS := mkLinkSystem(dstStore)
-	// Fetch-all recursively selector
-	np := basicnode.Prototype__Any{}
-	ssb := selectorbuilder.NewSelectorSpecBuilder(np)
-	sn := ssb.ExploreRecursive(selector.RecursionLimitNone(), ssb.ExploreAll(ssb.ExploreRecursiveEdge())).Node()
-	ls, err := legs.NewSubscriber(context.Background(), dstStore, dstHost, "legs/testtopic", dstLnkS, sn, nil)
+	ls, err := legs.NewSubscriber(context.Background(), dstStore, dstHost, "legs/testtopic", dstLnkS, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
