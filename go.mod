@@ -8,7 +8,7 @@ require (
 	github.com/ipfs/go-datastore v0.4.6
 	github.com/ipfs/go-graphsync v0.8.1-rc1
 	github.com/ipfs/go-log/v2 v2.1.3
-	github.com/ipld/go-ipld-prime v0.11.1-0.20210814231128-df94e6a99727
+	github.com/ipld/go-ipld-prime v0.11.1-0.20210819131917-d7e93a828c7c
 	github.com/libp2p/go-libp2p v0.14.4
 	github.com/libp2p/go-libp2p-core v0.8.6
 	github.com/libp2p/go-libp2p-pubsub v0.5.4
@@ -17,7 +17,3 @@ require (
 	github.com/whyrusleeping/cbor-gen v0.0.0-20210713220151-be142a5ae1a8
 	golang.org/x/xerrors v0.0.0-20200804184101-5ec99f83aff1
 )
-
-// TODO: Remove when https://github.com/ipld/go-ipld-prime/pull/229 is merged
-// and upgrade
-replace github.com/ipld/go-ipld-prime => github.com/adlrocha/go-ipld-prime v0.11.1-0.20210818075804-6bb6d8b2afce
