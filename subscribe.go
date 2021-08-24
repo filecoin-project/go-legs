@@ -67,6 +67,8 @@ func NewSubscriberPartiallySynced(
 	return l, nil
 }
 
+// TODO: Add a parameter or config to set the directory that the subscriber's
+// tmpDir is created in
 func newSubscriber(ctx context.Context, ds datastore.Batching, host host.Host, topic string, lsys ipld.LinkSystem, policy PolicyHandler) (*legSubscriber, error) {
 	t, err := makePubsub(ctx, host, topic)
 	if err != nil {

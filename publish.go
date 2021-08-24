@@ -26,6 +26,9 @@ type legPublisher struct {
 }
 
 // NewPublisher creates a new legs publisher
+//
+// TODO: Add a parameter or config to set the directory that the publisher's
+// tmpDir is created in
 func NewPublisher(ctx context.Context, dataStore datastore.Batching, host host.Host, topic string, lsys ipld.LinkSystem) (LegPublisher, error) {
 
 	t, err := makePubsub(ctx, host, topic)
