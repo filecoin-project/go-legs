@@ -2,6 +2,7 @@ package legs
 
 import (
 	"context"
+	"io/ioutil"
 	"os"
 
 	dt "github.com/filecoin-project/go-data-transfer"
@@ -37,7 +38,10 @@ func NewPublisher(ctx context.Context, dataStore datastore.Batching, host host.H
 	tp := gstransport.NewTransport(host.ID(), gs)
 	dtNet := dtnetwork.NewFromLibp2pHost(host)
 
-	tmpDir := os.TempDir()
+	tmpDir, err := ioutil.TempDir("", "golegs-pub")
+	if err != nil {
+		return nil, err
+	}
 
 	dt, err := datatransfer.NewDataTransfer(dataStore, tmpDir, dtNet, tp)
 	if err != nil {

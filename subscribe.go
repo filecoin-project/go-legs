@@ -2,6 +2,7 @@ package legs
 
 import (
 	"context"
+	"io/ioutil"
 	"os"
 	"sync"
 
@@ -77,7 +78,10 @@ func newSubscriber(ctx context.Context, ds datastore.Batching, host host.Host, t
 	tp := gstransport.NewTransport(host.ID(), gs)
 	dtNet := dtnetwork.NewFromLibp2pHost(host)
 
-	tmpDir := os.TempDir()
+	tmpDir, err := ioutil.TempDir("", "golegs-sub")
+	if err != nil {
+		return nil, err
+	}
 
 	dt, err := datatransfer.NewDataTransfer(ds, tmpDir, dtNet, tp)
 	if err != nil {
