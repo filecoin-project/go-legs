@@ -2,6 +2,7 @@ package legs
 
 import (
 	"context"
+	"io/ioutil"
 	"os"
 
 	dt "github.com/filecoin-project/go-data-transfer"
@@ -25,6 +26,9 @@ type legPublisher struct {
 }
 
 // NewPublisher creates a new legs publisher
+//
+// TODO: Add a parameter or config to set the directory that the publisher's
+// tmpDir is created in
 func NewPublisher(ctx context.Context, dataStore datastore.Batching, host host.Host, topic string, lsys ipld.LinkSystem) (LegPublisher, error) {
 
 	t, err := makePubsub(ctx, host, topic)
@@ -37,7 +41,10 @@ func NewPublisher(ctx context.Context, dataStore datastore.Batching, host host.H
 	tp := gstransport.NewTransport(host.ID(), gs)
 	dtNet := dtnetwork.NewFromLibp2pHost(host)
 
-	tmpDir := os.TempDir()
+	tmpDir, err := ioutil.TempDir("", "golegs-pub")
+	if err != nil {
+		return nil, err
+	}
 
 	dt, err := datatransfer.NewDataTransfer(dataStore, tmpDir, dtNet, tp)
 	if err != nil {

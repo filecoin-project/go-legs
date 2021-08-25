@@ -2,6 +2,7 @@ package legs
 
 import (
 	"context"
+	"io/ioutil"
 	"os"
 	"sync"
 
@@ -66,6 +67,8 @@ func NewSubscriberPartiallySynced(
 	return l, nil
 }
 
+// TODO: Add a parameter or config to set the directory that the subscriber's
+// tmpDir is created in
 func newSubscriber(ctx context.Context, ds datastore.Batching, host host.Host, topic string, lsys ipld.LinkSystem, policy PolicyHandler) (*legSubscriber, error) {
 	t, err := makePubsub(ctx, host, topic)
 	if err != nil {
@@ -77,7 +80,10 @@ func newSubscriber(ctx context.Context, ds datastore.Batching, host host.Host, t
 	tp := gstransport.NewTransport(host.ID(), gs)
 	dtNet := dtnetwork.NewFromLibp2pHost(host)
 
-	tmpDir := os.TempDir()
+	tmpDir, err := ioutil.TempDir("", "golegs-sub")
+	if err != nil {
+		return nil, err
+	}
 
 	dt, err := datatransfer.NewDataTransfer(ds, tmpDir, dtNet, tp)
 	if err != nil {
