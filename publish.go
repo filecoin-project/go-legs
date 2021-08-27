@@ -11,8 +11,7 @@ import (
 	gstransport "github.com/filecoin-project/go-data-transfer/transport/graphsync"
 	"github.com/ipfs/go-cid"
 	"github.com/ipfs/go-datastore"
-	gsimpl "github.com/ipfs/go-graphsync/impl"
-	gsnet "github.com/ipfs/go-graphsync/network"
+	"github.com/ipfs/go-graphsync"
 	"github.com/ipld/go-ipld-prime"
 	"github.com/libp2p/go-libp2p-core/host"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
@@ -29,15 +28,15 @@ type legPublisher struct {
 //
 // TODO: Add a parameter or config to set the directory that the publisher's
 // tmpDir is created in
-func NewPublisher(ctx context.Context, dataStore datastore.Batching, host host.Host, topic string, lsys ipld.LinkSystem) (LegPublisher, error) {
+func NewPublisher(ctx context.Context, dataStore datastore.Batching, host host.Host,
+	gs graphsync.GraphExchange, topic string,
+	lsys ipld.LinkSystem) (LegPublisher, error) {
 
 	t, err := makePubsub(ctx, host, topic)
 	if err != nil {
 		return nil, err
 	}
 
-	gsnet := gsnet.NewFromLibp2pHost(host)
-	gs := gsimpl.New(ctx, gsnet, lsys)
 	tp := gstransport.NewTransport(host.ID(), gs)
 	dtNet := dtnetwork.NewFromLibp2pHost(host)
 

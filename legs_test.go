@@ -9,6 +9,9 @@ import (
 
 	"github.com/ipfs/go-cid"
 	"github.com/ipfs/go-datastore"
+	dssync "github.com/ipfs/go-datastore/sync"
+	gsimpl "github.com/ipfs/go-graphsync/impl"
+	gsnet "github.com/ipfs/go-graphsync/network"
 	"github.com/ipld/go-ipld-prime"
 
 	// dagjson codec registered for encoding
@@ -29,7 +32,7 @@ func mkTestHost() host.Host {
 
 func mkLinkSystem(ds datastore.Batching) ipld.LinkSystem {
 	lsys := cidlink.DefaultLinkSystem()
-	lsys.StorageReadOpener = func(lctx ipld.LinkContext, lnk ipld.Link) (io.Reader, error) {
+	lsys.StorageReadOpener = func(_ ipld.LinkContext, lnk ipld.Link) (io.Reader, error) {
 		c := lnk.(cidlink.Link).Cid
 		val, err := ds.Get(datastore.NewKey(c.String()))
 		if err != nil {
@@ -50,7 +53,9 @@ func mkLinkSystem(ds datastore.Batching) ipld.LinkSystem {
 func initPubSub(t *testing.T, srcStore, dstStore datastore.Batching) (host.Host, host.Host, legs.LegPublisher, legs.LegSubscriber) {
 	srcHost := mkTestHost()
 	srcLnkS := mkLinkSystem(srcStore)
-	lp, err := legs.NewPublisher(context.Background(), srcStore, srcHost, "legs/testtopic", srcLnkS)
+	srcgsnet := gsnet.NewFromLibp2pHost(srcHost)
+	srcgs := gsimpl.New(context.Background(), srcgsnet, srcLnkS)
+	lp, err := legs.NewPublisher(context.Background(), srcStore, srcHost, srcgs, "legs/testtopic", srcLnkS)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -58,11 +63,13 @@ func initPubSub(t *testing.T, srcStore, dstStore datastore.Batching) (host.Host,
 	dstHost := mkTestHost()
 	srcHost.Peerstore().AddAddrs(dstHost.ID(), dstHost.Addrs(), time.Hour)
 	dstHost.Peerstore().AddAddrs(srcHost.ID(), srcHost.Addrs(), time.Hour)
+	dstgsnet := gsnet.NewFromLibp2pHost(dstHost)
 	if err := srcHost.Connect(context.Background(), dstHost.Peerstore().PeerInfo(dstHost.ID())); err != nil {
 		t.Fatal(err)
 	}
 	dstLnkS := mkLinkSystem(dstStore)
-	ls, err := legs.NewSubscriber(context.Background(), dstStore, dstHost, "legs/testtopic", dstLnkS, nil)
+	dstgs := gsimpl.New(context.Background(), dstgsnet, dstLnkS)
+	ls, err := legs.NewSubscriber(context.Background(), dstStore, dstHost, dstgs, "legs/testtopic", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -92,8 +99,8 @@ func mkRoot(srcStore datastore.Batching, n ipld.Node) (ipld.Link, error) {
 
 func TestRoundTrip(t *testing.T) {
 	// Init legs publisher and subscriber
-	srcStore := datastore.NewMapDatastore()
-	dstStore := datastore.NewMapDatastore()
+	srcStore := dssync.MutexWrap(datastore.NewMapDatastore())
+	dstStore := dssync.MutexWrap(datastore.NewMapDatastore())
 	_, _, lp, ls := initPubSub(t, srcStore, dstStore)
 
 	// per https://github.com/libp2p/go-libp2p-pubsub/blob/e6ad80cf4782fca31f46e3a8ba8d1a450d562f49/gossipsub_test.go#L103
@@ -134,8 +141,8 @@ func TestRoundTrip(t *testing.T) {
 
 func TestSetAndFilterPeerPolicy(t *testing.T) {
 	// Init legs publisher and subscriber
-	srcStore := datastore.NewMapDatastore()
-	dstStore := datastore.NewMapDatastore()
+	srcStore := dssync.MutexWrap(datastore.NewMapDatastore())
+	dstStore := dssync.MutexWrap(datastore.NewMapDatastore())
 	_, dstHost, lp, ls := initPubSub(t, srcStore, dstStore)
 
 	// Set policy to filter dstHost, which is not the one generating the update.

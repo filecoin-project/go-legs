@@ -8,7 +8,7 @@ require (
 	github.com/ipfs/go-datastore v0.4.6
 	github.com/ipfs/go-graphsync v0.8.1-rc1
 	github.com/ipfs/go-log/v2 v2.1.3
-	github.com/ipld/go-ipld-prime v0.11.1-0.20210819131917-d7e93a828c7c
+	github.com/ipld/go-ipld-prime v0.12.0
 	github.com/libp2p/go-libp2p v0.14.4
 	github.com/libp2p/go-libp2p-core v0.8.6
 	github.com/libp2p/go-libp2p-pubsub v0.5.4
