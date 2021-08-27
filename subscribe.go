@@ -12,8 +12,7 @@ import (
 	gstransport "github.com/filecoin-project/go-data-transfer/transport/graphsync"
 	"github.com/ipfs/go-cid"
 	"github.com/ipfs/go-datastore"
-	gsimpl "github.com/ipfs/go-graphsync/impl"
-	gsnet "github.com/ipfs/go-graphsync/network"
+	"github.com/ipfs/go-graphsync"
 	logging "github.com/ipfs/go-log/v2"
 	"github.com/ipld/go-ipld-prime"
 	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
@@ -45,9 +44,9 @@ type legSubscriber struct {
 // NewSubscriber creates a new leg subscriber listening to a specific pubsub topic
 // with a specific policyHandle to determine when to perform exchanges
 func NewSubscriber(ctx context.Context, ds datastore.Batching, host host.Host,
-	topic string, lsys ipld.LinkSystem,
+	gs graphsync.GraphExchange, topic string,
 	policy PolicyHandler) (LegSubscriber, error) {
-	return newSubscriber(ctx, ds, host, topic, lsys, policy)
+	return newSubscriber(ctx, ds, host, gs, topic, policy)
 }
 
 // NewSubscriberPartiallySynced creates a new leg subscriber with a specific latestSync.
@@ -55,28 +54,27 @@ func NewSubscriber(ctx context.Context, ds datastore.Batching, host host.Host,
 // start a new subscriber with knowledge about what has already been synced.
 func NewSubscriberPartiallySynced(
 	ctx context.Context, ds datastore.Batching, host host.Host,
-	topic string, lsys ipld.LinkSystem,
+	gs graphsync.GraphExchange, topic string,
 	policy PolicyHandler, latestSync cid.Cid) (LegSubscriber, error) {
-	l, err := newSubscriber(ctx, ds, host, topic, lsys, policy)
+
+	l, err := newSubscriber(ctx, ds, host, gs, topic, policy)
 	if err != nil {
 		return nil, err
 	}
+	l.syncmtx.Lock()
+	defer l.syncmtx.Unlock()
 	if latestSync != cid.Undef {
 		l.latestSync = cidlink.Link{Cid: latestSync}
 	}
 	return l, nil
 }
 
-// TODO: Add a parameter or config to set the directory that the subscriber's
-// tmpDir is created in
-func newSubscriber(ctx context.Context, ds datastore.Batching, host host.Host, topic string, lsys ipld.LinkSystem, policy PolicyHandler) (*legSubscriber, error) {
+func newSubscriber(ctx context.Context, ds datastore.Batching, host host.Host, gs graphsync.GraphExchange, topic string, policy PolicyHandler) (*legSubscriber, error) {
 	t, err := makePubsub(ctx, host, topic)
 	if err != nil {
 		return nil, err
 	}
 
-	gsnet := gsnet.NewFromLibp2pHost(host)
-	gs := gsimpl.New(ctx, gsnet, lsys)
 	tp := gstransport.NewTransport(host.ID(), gs)
 	dtNet := dtnetwork.NewFromLibp2pHost(host)
 
@@ -151,12 +149,20 @@ func (ls *legSubscriber) SetPolicyHandler(policy PolicyHandler) error {
 	return nil
 }
 
+// SetLatestSync sets a new latestSync in case the subscriber has
+func (ls *legSubscriber) SetLatestSync(c cid.Cid) error {
+	ls.syncmtx.Lock()
+	defer ls.syncmtx.Unlock()
+	ls.latestSync = cidlink.Link{Cid: c}
+	return nil
+}
+
 func (ls *legSubscriber) onEvent(event dt.Event, channelState dt.ChannelState) {
 	if event.Code == dt.FinishTransfer {
 		ls.updates <- channelState.BaseCID()
 		// Update latest head seen.
 		// NOTE: This is not persisted anywhere. Is the top-level user's
-		// responsability to persisted if needed to intialize a
+		// responsability to persist if needed to intialize a
 		// partiallySynced subscriber.
 		ls.latestSync = cidlink.Link{Cid: channelState.BaseCID()}
 		// This Unlocks the syncMutex that was locked in watch(),
@@ -181,6 +187,9 @@ func (ls *legSubscriber) watch(ctx context.Context, sub *pubsub.Subscription) {
 		if ls.policy != nil {
 			ls.hndmtx.RLock()
 			allow, err = ls.policy(msg)
+			if err != nil {
+				log.Errorf("Error running policy: %v", err)
+			}
 			ls.hndmtx.RUnlock()
 		}
 

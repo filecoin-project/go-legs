@@ -13,7 +13,9 @@ import (
 
 // LegPublisher is an interface for updating the published dag.
 type LegPublisher interface {
+	// Publishes and update for the DAG in the pubsub channel.
 	UpdateRoot(context.Context, cid.Cid) error
+	// Close publisher
 	Close(context.Context) error
 }
 
@@ -22,8 +24,14 @@ type LegPublisher interface {
 
 // LegSubscriber is an interface for watching a published dag.
 type LegSubscriber interface {
+	// OnChange return a listener and cancel func for subscriber.
 	OnChange() (chan cid.Cid, context.CancelFunc)
+	// SetPolicyHandler triggered to know if an exchange needs to be made.
 	SetPolicyHandler(PolicyHandler) error
+	// SetLatestSync updates the latest sync of a subcriber in case it has
+	// already update some data off-band.
+	SetLatestSync(c cid.Cid) error
+	// Close subscriber
 	Close(context.Context) error
 }
 
