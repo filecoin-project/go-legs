@@ -2,26 +2,18 @@ package legs
 
 import (
 	"context"
-	"io/ioutil"
-	"os"
 
-	dt "github.com/filecoin-project/go-data-transfer"
-	datatransfer "github.com/filecoin-project/go-data-transfer/impl"
-	dtnetwork "github.com/filecoin-project/go-data-transfer/network"
-	gstransport "github.com/filecoin-project/go-data-transfer/transport/graphsync"
 	"github.com/ipfs/go-cid"
 	"github.com/ipfs/go-datastore"
-	"github.com/ipfs/go-graphsync"
 	"github.com/ipld/go-ipld-prime"
 	"github.com/libp2p/go-libp2p-core/host"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 )
 
 type legPublisher struct {
-	ds     datastore.Datastore
-	tmpDir string
+	ds datastore.Datastore
 	*pubsub.Topic
-	transfer dt.Manager
+	transfer *LegTransport
 }
 
 // NewPublisher creates a new legs publisher
@@ -29,7 +21,7 @@ type legPublisher struct {
 // TODO: Add a parameter or config to set the directory that the publisher's
 // tmpDir is created in
 func NewPublisher(ctx context.Context, dataStore datastore.Batching, host host.Host,
-	gs graphsync.GraphExchange, topic string,
+	dt *LegTransport, topic string,
 	lsys ipld.LinkSystem) (LegPublisher, error) {
 
 	t, err := makePubsub(ctx, host, topic)
@@ -37,35 +29,11 @@ func NewPublisher(ctx context.Context, dataStore datastore.Batching, host host.H
 		return nil, err
 	}
 
-	tp := gstransport.NewTransport(host.ID(), gs)
-	dtNet := dtnetwork.NewFromLibp2pHost(host)
-
-	tmpDir, err := ioutil.TempDir("", "golegs-pub")
-	if err != nil {
-		return nil, err
-	}
-
-	dt, err := datatransfer.NewDataTransfer(dataStore, tmpDir, dtNet, tp)
-	if err != nil {
-		return nil, err
-	}
-
-	v := &Voucher{}
-	lvr := &VoucherResult{}
-	val := &legsValidator{}
-	if err := dt.RegisterVoucherType(v, val); err != nil {
-		return nil, err
-	}
-	if err := dt.RegisterVoucherResultType(lvr); err != nil {
-		return nil, err
-	}
-	if err := dt.Start(ctx); err != nil {
-		return nil, err
-	}
+	// Track how many publishers are using this transport
+	dt.addRefc()
 
 	return &legPublisher{
 		ds:       dataStore,
-		tmpDir:   tmpDir,
 		Topic:    t,
 		transfer: dt}, nil
 }
@@ -75,14 +43,10 @@ func (lp *legPublisher) UpdateRoot(ctx context.Context, c cid.Cid) error {
 }
 
 func (lp *legPublisher) Close(ctx context.Context) error {
-	err := lp.transfer.Stop(ctx)
-	err2 := os.RemoveAll(lp.tmpDir)
-	err3 := lp.Topic.Close()
+	err := lp.Topic.Close()
+	err2 := lp.transfer.Close(ctx)
 	if err != nil {
 		return err
 	}
-	if err2 != nil {
-		return err2
-	}
-	return err3
+	return err2
 }
