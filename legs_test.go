@@ -51,11 +51,11 @@ func mkLinkSystem(ds datastore.Batching) ipld.LinkSystem {
 func initPubSub(t *testing.T, srcStore, dstStore datastore.Batching) (host.Host, host.Host, legs.LegPublisher, legs.LegSubscriber) {
 	srcHost := mkTestHost()
 	srcLnkS := mkLinkSystem(srcStore)
-	srcdt, err := legs.MakeLegTransport(context.Background(), srcHost, srcStore, srcLnkS, "df")
+	srcdt, err := legs.MakeLegTransport(context.Background(), srcHost, srcStore, srcLnkS, "legs/testtopic", "legs-test")
 	if err != nil {
 		t.Fatal(err)
 	}
-	lp, err := legs.NewPublisher(context.Background(), srcStore, srcHost, srcdt, "legs/testtopic", srcLnkS)
+	lp, err := legs.NewPublisher(context.Background(), srcStore, srcHost, srcdt, srcLnkS)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -67,11 +67,11 @@ func initPubSub(t *testing.T, srcStore, dstStore datastore.Batching) (host.Host,
 		t.Fatal(err)
 	}
 	dstLnkS := mkLinkSystem(dstStore)
-	dstdt, err := legs.MakeLegTransport(context.Background(), dstHost, dstStore, dstLnkS, "legs-test")
+	dstdt, err := legs.MakeLegTransport(context.Background(), dstHost, dstStore, dstLnkS, "legs/testtopic", "legs-test")
 	if err != nil {
 		t.Fatal(err)
 	}
-	ls, err := legs.NewSubscriber(context.Background(), dstStore, dstHost, dstdt, "legs/testtopic", nil)
+	ls, err := legs.NewSubscriber(context.Background(), dstStore, dstHost, dstdt, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

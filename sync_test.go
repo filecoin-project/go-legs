@@ -113,11 +113,11 @@ func TestLatestSyncSuccess(t *testing.T) {
 	dstStore := dssync.MutexWrap(datastore.NewMapDatastore())
 	srcHost := mkTestHost()
 	srcLnkS := mkLinkSystem(srcStore)
-	srcdt, err := MakeLegTransport(context.Background(), srcHost, srcStore, srcLnkS, "df")
+	srcdt, err := MakeLegTransport(context.Background(), srcHost, srcStore, srcLnkS, "legs/testtopic", "legs-test")
 	if err != nil {
 		t.Fatal(err)
 	}
-	lp, err := NewPublisher(context.Background(), srcStore, srcHost, srcdt, "legs/testtopic", srcLnkS)
+	lp, err := NewPublisher(context.Background(), srcStore, srcHost, srcdt, srcLnkS)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -129,11 +129,11 @@ func TestLatestSyncSuccess(t *testing.T) {
 		t.Fatal(err)
 	}
 	dstLnkS := mkLinkSystem(dstStore)
-	dstdt, err := MakeLegTransport(context.Background(), dstHost, dstStore, dstLnkS, "legs-test")
+	dstdt, err := MakeLegTransport(context.Background(), dstHost, dstStore, dstLnkS, "legs/testtopic", "legs-test")
 	if err != nil {
 		t.Fatal(err)
 	}
-	ls, err := NewSubscriber(context.Background(), dstStore, dstHost, dstdt, "legs/testtopic", nil)
+	ls, err := NewSubscriber(context.Background(), dstStore, dstHost, dstdt, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -165,11 +165,11 @@ func TestPartialSync(t *testing.T) {
 	srcHost := mkTestHost()
 	srcLnkS := mkLinkSystem(srcStore)
 	testLnkS := mkLinkSystem(testStore)
-	srcdt, err := MakeLegTransport(context.Background(), srcHost, srcStore, srcLnkS, "df")
+	srcdt, err := MakeLegTransport(context.Background(), srcHost, srcStore, srcLnkS, "legs/testtopic", "legs-test")
 	if err != nil {
 		t.Fatal(err)
 	}
-	lp, err := NewPublisher(context.Background(), srcStore, srcHost, srcdt, "legs/testtopic", srcLnkS)
+	lp, err := NewPublisher(context.Background(), srcStore, srcHost, srcdt, srcLnkS)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -183,11 +183,11 @@ func TestPartialSync(t *testing.T) {
 		t.Fatal(err)
 	}
 	dstLnkS := mkLinkSystem(dstStore)
-	dstdt, err := MakeLegTransport(context.Background(), dstHost, dstStore, dstLnkS, "legs-test")
+	dstdt, err := MakeLegTransport(context.Background(), dstHost, dstStore, dstLnkS, "legs/testtopic", "legs-test")
 	if err != nil {
 		t.Fatal(err)
 	}
-	ls, err := NewSubscriberPartiallySynced(context.Background(), dstStore, dstHost, dstdt, "legs/testtopic", nil, chainLnks[3].(cidlink.Link).Cid)
+	ls, err := NewSubscriberPartiallySynced(context.Background(), dstStore, dstHost, dstdt, nil, chainLnks[3].(cidlink.Link).Cid)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -232,11 +232,11 @@ func TestStepByStepSync(t *testing.T) {
 	dstStore := dssync.MutexWrap(datastore.NewMapDatastore())
 	srcHost := mkTestHost()
 	srcLnkS := mkLinkSystem(srcStore)
-	srcdt, err := MakeLegTransport(context.Background(), srcHost, srcStore, srcLnkS, "df")
+	srcdt, err := MakeLegTransport(context.Background(), srcHost, srcStore, srcLnkS, "legs/testtopic", "legs-test")
 	if err != nil {
 		t.Fatal(err)
 	}
-	lp, err := NewPublisher(context.Background(), srcStore, srcHost, srcdt, "legs/testtopic", srcLnkS)
+	lp, err := NewPublisher(context.Background(), srcStore, srcHost, srcdt, srcLnkS)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -248,11 +248,11 @@ func TestStepByStepSync(t *testing.T) {
 		t.Fatal(err)
 	}
 	dstLnkS := mkLinkSystem(dstStore)
-	dstdt, err := MakeLegTransport(context.Background(), dstHost, dstStore, dstLnkS, "legs-test")
+	dstdt, err := MakeLegTransport(context.Background(), dstHost, dstStore, dstLnkS, "legs/testtopic", "legs-test")
 	if err != nil {
 		t.Fatal(err)
 	}
-	ls, err := NewSubscriber(context.Background(), dstStore, dstHost, dstdt, "legs/testtopic", nil)
+	ls, err := NewSubscriber(context.Background(), dstStore, dstHost, dstdt, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -287,11 +287,11 @@ func TestLatestSyncFailure(t *testing.T) {
 	dstStore := dssync.MutexWrap(datastore.NewMapDatastore())
 	srcHost := mkTestHost()
 	srcLnkS := mkLinkSystem(srcStore)
-	srcdt, err := MakeLegTransport(context.Background(), srcHost, srcStore, srcLnkS, "df")
+	srcdt, err := MakeLegTransport(context.Background(), srcHost, srcStore, srcLnkS, "legs/testtopic", "legs-test")
 	if err != nil {
 		t.Fatal(err)
 	}
-	lp, err := NewPublisher(context.Background(), srcStore, srcHost, srcdt, "legs/testtopic", srcLnkS)
+	lp, err := NewPublisher(context.Background(), srcStore, srcHost, srcdt, srcLnkS)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -305,11 +305,11 @@ func TestLatestSyncFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 	dstLnkS := mkLinkSystem(dstStore)
-	dstdt, err := MakeLegTransport(context.Background(), dstHost, dstStore, dstLnkS, "legs-test")
+	dstdt, err := MakeLegTransport(context.Background(), dstHost, dstStore, dstLnkS, "legs/testtopic", "legs-test")
 	if err != nil {
 		t.Fatal(err)
 	}
-	ls, err := NewSubscriberPartiallySynced(context.Background(), dstStore, dstHost, dstdt, "legs/testtopic", nil, chainLnks[3].(cidlink.Link).Cid)
+	ls, err := NewSubscriberPartiallySynced(context.Background(), dstStore, dstHost, dstdt, nil, chainLnks[3].(cidlink.Link).Cid)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -330,12 +330,17 @@ func TestLatestSyncFailure(t *testing.T) {
 	newUpdateTest(t, lp, ls, watcher, cidlink.Link{Cid: cid.Undef}, true, chainLnks[3].(cidlink.Link).Cid)
 
 	dstStore = dssync.MutexWrap(datastore.NewMapDatastore())
-	ls, err = NewSubscriberPartiallySynced(context.Background(), dstStore, dstHost, dstdt, "legs/testtopic", nil, chainLnks[3].(cidlink.Link).Cid)
+	ls, err = NewSubscriberPartiallySynced(context.Background(), dstStore, dstHost, dstdt, nil, chainLnks[3].(cidlink.Link).Cid)
 	if err != nil {
 		t.Fatal(err)
 	}
 	// We are not able to run the full exchange
 	newUpdateTest(t, lp, ls, watcher, chainLnks[2], true, chainLnks[3].(cidlink.Link).Cid)
+}
+
+func TestRefcClose(t *testing.T) {
+	t.SkipNow()
+	// TODO: Add a test that checks if RefC is working correctly for close.
 }
 
 func newUpdateTest(t *testing.T, lp LegPublisher, ls LegSubscriber, watcher chan cid.Cid, lnk ipld.Link, withFailure bool, expectedSync cid.Cid) {
