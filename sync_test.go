@@ -138,6 +138,7 @@ func TestLatestSyncSuccess(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	time.Sleep(1 * time.Second)
 	watcher, cncl := ls.OnChange()
 
 	// Store the whole chain in source node
@@ -185,6 +186,8 @@ func TestPartialSync(t *testing.T) {
 	}
 
 	mkChain(srcLnkS, true)
+
+	time.Sleep(1 * time.Second)
 
 	watcher, cncl := ls.OnChange()
 
@@ -242,7 +245,7 @@ func TestStepByStepSync(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	time.Sleep(500 * time.Millisecond)
+	time.Sleep(1 * time.Second)
 
 	watcher, cncl := ls.OnChange()
 
