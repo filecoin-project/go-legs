@@ -16,7 +16,7 @@ type LegPublisher interface {
 	// Publishes and update for the DAG in the pubsub channel.
 	UpdateRoot(context.Context, cid.Cid) error
 	// Close publisher
-	Close(context.Context) error
+	Close() error
 }
 
 // Subscribe will sync an IPLD dag of data from a publisher
@@ -32,7 +32,7 @@ type LegSubscriber interface {
 	// already update some data off-band.
 	SetLatestSync(c cid.Cid) error
 	// Close subscriber
-	Close(context.Context) error
+	Close() error
 }
 
 // PolicyHandler make some preliminary checks before running the exchange
