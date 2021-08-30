@@ -3,6 +3,7 @@ package legs
 import (
 	"context"
 	"sync"
+	"sync/atomic"
 
 	dt "github.com/filecoin-project/go-data-transfer"
 	"github.com/ipfs/go-cid"
@@ -225,6 +226,7 @@ func (ls *legSubscriber) OnChange() (chan cid.Cid, context.CancelFunc) {
 }
 
 func (ls *legSubscriber) Close() error {
+	atomic.AddInt32(ls.transfer.refc, -1)
 	ls.cancel()
 	return nil
 }

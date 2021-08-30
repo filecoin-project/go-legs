@@ -242,6 +242,8 @@ func TestStepByStepSync(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	time.Sleep(500 * time.Millisecond)
+
 	watcher, cncl := ls.OnChange()
 
 	// Store the whole chain in source node
@@ -292,16 +294,20 @@ func TestLatestSyncFailure(t *testing.T) {
 	}
 
 	watcher, cncl := ls.OnChange()
-	defer clean(lp, ls, srcdt, dstdt, cncl)
+	ls.Close()
 
 	// The other end doesn't have the data
 	newUpdateTest(t, lp, ls, watcher, cidlink.Link{Cid: cid.Undef}, true, chainLnks[3].(cidlink.Link).Cid)
-
 	dstStore = dssync.MutexWrap(datastore.NewMapDatastore())
+	dstdt, err = MakeLegTransport(context.Background(), dstHost, dstStore, dstLnkS, "legs/testtopic")
+	if err != nil {
+		t.Fatal(err)
+	}
 	ls, err = NewSubscriberPartiallySynced(context.Background(), dstdt, nil, chainLnks[3].(cidlink.Link).Cid)
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer clean(lp, ls, srcdt, dstdt, cncl)
 	// We are not able to run the full exchange
 	newUpdateTest(t, lp, ls, watcher, chainLnks[2], true, chainLnks[3].(cidlink.Link).Cid)
 }

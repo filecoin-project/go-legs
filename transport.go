@@ -96,7 +96,7 @@ func (lt *LegTransport) addRefc() {
 // Close closes the LegTransport. It returns an error if it still
 // has an active publisher or subscriber attached to the transport.
 func (lt *LegTransport) Close(ctx context.Context) error {
-	if n := atomic.AddInt32(lt.refc, -1); n == 0 {
+	if *lt.refc == 0 {
 		err := lt.t.Stop(ctx)
 		err2 := os.RemoveAll(lt.tmpDir)
 		err3 := lt.topic.Close()
@@ -107,8 +107,8 @@ func (lt *LegTransport) Close(ctx context.Context) error {
 			return err2
 		}
 		return err3
-	} else if n > 0 {
-		return errors.Errorf("can't close transport. %d pub/sub still active", n)
+	} else if *lt.refc > 0 {
+		return errors.Errorf("can't close transport. %d pub/sub still active", *lt.refc)
 	}
 	return nil
 }
