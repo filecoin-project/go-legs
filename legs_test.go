@@ -122,6 +122,8 @@ func TestRoundTrip(t *testing.T) {
 		dstdt.Close(context.Background())
 	}()
 
+	time.Sleep(time.Second)
+
 	if err := lp.UpdateRoot(context.Background(), lnk.(cidlink.Link).Cid); err != nil {
 		t.Fatal(err)
 	}
