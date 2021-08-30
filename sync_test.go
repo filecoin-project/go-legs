@@ -179,7 +179,7 @@ func TestPartialSync(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ls, err := NewSubscriberPartiallySynced(context.Background(), dstStore, dstHost, dstdt, nil, chainLnks[3].(cidlink.Link).Cid)
+	ls, err := NewSubscriberPartiallySynced(context.Background(), dstdt, nil, chainLnks[3].(cidlink.Link).Cid)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -286,7 +286,7 @@ func TestLatestSyncFailure(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ls, err := NewSubscriberPartiallySynced(context.Background(), dstStore, dstHost, dstdt, nil, chainLnks[3].(cidlink.Link).Cid)
+	ls, err := NewSubscriberPartiallySynced(context.Background(), dstdt, nil, chainLnks[3].(cidlink.Link).Cid)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -298,7 +298,7 @@ func TestLatestSyncFailure(t *testing.T) {
 	newUpdateTest(t, lp, ls, watcher, cidlink.Link{Cid: cid.Undef}, true, chainLnks[3].(cidlink.Link).Cid)
 
 	dstStore = dssync.MutexWrap(datastore.NewMapDatastore())
-	ls, err = NewSubscriberPartiallySynced(context.Background(), dstStore, dstHost, dstdt, nil, chainLnks[3].(cidlink.Link).Cid)
+	ls, err = NewSubscriberPartiallySynced(context.Background(), dstdt, nil, chainLnks[3].(cidlink.Link).Cid)
 	if err != nil {
 		t.Fatal(err)
 	}

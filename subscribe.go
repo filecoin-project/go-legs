@@ -6,11 +6,9 @@ import (
 
 	dt "github.com/filecoin-project/go-data-transfer"
 	"github.com/ipfs/go-cid"
-	"github.com/ipfs/go-datastore"
 	logging "github.com/ipfs/go-log/v2"
 	"github.com/ipld/go-ipld-prime"
 	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
-	"github.com/libp2p/go-libp2p-core/host"
 	"github.com/libp2p/go-libp2p-core/peer"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 )
@@ -44,9 +42,8 @@ func NewSubscriber(ctx context.Context, dt *LegTransport,
 // LegSubscribers don't persist their latestSync. With this, users are able to
 // start a new subscriber with knowledge about what has already been synced.
 func NewSubscriberPartiallySynced(
-	ctx context.Context, ds datastore.Batching, host host.Host,
-	dt *LegTransport,
-	policy PolicyHandler, latestSync cid.Cid) (LegSubscriber, error) {
+	ctx context.Context, dt *LegTransport, policy PolicyHandler,
+	latestSync cid.Cid) (LegSubscriber, error) {
 
 	l, err := newSubscriber(ctx, dt, policy)
 	if err != nil {
