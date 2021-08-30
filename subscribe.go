@@ -18,7 +18,6 @@ import (
 var log = logging.Logger("go-legs")
 
 type legSubscriber struct {
-	ds       datastore.Datastore
 	updates  chan cid.Cid
 	transfer *LegTransport
 
@@ -36,10 +35,9 @@ type legSubscriber struct {
 
 // NewSubscriber creates a new leg subscriber listening to a specific pubsub topic
 // with a specific policyHandle to determine when to perform exchanges
-func NewSubscriber(ctx context.Context, ds datastore.Batching, host host.Host,
-	dt *LegTransport,
+func NewSubscriber(ctx context.Context, dt *LegTransport,
 	policy PolicyHandler) (LegSubscriber, error) {
-	return newSubscriber(ctx, ds, host, dt, policy)
+	return newSubscriber(ctx, dt, policy)
 }
 
 // NewSubscriberPartiallySynced creates a new leg subscriber with a specific latestSync.
@@ -50,7 +48,7 @@ func NewSubscriberPartiallySynced(
 	dt *LegTransport,
 	policy PolicyHandler, latestSync cid.Cid) (LegSubscriber, error) {
 
-	l, err := newSubscriber(ctx, ds, host, dt, policy)
+	l, err := newSubscriber(ctx, dt, policy)
 	if err != nil {
 		return nil, err
 	}
@@ -62,10 +60,9 @@ func NewSubscriberPartiallySynced(
 	return l, nil
 }
 
-func newSubscriber(ctx context.Context, ds datastore.Batching, host host.Host, dt *LegTransport, policy PolicyHandler) (*legSubscriber, error) {
+func newSubscriber(ctx context.Context, dt *LegTransport, policy PolicyHandler) (*legSubscriber, error) {
 
 	ls := &legSubscriber{
-		ds:       ds,
 		transfer: dt,
 		updates:  make(chan cid.Cid, 5),
 		subs:     make([]chan cid.Cid, 0),
@@ -73,14 +70,13 @@ func newSubscriber(ctx context.Context, ds datastore.Batching, host host.Host, d
 		policy:   policy,
 	}
 
-	// Add refC to track how many subscribers are using the transport.
-	dt.addRefc()
-
 	// Start subscription
 	err := ls.subscribe(ctx)
 	if err != nil {
 		return nil, err
 	}
+	// Add refC to track how many subscribers are using the transport.
+	dt.addRefc()
 
 	return ls, nil
 }
@@ -125,7 +121,7 @@ func (ls *legSubscriber) onEvent(event dt.Event, channelState dt.ChannelState) {
 	if event.Code == dt.FinishTransfer {
 		// Now we share the data channel between different subscribers.
 		// When we receive a FinishTransfer we need to check if it belongs
-		// to use
+		// to us
 		if ls.syncing == channelState.BaseCID() {
 			ls.syncing = cid.Undef
 			ls.updates <- channelState.BaseCID()
@@ -231,7 +227,7 @@ func (ls *legSubscriber) OnChange() (chan cid.Cid, context.CancelFunc) {
 	return ch, cncl
 }
 
-func (ls *legSubscriber) Close(ctx context.Context) error {
+func (ls *legSubscriber) Close() error {
 	ls.cancel()
-	return ls.transfer.Close(ctx)
+	return nil
 }

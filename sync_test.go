@@ -113,11 +113,11 @@ func TestLatestSyncSuccess(t *testing.T) {
 	dstStore := dssync.MutexWrap(datastore.NewMapDatastore())
 	srcHost := mkTestHost()
 	srcLnkS := mkLinkSystem(srcStore)
-	srcdt, err := MakeLegTransport(context.Background(), srcHost, srcStore, srcLnkS, "legs/testtopic", "legs-test")
+	srcdt, err := MakeLegTransport(context.Background(), srcHost, srcStore, srcLnkS, "legs/testtopic")
 	if err != nil {
 		t.Fatal(err)
 	}
-	lp, err := NewPublisher(context.Background(), srcStore, srcHost, srcdt, srcLnkS)
+	lp, err := NewPublisher(context.Background(), srcdt)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -129,29 +129,21 @@ func TestLatestSyncSuccess(t *testing.T) {
 		t.Fatal(err)
 	}
 	dstLnkS := mkLinkSystem(dstStore)
-	dstdt, err := MakeLegTransport(context.Background(), dstHost, dstStore, dstLnkS, "legs/testtopic", "legs-test")
+	dstdt, err := MakeLegTransport(context.Background(), dstHost, dstStore, dstLnkS, "legs/testtopic")
 	if err != nil {
 		t.Fatal(err)
 	}
-	ls, err := NewSubscriber(context.Background(), dstStore, dstHost, dstdt, nil)
+	ls, err := NewSubscriber(context.Background(), dstdt, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-
-	// per https://github.com/libp2p/go-libp2p-pubsub/blob/e6ad80cf4782fca31f46e3a8ba8d1a450d562f49/gossipsub_test.go#L103
-	// we don't seem to have a way to manually trigger needed gossip-sub heartbeats for mesh establishment.
-	time.Sleep(time.Second)
 
 	watcher, cncl := ls.OnChange()
 
 	// Store the whole chain in source node
 	chainLnks := mkChain(srcLnkS, true)
 
-	defer func() {
-		cncl()
-		lp.Close(context.Background())
-		ls.Close(context.Background())
-	}()
+	defer clean(lp, ls, srcdt, dstdt, cncl)
 
 	newUpdateTest(t, lp, ls, watcher, chainLnks[2], false, chainLnks[2].(cidlink.Link).Cid)
 	newUpdateTest(t, lp, ls, watcher, chainLnks[1], false, chainLnks[1].(cidlink.Link).Cid)
@@ -165,11 +157,11 @@ func TestPartialSync(t *testing.T) {
 	srcHost := mkTestHost()
 	srcLnkS := mkLinkSystem(srcStore)
 	testLnkS := mkLinkSystem(testStore)
-	srcdt, err := MakeLegTransport(context.Background(), srcHost, srcStore, srcLnkS, "legs/testtopic", "legs-test")
+	srcdt, err := MakeLegTransport(context.Background(), srcHost, srcStore, srcLnkS, "legs/testtopic")
 	if err != nil {
 		t.Fatal(err)
 	}
-	lp, err := NewPublisher(context.Background(), srcStore, srcHost, srcdt, srcLnkS)
+	lp, err := NewPublisher(context.Background(), srcdt)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -183,7 +175,7 @@ func TestPartialSync(t *testing.T) {
 		t.Fatal(err)
 	}
 	dstLnkS := mkLinkSystem(dstStore)
-	dstdt, err := MakeLegTransport(context.Background(), dstHost, dstStore, dstLnkS, "legs/testtopic", "legs-test")
+	dstdt, err := MakeLegTransport(context.Background(), dstHost, dstStore, dstLnkS, "legs/testtopic")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -192,25 +184,18 @@ func TestPartialSync(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// per https://github.com/libp2p/go-libp2p-pubsub/blob/e6ad80cf4782fca31f46e3a8ba8d1a450d562f49/gossipsub_test.go#L103
-	// we don't seem to have a way to manually trigger needed gossip-sub heartbeats for mesh establishment.
-	time.Sleep(time.Second)
 	mkChain(srcLnkS, true)
 
 	watcher, cncl := ls.OnChange()
 
-	defer func() {
-		cncl()
-		lp.Close(context.Background())
-		ls.Close(context.Background())
-	}()
+	defer clean(lp, ls, srcdt, dstdt, cncl)
 
 	// Fetching first few nodes.
 	newUpdateTest(t, lp, ls, watcher, chainLnks[2], false, chainLnks[2].(cidlink.Link).Cid)
 
 	// Check that first nodes hadn't been synced
 	lsT := ls.(*legSubscriber)
-	if _, err := lsT.ds.Get(datastore.NewKey(chainLnks[3].(cidlink.Link).Cid.String())); err != datastore.ErrNotFound {
+	if _, err := lsT.transfer.ds.Get(datastore.NewKey(chainLnks[3].(cidlink.Link).Cid.String())); err != datastore.ErrNotFound {
 		t.Fatalf("data should not be in receiver store: %v", err)
 	}
 
@@ -223,7 +208,7 @@ func TestPartialSync(t *testing.T) {
 	newUpdateTest(t, lp, ls, watcher, chainLnks[0], false, chainLnks[0].(cidlink.Link).Cid)
 
 	// Check if the node we pass through was retrieved
-	if _, err := lsT.ds.Get(datastore.NewKey(chainLnks[1].(cidlink.Link).Cid.String())); err != datastore.ErrNotFound {
+	if _, err := lsT.transfer.ds.Get(datastore.NewKey(chainLnks[1].(cidlink.Link).Cid.String())); err != datastore.ErrNotFound {
 		t.Fatalf("data should not be in receiver store: %v", err)
 	}
 }
@@ -232,11 +217,11 @@ func TestStepByStepSync(t *testing.T) {
 	dstStore := dssync.MutexWrap(datastore.NewMapDatastore())
 	srcHost := mkTestHost()
 	srcLnkS := mkLinkSystem(srcStore)
-	srcdt, err := MakeLegTransport(context.Background(), srcHost, srcStore, srcLnkS, "legs/testtopic", "legs-test")
+	srcdt, err := MakeLegTransport(context.Background(), srcHost, srcStore, srcLnkS, "legs/testtopic")
 	if err != nil {
 		t.Fatal(err)
 	}
-	lp, err := NewPublisher(context.Background(), srcStore, srcHost, srcdt, srcLnkS)
+	lp, err := NewPublisher(context.Background(), srcdt)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -248,18 +233,14 @@ func TestStepByStepSync(t *testing.T) {
 		t.Fatal(err)
 	}
 	dstLnkS := mkLinkSystem(dstStore)
-	dstdt, err := MakeLegTransport(context.Background(), dstHost, dstStore, dstLnkS, "legs/testtopic", "legs-test")
+	dstdt, err := MakeLegTransport(context.Background(), dstHost, dstStore, dstLnkS, "legs/testtopic")
 	if err != nil {
 		t.Fatal(err)
 	}
-	ls, err := NewSubscriber(context.Background(), dstStore, dstHost, dstdt, nil)
+	ls, err := NewSubscriber(context.Background(), dstdt, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-
-	// per https://github.com/libp2p/go-libp2p-pubsub/blob/e6ad80cf4782fca31f46e3a8ba8d1a450d562f49/gossipsub_test.go#L103
-	// we don't seem to have a way to manually trigger needed gossip-sub heartbeats for mesh establishment.
-	time.Sleep(time.Second)
 
 	watcher, cncl := ls.OnChange()
 
@@ -270,11 +251,7 @@ func TestStepByStepSync(t *testing.T) {
 	// to simulate the partial sync.
 	mkChain(dstLnkS, true)
 
-	defer func() {
-		cncl()
-		lp.Close(context.Background())
-		ls.Close(context.Background())
-	}()
+	defer clean(lp, ls, srcdt, dstdt, cncl)
 
 	// Sync the rest of the chain
 	newUpdateTest(t, lp, ls, watcher, chainLnks[1], false, chainLnks[1].(cidlink.Link).Cid)
@@ -287,11 +264,11 @@ func TestLatestSyncFailure(t *testing.T) {
 	dstStore := dssync.MutexWrap(datastore.NewMapDatastore())
 	srcHost := mkTestHost()
 	srcLnkS := mkLinkSystem(srcStore)
-	srcdt, err := MakeLegTransport(context.Background(), srcHost, srcStore, srcLnkS, "legs/testtopic", "legs-test")
+	srcdt, err := MakeLegTransport(context.Background(), srcHost, srcStore, srcLnkS, "legs/testtopic")
 	if err != nil {
 		t.Fatal(err)
 	}
-	lp, err := NewPublisher(context.Background(), srcStore, srcHost, srcdt, srcLnkS)
+	lp, err := NewPublisher(context.Background(), srcdt)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -305,7 +282,7 @@ func TestLatestSyncFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 	dstLnkS := mkLinkSystem(dstStore)
-	dstdt, err := MakeLegTransport(context.Background(), dstHost, dstStore, dstLnkS, "legs/testtopic", "legs-test")
+	dstdt, err := MakeLegTransport(context.Background(), dstHost, dstStore, dstLnkS, "legs/testtopic")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -314,17 +291,8 @@ func TestLatestSyncFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// per https://github.com/libp2p/go-libp2p-pubsub/blob/e6ad80cf4782fca31f46e3a8ba8d1a450d562f49/gossipsub_test.go#L103
-	// we don't seem to have a way to manually trigger needed gossip-sub heartbeats for mesh establishment.
-	time.Sleep(time.Second)
-
 	watcher, cncl := ls.OnChange()
-
-	defer func() {
-		cncl()
-		lp.Close(context.Background())
-		ls.Close(context.Background())
-	}()
+	defer clean(lp, ls, srcdt, dstdt, cncl)
 
 	// The other end doesn't have the data
 	newUpdateTest(t, lp, ls, watcher, cidlink.Link{Cid: cid.Undef}, true, chainLnks[3].(cidlink.Link).Cid)
@@ -336,11 +304,6 @@ func TestLatestSyncFailure(t *testing.T) {
 	}
 	// We are not able to run the full exchange
 	newUpdateTest(t, lp, ls, watcher, chainLnks[2], true, chainLnks[3].(cidlink.Link).Cid)
-}
-
-func TestRefcClose(t *testing.T) {
-	t.SkipNow()
-	// TODO: Add a test that checks if RefC is working correctly for close.
 }
 
 func newUpdateTest(t *testing.T, lp LegPublisher, ls LegSubscriber, watcher chan cid.Cid, lnk ipld.Link, withFailure bool, expectedSync cid.Cid) {
@@ -368,7 +331,7 @@ func newUpdateTest(t *testing.T, lp LegPublisher, ls LegSubscriber, watcher chan
 			if !downstream.Equals(lnk.(cidlink.Link).Cid) {
 				t.Fatalf("sync'd sid unexpected %s vs %s", downstream, lnk)
 			}
-			if _, err := lsT.ds.Get(datastore.NewKey(downstream.String())); err != nil {
+			if _, err := lsT.transfer.ds.Get(datastore.NewKey(downstream.String())); err != nil {
 				t.Fatalf("data not in receiver store: %v", err)
 			}
 		}
@@ -376,4 +339,12 @@ func newUpdateTest(t *testing.T, lp LegPublisher, ls LegSubscriber, watcher chan
 			t.Fatal("latestSync not updated correctly", lsT.latestSync)
 		}
 	}
+}
+
+func clean(lp LegPublisher, ls LegSubscriber, srcdt, dstdt *LegTransport, cncl context.CancelFunc) {
+	cncl()
+	lp.Close()
+	ls.Close()
+	srcdt.Close(context.Background())
+	dstdt.Close(context.Background())
 }
