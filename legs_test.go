@@ -114,13 +114,13 @@ func TestRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	defer func() {
+	t.Cleanup(func() {
 		cncl()
 		lp.Close()
 		ls.Close()
 		srcdt.Close(context.Background())
 		dstdt.Close(context.Background())
-	}()
+	})
 
 	// per https://github.com/libp2p/go-libp2p-pubsub/blob/e6ad80cf4782fca31f46e3a8ba8d1a450d562f49/gossipsub_test.go#L103
 	// we don't seem to have a way to manually trigger needed gossip-sub heartbeats for mesh establishment.
@@ -173,13 +173,13 @@ func TestSetAndFilterPeerPolicy(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	defer func() {
+	t.Cleanup(func() {
 		cncl()
 		lp.Close()
 		ls.Close()
 		srcdt.Close(context.Background())
 		dstdt.Close(context.Background())
-	}()
+	})
 
 	if err := lp.UpdateRoot(context.Background(), lnk.(cidlink.Link).Cid); err != nil {
 		t.Fatal(err)

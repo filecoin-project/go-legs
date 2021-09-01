@@ -31,6 +31,9 @@ type LegSubscriber interface {
 	// SetLatestSync updates the latest sync of a subcriber in case it has
 	// already update some data off-band.
 	SetLatestSync(c cid.Cid) error
+	// Sync to a specific Cid of a peer's DAG without having to wait for a
+	// publication.
+	Sync(ctx context.Context, p peer.ID, c cid.Cid) (chan cid.Cid, context.CancelFunc, error)
 	// Close subscriber
 	Close() error
 }

@@ -230,3 +230,50 @@ func (ls *legSubscriber) Close() error {
 	ls.cancel()
 	return nil
 }
+
+func (ls *legSubscriber) unlockOnce(ulOnce *sync.Once) {
+	ulOnce.Do(ls.syncmtx.Unlock)
+}
+
+func (ls *legSubscriber) Sync(ctx context.Context, p peer.ID, c cid.Cid) (chan cid.Cid, context.CancelFunc, error) {
+	ls.syncmtx.Lock()
+	out := make(chan cid.Cid)
+	var ulOnce sync.Once
+
+	v := Voucher{&c}
+	unsub := ls.transfer.t.SubscribeToEvents(ls.onSyncEvent(c, out, &ulOnce))
+	_, err := ls.transfer.t.OpenPullDataChannel(ctx, p, &v, c, legSelector(nil))
+	if err != nil {
+		log.Errorf("Error in data channel for sync: %v", err)
+		ls.syncmtx.Unlock()
+		return nil, nil, err
+	}
+	cncl := func() {
+		unsub()
+		close(out)
+		// if the mutex is lock, unlock it. This may happen
+		// if CancelFunc is called after the exchange has finished
+		// and the lock has unlocked.
+		// We need this sanity-check to avoid the mutex from being
+		// unlocked twice
+		ls.unlockOnce(&ulOnce)
+	}
+	return out, cncl, nil
+}
+
+func (ls *legSubscriber) onSyncEvent(c cid.Cid, out chan cid.Cid, ulOnce *sync.Once) func(dt.Event, dt.ChannelState) {
+	return func(event dt.Event, channelState dt.ChannelState) {
+		if event.Code == dt.FinishTransfer {
+			if c == channelState.BaseCID() {
+				out <- channelState.BaseCID()
+				log.Debugw("Exchange finished, updating latest to  %s", channelState.BaseCID())
+				// Update latest sync to the head we are proactively syncing to.
+				// Beware! This means that if we sync to a CID which is before
+				// the latest one it may require to resend content from the chain that
+				// we already have. This should be handled by users.
+				ls.latestSync = cidlink.Link{Cid: channelState.BaseCID()}
+				ls.unlockOnce(ulOnce)
+			}
+		}
+	}
+}

@@ -8,17 +8,32 @@ a publisher and subscriber.
 Usage
 ---
 
-Creating a legs publisher is as simple as:
+Creating a legs publisher is as simple as creating a `LegTransport` and starting
+a publisher. `LegTransport` handles all the transport machinery to enable
+the instantiation of several publishers and subscribers in the same libp2p host:
 
 ```golang
-publisher, err := legs.Publish(ctx, dataStore, lp2pHost, "legs/topic")
+t, err := legs.MakeLegTransport(ctx, host, host, lsys, "legs/topic")
+if err != nil {
+	panic(err)
+}
+publisher, err := legs.Publish(ctx, t)
 ...
+// Publish updated root.
 if err := publisher.UpdateRoot(ctx, lnk.(cidlink.Link).Cid); err != nil {
 	panic(err)
 }
 ```
 
-A subscriber to the same "legs/topic" would watch via
+A subscriber to the same "legs/topic" would be created similarly 
+```golang
+t, err := legs.MakeLegTransport(ctx, host, host, lsys, "legs/topic")
+if err != nil {
+	panic(err)
+}
+subscriber, err := legs.NewSubscriber(ctx, t, policy)
+```
+and can watch to changes via:
 
 ```golang
 subscriber, err := legs.Subscribe(ctx, dataStore, lp2pHost, "legs/topic")
@@ -31,6 +46,21 @@ func watch(notifications chan cid.Cid) {
         // newHead is now available in the local dataStore
     }
 }
+```
+
+Subscribers can be created with a `PolicyHandler`. This policy is
+used to filter the exchanges and updates a subscriber will process.
+Subscribers started with `FilterPeerPolicy`, for instance, will only
+process (and thus exchange) updates from the specific peer specified
+in the policy.
+
+Subscribers keep track of the latest head they've already synced
+to prevent from exchanging all the DAG from scratch in every update, downloading
+exclusively the part they're missing. This value is not persisted as part
+of the library. If you want to start a subscriber which has already
+partially synced with a provider you can use:
+```golang
+subscriber, err := legs.NewSubscriberPartiallySynced(ctx, t, policy, latestSync)
 ```
 
 License
