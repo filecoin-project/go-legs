@@ -242,7 +242,7 @@ func (ls *legSubscriber) Sync(ctx context.Context, p peer.ID, c cid.Cid) (chan c
 
 	v := Voucher{&c}
 	unsub := ls.transfer.t.SubscribeToEvents(ls.onSyncEvent(c, out, &ulOnce))
-	_, err := ls.transfer.t.OpenPullDataChannel(ctx, p, &v, c, legSelector(nil))
+	_, err := ls.transfer.t.OpenPullDataChannel(ctx, p, &v, c, legSelector(ls.latestSync))
 	if err != nil {
 		log.Errorf("Error in data channel for sync: %v", err)
 		ls.syncmtx.Unlock()
