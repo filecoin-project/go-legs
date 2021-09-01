@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"io"
+	"math/rand"
 	"testing"
 	"time"
 
@@ -18,6 +19,13 @@ import (
 	"github.com/libp2p/go-libp2p-core/host"
 	"github.com/multiformats/go-multicodec"
 )
+
+var prefix = cid.Prefix{
+	Version:  1,
+	Codec:    uint64(multicodec.DagJson),
+	MhType:   uint64(multicodec.Sha2_256),
+	MhLength: 16,
+}
 
 func mkTestHost() host.Host {
 	h, _ := libp2p.New(context.Background(), libp2p.ListenAddrStrings("/ip4/0.0.0.0/tcp/0"))
@@ -42,6 +50,22 @@ func mkLinkSystem(ds datastore.Batching) ipld.LinkSystem {
 		}, nil
 	}
 	return lsys
+}
+
+func RandomCids(n int) ([]cid.Cid, error) {
+	var prng = rand.New(rand.NewSource(time.Now().UnixNano()))
+
+	res := make([]cid.Cid, n)
+	for i := 0; i < n; i++ {
+		b := make([]byte, 10*n)
+		prng.Read(b)
+		c, err := prefix.Sum(b)
+		if err != nil {
+			return nil, err
+		}
+		res[i] = c
+	}
+	return res, nil
 }
 
 // Return the chain with all nodes or just half of it for testing
@@ -93,12 +117,7 @@ func mkChain(lsys ipld.LinkSystem, full bool) []ipld.Link {
 // (also return the node again for convenient assignment.)
 func encode(lsys ipld.LinkSystem, n ipld.Node) (ipld.Node, ipld.Link) {
 	lp := cidlink.LinkPrototype{
-		Prefix: cid.Prefix{
-			Version:  1,
-			Codec:    uint64(multicodec.DagJson),
-			MhType:   uint64(multicodec.Sha2_256),
-			MhLength: 16,
-		},
+		Prefix: prefix,
 	}
 
 	lnk, err := lsys.Store(ipld.LinkContext{}, lp, n)
@@ -188,6 +207,16 @@ func TestSyncFn(t *testing.T) {
 
 	// Store the whole chain in source node
 	chainLnks := mkChain(srcLnkS, true)
+
+	// Try to sync with a non-existing cid, and cancel right away.
+	// This is to check that we unlock syncmtx if the exchange is cancelled.
+	cids, _ := RandomCids(1)
+	_, syncncl, err := ls.Sync(context.Background(), srcHost.ID(), cids[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Cancel without any exchange being done.
+	syncncl()
 
 	lnk := chainLnks[1]
 	lsT := ls.(*legSubscriber)
