@@ -230,3 +230,38 @@ func (ls *legSubscriber) Close() error {
 	ls.cancel()
 	return nil
 }
+
+func (ls *legSubscriber) Sync(ctx context.Context, p peer.ID, c cid.Cid) (chan cid.Cid, context.CancelFunc, error) {
+	ls.syncmtx.Lock()
+	out := make(chan cid.Cid)
+	v := Voucher{&c}
+	unsub := ls.transfer.t.SubscribeToEvents(ls.onSyncEvent(c, out))
+	_, err := ls.transfer.t.OpenPullDataChannel(ctx, p, &v, c, legSelector(nil))
+	if err != nil {
+		log.Errorf("Error in data channel for sync: %v", err)
+		ls.syncmtx.Unlock()
+		return nil, nil, err
+	}
+	cncl := func() {
+		unsub()
+		close(out)
+	}
+	return out, cncl, nil
+}
+
+func (ls *legSubscriber) onSyncEvent(c cid.Cid, out chan cid.Cid) func(dt.Event, dt.ChannelState) {
+	return func(event dt.Event, channelState dt.ChannelState) {
+		if event.Code == dt.FinishTransfer {
+			if c == channelState.BaseCID() {
+				out <- channelState.BaseCID()
+				log.Debugw("Exchange finished, updating latest to  %s", channelState.BaseCID())
+				// Update latest sync to the head we are proactively syncing to.
+				// Beware! This means that if we sync to a CID which is before
+				// the latest one it may require to resend content from the chain that
+				// we already have. This should be handled by users.
+				ls.latestSync = cidlink.Link{Cid: channelState.BaseCID()}
+				ls.syncmtx.Unlock()
+			}
+		}
+	}
+}

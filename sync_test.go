@@ -144,10 +144,75 @@ func TestLatestSyncSuccess(t *testing.T) {
 	// Store the whole chain in source node
 	chainLnks := mkChain(srcLnkS, true)
 
-	defer clean(lp, ls, srcdt, dstdt, cncl)
+	t.Cleanup(clean(lp, ls, srcdt, dstdt, cncl))
 
 	newUpdateTest(t, lp, ls, watcher, chainLnks[2], false, chainLnks[2].(cidlink.Link).Cid)
 	newUpdateTest(t, lp, ls, watcher, chainLnks[1], false, chainLnks[1].(cidlink.Link).Cid)
+	newUpdateTest(t, lp, ls, watcher, chainLnks[0], false, chainLnks[0].(cidlink.Link).Cid)
+}
+
+func TestSyncFn(t *testing.T) {
+	srcStore := dssync.MutexWrap(datastore.NewMapDatastore())
+	dstStore := dssync.MutexWrap(datastore.NewMapDatastore())
+	srcHost := mkTestHost()
+	srcLnkS := mkLinkSystem(srcStore)
+	srcdt, err := MakeLegTransport(context.Background(), srcHost, srcStore, srcLnkS, "legs/testtopic")
+	if err != nil {
+		t.Fatal(err)
+	}
+	lp, err := NewPublisher(context.Background(), srcdt)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	dstHost := mkTestHost()
+	srcHost.Peerstore().AddAddrs(dstHost.ID(), dstHost.Addrs(), time.Hour)
+	dstHost.Peerstore().AddAddrs(srcHost.ID(), srcHost.Addrs(), time.Hour)
+	if err := srcHost.Connect(context.Background(), dstHost.Peerstore().PeerInfo(dstHost.ID())); err != nil {
+		t.Fatal(err)
+	}
+	dstLnkS := mkLinkSystem(dstStore)
+	dstdt, err := MakeLegTransport(context.Background(), dstHost, dstStore, dstLnkS, "legs/testtopic")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ls, err := NewSubscriber(context.Background(), dstdt, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	time.Sleep(1 * time.Second)
+	watcher, cncl := ls.OnChange()
+
+	t.Cleanup(clean(lp, ls, srcdt, dstdt, cncl))
+
+	// Store the whole chain in source node
+	chainLnks := mkChain(srcLnkS, true)
+
+	lnk := chainLnks[1]
+	lsT := ls.(*legSubscriber)
+	// Proactively sync with publisher without him publishing to gossipsub channel.
+	out, syncncl, err := ls.Sync(context.Background(), srcHost.ID(), lnk.(cidlink.Link).Cid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-time.After(time.Second * 2):
+		t.Fatal("timed out waiting for sync to propogate")
+	case downstream := <-out:
+		if !downstream.Equals(lnk.(cidlink.Link).Cid) {
+			t.Fatalf("sync'd sid unexpected %s vs %s", downstream, lnk)
+		}
+		if _, err := lsT.transfer.ds.Get(datastore.NewKey(downstream.String())); err != nil {
+			t.Fatalf("data not in receiver store: %v", err)
+		}
+	}
+	// Stop listening to sync events.
+	syncncl()
+	if lsT.latestSync.(cidlink.Link).Cid != lnk.(cidlink.Link).Cid {
+		t.Fatal("latestSync not updated correctly", lsT.latestSync)
+	}
+	// Now sync after a gossipsub publication.
 	newUpdateTest(t, lp, ls, watcher, chainLnks[0], false, chainLnks[0].(cidlink.Link).Cid)
 }
 
@@ -191,7 +256,7 @@ func TestPartialSync(t *testing.T) {
 
 	watcher, cncl := ls.OnChange()
 
-	defer clean(lp, ls, srcdt, dstdt, cncl)
+	t.Cleanup(clean(lp, ls, srcdt, dstdt, cncl))
 
 	// Fetching first few nodes.
 	newUpdateTest(t, lp, ls, watcher, chainLnks[2], false, chainLnks[2].(cidlink.Link).Cid)
@@ -256,7 +321,7 @@ func TestStepByStepSync(t *testing.T) {
 	// to simulate the partial sync.
 	mkChain(dstLnkS, true)
 
-	defer clean(lp, ls, srcdt, dstdt, cncl)
+	t.Cleanup(clean(lp, ls, srcdt, dstdt, cncl))
 
 	// Sync the rest of the chain
 	newUpdateTest(t, lp, ls, watcher, chainLnks[1], false, chainLnks[1].(cidlink.Link).Cid)
@@ -310,7 +375,7 @@ func TestLatestSyncFailure(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer clean(lp, ls, srcdt, dstdt, cncl)
+	t.Cleanup(clean(lp, ls, srcdt, dstdt, cncl))
 	// We are not able to run the full exchange
 	newUpdateTest(t, lp, ls, watcher, chainLnks[2], true, chainLnks[3].(cidlink.Link).Cid)
 }
@@ -350,10 +415,12 @@ func newUpdateTest(t *testing.T, lp LegPublisher, ls LegSubscriber, watcher chan
 	}
 }
 
-func clean(lp LegPublisher, ls LegSubscriber, srcdt, dstdt *LegTransport, cncl context.CancelFunc) {
-	cncl()
-	lp.Close()
-	ls.Close()
-	srcdt.Close(context.Background())
-	dstdt.Close(context.Background())
+func clean(lp LegPublisher, ls LegSubscriber, srcdt, dstdt *LegTransport, cncl context.CancelFunc) func() {
+	return func() {
+		cncl()
+		lp.Close()
+		ls.Close()
+		srcdt.Close(context.Background())
+		dstdt.Close(context.Background())
+	}
 }
