@@ -232,9 +232,7 @@ func (ls *legSubscriber) Close() error {
 }
 
 func (ls *legSubscriber) unlockOnce(ulOnce *sync.Once) {
-	ulOnce.Do(func() {
-		ls.syncmtx.Unlock()
-	})
+	ulOnce.Do(ls.syncmtx.Unlock)
 }
 
 func (ls *legSubscriber) Sync(ctx context.Context, p peer.ID, c cid.Cid) (chan cid.Cid, context.CancelFunc, error) {
