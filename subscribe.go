@@ -27,7 +27,7 @@ type legSubscriber struct {
 	hndmtx sync.RWMutex
 	policy PolicyHandler
 
-	syncmtx    *syncMutex
+	syncmtx    sync.Mutex
 	latestSync ipld.Link
 	syncing    cid.Cid
 }
@@ -50,8 +50,8 @@ func NewSubscriberPartiallySynced(
 	if err != nil {
 		return nil, err
 	}
-	l.syncmtx.lock()
-	defer l.syncmtx.unlock()
+	l.syncmtx.Lock()
+	defer l.syncmtx.Unlock()
 	if latestSync != cid.Undef {
 		l.latestSync = cidlink.Link{Cid: latestSync}
 	}
@@ -66,7 +66,6 @@ func newSubscriber(ctx context.Context, dt *LegTransport, policy PolicyHandler) 
 		subs:     make([]chan cid.Cid, 0),
 		cancel:   nil,
 		policy:   policy,
-		syncmtx:  &syncMutex{},
 	}
 
 	// Start subscription
@@ -110,8 +109,8 @@ func (ls *legSubscriber) SetPolicyHandler(policy PolicyHandler) error {
 
 // SetLatestSync sets a new latestSync in case the subscriber has
 func (ls *legSubscriber) SetLatestSync(c cid.Cid) error {
-	ls.syncmtx.lock()
-	defer ls.syncmtx.unlock()
+	ls.syncmtx.Lock()
+	defer ls.syncmtx.Unlock()
 	ls.latestSync = cidlink.Link{Cid: c}
 	return nil
 }
@@ -132,7 +131,7 @@ func (ls *legSubscriber) onEvent(event dt.Event, channelState dt.ChannelState) {
 			ls.latestSync = cidlink.Link{Cid: channelState.BaseCID()}
 			// This Unlocks the syncMutex that was locked in watch(),
 			// refer to that function for the lock functionality.
-			ls.syncmtx.unlock()
+			ls.syncmtx.Unlock()
 		}
 	}
 }
@@ -174,7 +173,7 @@ func (ls *legSubscriber) watch(ctx context.Context, sub *pubsub.Subscription) {
 			// Locking latestSync to avoid data races by several updates
 			// This sync is unlocked when the transfer is finished or if
 			// there is an error in the channel.
-			ls.syncmtx.lock()
+			ls.syncmtx.Lock()
 			log.Debugf("Starting data channel (cid: %s, latestSync: %s)", c, ls.latestSync)
 			ls.syncing = c
 			_, err = ls.transfer.t.OpenPullDataChannel(ctx, src, &v, c, legSelector(ls.latestSync))
@@ -183,7 +182,7 @@ func (ls *legSubscriber) watch(ctx context.Context, sub *pubsub.Subscription) {
 				log.Errorf("Error in data channel: %v", err)
 				// There has been an error, no FinishTransfer event will be triggered,
 				// so we need to release the lock here.
-				ls.syncmtx.unlock()
+				ls.syncmtx.Unlock()
 
 				// TODO: Should we retry if there's an error in the exchange?
 			}
@@ -232,30 +231,39 @@ func (ls *legSubscriber) Close() error {
 	return nil
 }
 
+func (ls *legSubscriber) unlockOnce(ulOnce *sync.Once) {
+	ulOnce.Do(func() {
+		ls.syncmtx.Unlock()
+	})
+}
+
 func (ls *legSubscriber) Sync(ctx context.Context, p peer.ID, c cid.Cid) (chan cid.Cid, context.CancelFunc, error) {
-	ls.syncmtx.lock()
+	ls.syncmtx.Lock()
 	out := make(chan cid.Cid)
+	var ulOnce sync.Once
+
 	v := Voucher{&c}
-	unsub := ls.transfer.t.SubscribeToEvents(ls.onSyncEvent(c, out))
+	unsub := ls.transfer.t.SubscribeToEvents(ls.onSyncEvent(c, out, &ulOnce))
 	_, err := ls.transfer.t.OpenPullDataChannel(ctx, p, &v, c, legSelector(nil))
 	if err != nil {
 		log.Errorf("Error in data channel for sync: %v", err)
-		ls.syncmtx.unlock()
+		ls.syncmtx.Unlock()
 		return nil, nil, err
 	}
 	cncl := func() {
 		unsub()
 		close(out)
 		// if the mutex is lock, unlock it. This may happen
-		// if CancelFunc is called before the exchange has finished.
+		// if CancelFunc is called after the exchange has finished
+		// and the lock has unlocked.
 		// We need this sanity-check to avoid the mutex from being
-		// locked forever.
-		ls.syncmtx.unlock()
+		// unlocked twice
+		ls.unlockOnce(&ulOnce)
 	}
 	return out, cncl, nil
 }
 
-func (ls *legSubscriber) onSyncEvent(c cid.Cid, out chan cid.Cid) func(dt.Event, dt.ChannelState) {
+func (ls *legSubscriber) onSyncEvent(c cid.Cid, out chan cid.Cid, ulOnce *sync.Once) func(dt.Event, dt.ChannelState) {
 	return func(event dt.Event, channelState dt.ChannelState) {
 		if event.Code == dt.FinishTransfer {
 			if c == channelState.BaseCID() {
@@ -266,7 +274,7 @@ func (ls *legSubscriber) onSyncEvent(c cid.Cid, out chan cid.Cid) func(dt.Event,
 				// the latest one it may require to resend content from the chain that
 				// we already have. This should be handled by users.
 				ls.latestSync = cidlink.Link{Cid: channelState.BaseCID()}
-				ls.syncmtx.unlock()
+				ls.unlockOnce(ulOnce)
 			}
 		}
 	}
