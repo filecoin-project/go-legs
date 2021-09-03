@@ -17,3 +17,6 @@ require (
 	github.com/whyrusleeping/cbor-gen v0.0.0-20210713220151-be142a5ae1a8
 	golang.org/x/xerrors v0.0.0-20200804184101-5ec99f83aff1
 )
+
+// TODO: Replace when https://github.com/ipld/go-ipld-prime/pull/240 is merged
+replace github.com/ipld/go-ipld-prime => github.com/adlrocha/go-ipld-prime v0.11.1-0.20210903061231-033de3964876

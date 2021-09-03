@@ -11,12 +11,14 @@ import (
 	datatransfer "github.com/filecoin-project/go-data-transfer/impl"
 	dtnetwork "github.com/filecoin-project/go-data-transfer/network"
 	gstransport "github.com/filecoin-project/go-data-transfer/transport/graphsync"
+	"github.com/ipfs/go-cid"
 	"github.com/ipfs/go-datastore"
 	"github.com/ipfs/go-graphsync"
 	gsimpl "github.com/ipfs/go-graphsync/impl"
 	gsnet "github.com/ipfs/go-graphsync/network"
 	"github.com/ipld/go-ipld-prime"
 	"github.com/libp2p/go-libp2p-core/host"
+	"github.com/libp2p/go-libp2p-core/peer"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	pubsubpb "github.com/libp2p/go-libp2p-pubsub/pb"
 	"github.com/minio/blake2b-simd"
@@ -91,6 +93,39 @@ func MakeLegTransport(ctx context.Context, host host.Host, ds datastore.Batching
 
 func (lt *LegTransport) addRefc() {
 	atomic.AddInt32(lt.refc, 1)
+}
+
+// Fetch starts a new transfer with a peer for certain CID using the selector passed as argument.
+//
+// sel determines the selector to use for the exchange
+// Optionally, we can run an onFinish callback when the exchange has finished.
+func (lt *LegTransport) Fetch(ctx context.Context, p peer.ID, c cid.Cid, sel ipld.Node, onFinish func()) (chan cid.Cid, context.CancelFunc, error) {
+	v := Voucher{&c}
+	out := make(chan cid.Cid)
+	unsub := lt.t.SubscribeToEvents(lt.onFetchFinished(c, out, onFinish))
+	_, err := lt.t.OpenPullDataChannel(ctx, p, &v, c, sel)
+	if err != nil {
+		log.Errorf("Error starting data channel to fetch cid %s: %v", c, err)
+		return nil, nil, err
+	}
+	cncl := func() {
+		unsub()
+		close(out)
+	}
+	return out, cncl, nil
+}
+
+func (lt *LegTransport) onFetchFinished(c cid.Cid, out chan cid.Cid, onFinish func()) func(dt.Event, dt.ChannelState) {
+	return func(event dt.Event, channelState dt.ChannelState) {
+		if event.Code == dt.FinishTransfer {
+			if c == channelState.BaseCID() {
+				if onFinish != nil {
+					onFinish()
+				}
+				out <- channelState.BaseCID()
+			}
+		}
+	}
 }
 
 // Close closes the LegTransport. It returns an error if it still
