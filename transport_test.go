@@ -38,6 +38,9 @@ func TestFetch(t *testing.T) {
 
 	// Store the whole chain in source node
 	gitLnks := mkChain(srcLnkS, true)
+
+	// Wait for migrations to be run before performing exchange.
+	time.Sleep(500 * time.Millisecond)
 	onFinish := func() {
 		t.Log("Transfer finished")
 	}
