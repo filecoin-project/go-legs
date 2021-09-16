@@ -159,6 +159,7 @@ func (ls *legSubscriber) watch(ctx context.Context, sub *pubsub.Subscription) {
 		}
 
 		if allow {
+			log.Debugf("Pubsub message received. Policy says we are allowed to process")
 			src, err := peer.IDFromBytes(msg.From)
 			if err != nil {
 				continue
@@ -166,6 +167,7 @@ func (ls *legSubscriber) watch(ctx context.Context, sub *pubsub.Subscription) {
 
 			c, err := cid.Cast(msg.Data)
 			if err != nil {
+				log.Warnf("Couldn't cast CID from pubsub message")
 				continue
 			}
 			v := Voucher{&c}
@@ -176,7 +178,7 @@ func (ls *legSubscriber) watch(ctx context.Context, sub *pubsub.Subscription) {
 			ls.syncmtx.Lock()
 			log.Debugf("Starting data channel (cid: %s, latestSync: %s)", c, ls.latestSync)
 			ls.syncing = c
-			_, err = ls.transfer.t.OpenPullDataChannel(ctx, src, &v, c, LegSelector(ls.latestSync, ""))
+			_, err = ls.transfer.t.OpenPullDataChannel(ctx, src, &v, c, LegSelector(ls.latestSync))
 			if err != nil {
 				// Log error for now.
 				log.Errorf("Error in data channel: %v", err)
@@ -242,7 +244,7 @@ func (ls *legSubscriber) Sync(ctx context.Context, p peer.ID, c cid.Cid) (chan c
 
 	v := Voucher{&c}
 	unsub := ls.transfer.t.SubscribeToEvents(ls.onSyncEvent(c, out, &ulOnce))
-	_, err := ls.transfer.t.OpenPullDataChannel(ctx, p, &v, c, LegSelector(ls.latestSync, ""))
+	_, err := ls.transfer.t.OpenPullDataChannel(ctx, p, &v, c, LegSelector(ls.latestSync))
 	if err != nil {
 		log.Errorf("Error in data channel for sync: %v", err)
 		ls.syncmtx.Unlock()

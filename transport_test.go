@@ -37,7 +37,7 @@ func TestFetch(t *testing.T) {
 	}
 
 	// Store the whole chain in source node
-	gitLnks := mkChain(srcLnkS, true)
+	_, gitLnks := mkGitLike(srcLnkS)
 
 	// Wait for migrations to be run before performing exchange.
 	time.Sleep(500 * time.Millisecond)
@@ -46,7 +46,7 @@ func TestFetch(t *testing.T) {
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	cch, cncl, err := dstdt.Fetch(ctx, srcHost.ID(), gitLnks[0].(cidlink.Link).Cid, LegSelector(nil, "nested"), onFinish)
+	cch, cncl, err := dstdt.Fetch(ctx, srcHost.ID(), gitLnks[0].(cidlink.Link).Cid, LegSelector(nil), onFinish)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -70,10 +70,6 @@ func TestFetch(t *testing.T) {
 }
 
 // mkGitlike creates a DAG that represent a chain of subDAGs.
-// All of the nodes of the chain are the same, and the bypass
-// condition should prevent from recursing in specific fields.
-// We will traverse the full chain but prevent recursion for
-// certain fields
 func mkGitLike(lsys ipld.LinkSystem) (datamodel.Node, []datamodel.Link) {
 	_, leafAlphaLnk := encode(lsys, basicnode.NewString("alpha"))
 	_, mapLnk1 := encode(lsys, fluent.MustBuildMap(basicnode.Prototype__Map{}, 3, func(na fluent.MapAssembler) {

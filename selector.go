@@ -11,7 +11,7 @@ import (
 // ExploreRecursiveWithStop builds a selector that recursively syncs a DAG
 // until the link stopLnk is seen. It prevents from having to sync DAGs from
 // scratch with every update.
-func ExploreRecursiveWithStop(limit selector.RecursionLimit, sequence selectorbuilder.SelectorSpec, stopLnk ipld.Link, bypassField string) ipld.Node {
+func ExploreRecursiveWithStop(limit selector.RecursionLimit, sequence selectorbuilder.SelectorSpec, stopLnk ipld.Link) ipld.Node {
 	np := basicnode.Prototype__Map{}
 	return fluent.MustBuildMap(np, 1, func(na fluent.MapAssembler) {
 		// RecursionLimit
@@ -36,14 +36,6 @@ func ExploreRecursiveWithStop(limit selector.RecursionLimit, sequence selectorbu
 				})
 				na.AssembleEntry(selector.SelectorKey_StopAt).AssignNode(cond)
 			}
-
-			// Bypass condition
-			if bypassField != "" {
-				cond := fluent.MustBuildMap(basicnode.Prototype__Map{}, 1, func(na fluent.MapAssembler) {
-					na.AssembleEntry(string(selector.ConditionMode_HasField)).AssignString(bypassField)
-				})
-				na.AssembleEntry(selector.SelectorKey_Bypass).AssignNode(cond)
-			}
 		})
 	})
 
@@ -53,14 +45,12 @@ func ExploreRecursiveWithStop(limit selector.RecursionLimit, sequence selectorbu
 // used by leg subscribers
 //
 // LegSelector is a "recurse all" selector that provides conditions
-// to stop the traversal at a specific link (stopAt), or inspect
-// the full chain without recursing nodes with the fieldName specified
-// by bypassField
-func LegSelector(stopLnk ipld.Link, bypassField string) ipld.Node {
+// to stop the traversal at a specific link (stopAt).
+func LegSelector(stopLnk ipld.Link) ipld.Node {
 	np := basicnode.Prototype__Any{}
 	ssb := selectorbuilder.NewSelectorSpecBuilder(np)
 	return ExploreRecursiveWithStop(
 		selector.RecursionLimitNone(),
 		ssb.ExploreAll(ssb.ExploreRecursiveEdge()),
-		stopLnk, bypassField)
+		stopLnk)
 }
