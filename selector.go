@@ -41,9 +41,12 @@ func ExploreRecursiveWithStop(limit selector.RecursionLimit, sequence selectorbu
 
 }
 
-// LegSelector is a convenient function that  returns the selector
+// LegSelector is a convenient function that returns the selector
 // used by leg subscribers
-func legSelector(stopLnk ipld.Link) ipld.Node {
+//
+// LegSelector is a "recurse all" selector that provides conditions
+// to stop the traversal at a specific link (stopAt).
+func LegSelector(stopLnk ipld.Link) ipld.Node {
 	np := basicnode.Prototype__Any{}
 	ssb := selectorbuilder.NewSelectorSpecBuilder(np)
 	return ExploreRecursiveWithStop(
