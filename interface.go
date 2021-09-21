@@ -24,7 +24,8 @@ type LegPublisher interface {
 
 // LegSubscriber is an interface for watching a published dag.
 type LegSubscriber interface {
-	// OnChange return a listener and cancel func for subscriber.
+	// OnChange returns a listener and cancel func for subscriber.  When cancel
+	// is called the listener channel is closed.
 	OnChange() (chan cid.Cid, context.CancelFunc)
 	// SetPolicyHandler triggered to know if an exchange needs to be made.
 	SetPolicyHandler(PolicyHandler) error

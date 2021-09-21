@@ -207,7 +207,6 @@ func (ls *legSubscriber) distribute(ctx context.Context) {
 	}
 }
 
-// LegSubscriber is an interface for watching a published dag.
 func (ls *legSubscriber) OnChange() (chan cid.Cid, context.CancelFunc) {
 	ch := make(chan cid.Cid)
 	ls.submtx.Lock()
@@ -218,7 +217,9 @@ func (ls *legSubscriber) OnChange() (chan cid.Cid, context.CancelFunc) {
 		defer ls.submtx.Unlock()
 		for i, ca := range ls.subs {
 			if ca == ch {
-				ls.subs = append(ls.subs[0:i], ls.subs[i+1:]...)
+				ls.subs[i] = ls.subs[len(ls.subs)-1]
+				ls.subs[len(ls.subs)-1] = nil
+				ls.subs = ls.subs[:len(ls.subs)-1]
 				close(ch)
 				break
 			}
@@ -238,11 +239,12 @@ func (ls *legSubscriber) unlockOnce(ulOnce *sync.Once) {
 }
 
 func (ls *legSubscriber) Sync(ctx context.Context, p peer.ID, c cid.Cid) (chan cid.Cid, context.CancelFunc, error) {
-	ls.syncmtx.Lock()
 	out := make(chan cid.Cid)
+	v := Voucher{&c}
 	var ulOnce sync.Once
 
-	v := Voucher{&c}
+	ls.syncmtx.Lock()
+
 	unsub := ls.transfer.t.SubscribeToEvents(ls.onSyncEvent(c, out, &ulOnce))
 	_, err := ls.transfer.t.OpenPullDataChannel(ctx, p, &v, c, LegSelector(ls.latestSync))
 	if err != nil {

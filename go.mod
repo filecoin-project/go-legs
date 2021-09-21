@@ -4,13 +4,13 @@ go 1.16
 
 require (
 	github.com/filecoin-project/go-data-transfer v1.6.1-0.20210608092034-e4f40bc3a685
-	github.com/ipfs/go-cid v0.0.7
+	github.com/ipfs/go-cid v0.1.0
 	github.com/ipfs/go-datastore v0.4.6
 	github.com/ipfs/go-graphsync v0.8.1-rc1
-	github.com/ipfs/go-log/v2 v2.1.3
+	github.com/ipfs/go-log/v2 v2.3.0
 	github.com/ipld/go-ipld-prime v0.12.0
-	github.com/libp2p/go-libp2p v0.14.4
-	github.com/libp2p/go-libp2p-core v0.8.6
+	github.com/libp2p/go-libp2p v0.15.0
+	github.com/libp2p/go-libp2p-core v0.9.0
 	github.com/libp2p/go-libp2p-pubsub v0.5.4
 	github.com/minio/blake2b-simd v0.0.0-20160723061019-3f5f724cb5b1
 	github.com/multiformats/go-multicodec v0.3.0
