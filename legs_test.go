@@ -13,6 +13,7 @@ import (
 	"github.com/ipld/go-ipld-prime"
 
 	// dagjson codec registered for encoding
+	legs "github.com/filecoin-project/go-legs"
 	_ "github.com/ipld/go-ipld-prime/codec/dagcbor"
 	_ "github.com/ipld/go-ipld-prime/codec/dagjson"
 	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
@@ -20,7 +21,6 @@ import (
 	"github.com/libp2p/go-libp2p"
 	"github.com/libp2p/go-libp2p-core/host"
 	"github.com/multiformats/go-multicodec"
-	legs "github.com/willscott/go-legs"
 )
 
 func mkTestHost() host.Host {

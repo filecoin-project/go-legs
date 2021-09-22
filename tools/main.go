@@ -1,3 +1,4 @@
+//go:build cbg
 // +build cbg
 
 package main
@@ -6,8 +7,8 @@ import (
 	"os"
 	"path"
 
+	legs "github.com/filecoin-project/go-legs"
 	cborgen "github.com/whyrusleeping/cbor-gen"
-	legs "github.com/willscott/go-legs"
 )
 
 func main() {
