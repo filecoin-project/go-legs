@@ -1,4 +1,4 @@
-module github.com/willscott/go-legs
+module github.com/filecoin-project/go-legs
 
 go 1.16
 
