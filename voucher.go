@@ -1,7 +1,6 @@
 package legs
 
 import (
-	"context"
 	"errors"
 
 	datatransfer "github.com/filecoin-project/go-data-transfer"
@@ -35,7 +34,7 @@ func (v *VoucherResult) Type() datatransfer.TypeIdentifier {
 }
 
 type legsValidator struct {
-	ctx context.Context
+	//ctx context.Context
 	//ValidationsReceived chan receivedValidation
 }
 

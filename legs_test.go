@@ -20,7 +20,7 @@ import (
 	"github.com/libp2p/go-libp2p"
 	"github.com/libp2p/go-libp2p-core/host"
 	"github.com/multiformats/go-multicodec"
-	"github.com/willscott/go-legs"
+	legs "github.com/willscott/go-legs"
 )
 
 func mkTestHost() host.Host {
@@ -150,8 +150,10 @@ func TestSetAndFilterPeerPolicy(t *testing.T) {
 	_, dstHost, lp, ls, dstdt, srcdt := initPubSub(t, srcStore, dstStore)
 
 	// Set policy to filter dstHost, which is not the one generating the update.
-	ls.SetPolicyHandler(legs.FilterPeerPolicy(dstHost.ID()))
-
+	err := ls.SetPolicyHandler(legs.FilterPeerPolicy(dstHost.ID()))
+	if err != nil {
+		t.Fatal(err)
+	}
 	// per https://github.com/libp2p/go-libp2p-pubsub/blob/e6ad80cf4782fca31f46e3a8ba8d1a450d562f49/gossipsub_test.go#L103
 	// we don't seem to have a way to manually trigger needed gossip-sub heartbeats for mesh establishment.
 	time.Sleep(time.Second)
@@ -181,7 +183,7 @@ func TestSetAndFilterPeerPolicy(t *testing.T) {
 		dstdt.Close(context.Background())
 	})
 
-	if err := lp.UpdateRoot(context.Background(), lnk.(cidlink.Link).Cid); err != nil {
+	if err = lp.UpdateRoot(context.Background(), lnk.(cidlink.Link).Cid); err != nil {
 		t.Fatal(err)
 	}
 

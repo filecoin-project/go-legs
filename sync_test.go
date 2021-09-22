@@ -297,7 +297,10 @@ func TestPartialSync(t *testing.T) {
 	}
 
 	// Set latest sync so we pass through one of the links
-	ls.SetLatestSync(chainLnks[1].(cidlink.Link).Cid)
+	err = ls.SetLatestSync(chainLnks[1].(cidlink.Link).Cid)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if lsT.latestSync.(cidlink.Link).Cid != chainLnks[1].(cidlink.Link).Cid {
 		t.Fatal("latestSync not set correctly", lsT.latestSync)
 	}
