@@ -38,7 +38,7 @@ type LegTransport struct {
 	Gs     graphsync.GraphExchange
 	topic  *pubsub.Topic
 
-	refc *int32
+	refc int32
 }
 
 // MakeLegTransport creates a new datatransfer transport to use with go-legs
@@ -81,18 +81,17 @@ func MakeLegTransport(ctx context.Context, host host.Host, ds datastore.Batching
 		return nil, err
 	}
 
-	var r int32 = 0
 	return &LegTransport{
 		tmpDir: tmpDir,
 		ds:     ds,
 		t:      dt,
 		Gs:     gs,
 		topic:  t,
-		refc:   &r}, nil
+	}, nil
 }
 
 func (lt *LegTransport) addRefc() {
-	atomic.AddInt32(lt.refc, 1)
+	atomic.AddInt32(&lt.refc, 1)
 }
 
 // Fetch starts a new transfer with a peer for certain CID using the selector passed as argument.
@@ -131,7 +130,8 @@ func (lt *LegTransport) onFetchFinished(c cid.Cid, out chan cid.Cid, onFinish fu
 // Close closes the LegTransport. It returns an error if it still
 // has an active publisher or subscriber attached to the transport.
 func (lt *LegTransport) Close(ctx context.Context) error {
-	if *lt.refc == 0 {
+	refc := atomic.LoadInt32(&lt.refc)
+	if refc == 0 {
 		err := lt.t.Stop(ctx)
 		err2 := os.RemoveAll(lt.tmpDir)
 		err3 := lt.topic.Close()
@@ -142,8 +142,8 @@ func (lt *LegTransport) Close(ctx context.Context) error {
 			return err2
 		}
 		return err3
-	} else if *lt.refc > 0 {
-		return errors.Errorf("can't close transport. %d pub/sub still active", *lt.refc)
+	} else if refc > 0 {
+		return errors.Errorf("can't close transport. %d pub/sub still active", refc)
 	}
 	return nil
 }

@@ -27,6 +27,6 @@ func (lp *legPublisher) UpdateRoot(ctx context.Context, c cid.Cid) error {
 }
 
 func (lp *legPublisher) Close() error {
-	atomic.AddInt32(lp.transfer.refc, -1)
+	atomic.AddInt32(&lp.transfer.refc, -1)
 	return nil
 }
