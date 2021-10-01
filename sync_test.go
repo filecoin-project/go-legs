@@ -132,11 +132,7 @@ func TestLatestSyncSuccess(t *testing.T) {
 	dstStore := dssync.MutexWrap(datastore.NewMapDatastore())
 	srcHost := mkTestHost()
 	srcLnkS := mkLinkSystem(srcStore)
-	srcdt, err := MakeLegTransport(context.Background(), srcHost, srcStore, srcLnkS, "legs/testtopic")
-	if err != nil {
-		t.Fatal(err)
-	}
-	lp, err := NewPublisher(context.Background(), srcdt)
+	lp, err := NewPublisher(context.Background(), srcHost, srcStore, srcLnkS, "legs/testtopic")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -148,11 +144,7 @@ func TestLatestSyncSuccess(t *testing.T) {
 		t.Fatal(err)
 	}
 	dstLnkS := mkLinkSystem(dstStore)
-	dstdt, err := MakeLegTransport(context.Background(), dstHost, dstStore, dstLnkS, "legs/testtopic")
-	if err != nil {
-		t.Fatal(err)
-	}
-	ls, err := NewSubscriber(context.Background(), dstdt, nil)
+	ls, err := NewSubscriber(context.Background(), dstHost, dstStore, dstLnkS, "legs/testtopic")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -163,11 +155,11 @@ func TestLatestSyncSuccess(t *testing.T) {
 	// Store the whole chain in source node
 	chainLnks := mkChain(srcLnkS, true)
 
-	t.Cleanup(clean(lp, ls, srcdt, dstdt, cncl))
+	t.Cleanup(clean(lp, ls, cncl))
 
-	newUpdateTest(t, lp, ls, watcher, chainLnks[2], false, chainLnks[2].(cidlink.Link).Cid)
-	newUpdateTest(t, lp, ls, watcher, chainLnks[1], false, chainLnks[1].(cidlink.Link).Cid)
-	newUpdateTest(t, lp, ls, watcher, chainLnks[0], false, chainLnks[0].(cidlink.Link).Cid)
+	newUpdateTest(t, lp, ls, dstStore, watcher, chainLnks[2], false, chainLnks[2].(cidlink.Link).Cid)
+	newUpdateTest(t, lp, ls, dstStore, watcher, chainLnks[1], false, chainLnks[1].(cidlink.Link).Cid)
+	newUpdateTest(t, lp, ls, dstStore, watcher, chainLnks[0], false, chainLnks[0].(cidlink.Link).Cid)
 }
 
 func TestSyncFn(t *testing.T) {
@@ -175,11 +167,7 @@ func TestSyncFn(t *testing.T) {
 	dstStore := dssync.MutexWrap(datastore.NewMapDatastore())
 	srcHost := mkTestHost()
 	srcLnkS := mkLinkSystem(srcStore)
-	srcdt, err := MakeLegTransport(context.Background(), srcHost, srcStore, srcLnkS, "legs/testtopic")
-	if err != nil {
-		t.Fatal(err)
-	}
-	lp, err := NewPublisher(context.Background(), srcdt)
+	lp, err := NewPublisher(context.Background(), srcHost, srcStore, srcLnkS, "legs/testtopic")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -191,11 +179,8 @@ func TestSyncFn(t *testing.T) {
 		t.Fatal(err)
 	}
 	dstLnkS := mkLinkSystem(dstStore)
-	dstdt, err := MakeLegTransport(context.Background(), dstHost, dstStore, dstLnkS, "legs/testtopic")
-	if err != nil {
-		t.Fatal(err)
-	}
-	ls, err := NewSubscriber(context.Background(), dstdt, nil)
+
+	ls, err := NewSubscriber(context.Background(), dstHost, dstStore, dstLnkS, "legs/testtopic")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -203,7 +188,7 @@ func TestSyncFn(t *testing.T) {
 	time.Sleep(1 * time.Second)
 	watcher, cncl := ls.OnChange()
 
-	t.Cleanup(clean(lp, ls, srcdt, dstdt, cncl))
+	t.Cleanup(clean(lp, ls, cncl))
 
 	// Store the whole chain in source node
 	chainLnks := mkChain(srcLnkS, true)
@@ -232,7 +217,7 @@ func TestSyncFn(t *testing.T) {
 		if !downstream.Equals(lnk.(cidlink.Link).Cid) {
 			t.Fatalf("sync'd sid unexpected %s vs %s", downstream, lnk)
 		}
-		if _, err := lsT.transfer.ds.Get(datastore.NewKey(downstream.String())); err != nil {
+		if _, err := dstStore.Get(datastore.NewKey(downstream.String())); err != nil {
 			t.Fatalf("data not in receiver store: %v", err)
 		}
 	}
@@ -242,7 +227,7 @@ func TestSyncFn(t *testing.T) {
 		t.Fatal("latestSync not updated correctly", lsT.latestSync)
 	}
 	// Now sync after a gossipsub publication.
-	newUpdateTest(t, lp, ls, watcher, chainLnks[0], false, chainLnks[0].(cidlink.Link).Cid)
+	newUpdateTest(t, lp, ls, dstStore, watcher, chainLnks[0], false, chainLnks[0].(cidlink.Link).Cid)
 }
 
 func TestPartialSync(t *testing.T) {
@@ -252,11 +237,7 @@ func TestPartialSync(t *testing.T) {
 	srcHost := mkTestHost()
 	srcLnkS := mkLinkSystem(srcStore)
 	testLnkS := mkLinkSystem(testStore)
-	srcdt, err := MakeLegTransport(context.Background(), srcHost, srcStore, srcLnkS, "legs/testtopic")
-	if err != nil {
-		t.Fatal(err)
-	}
-	lp, err := NewPublisher(context.Background(), srcdt)
+	lp, err := NewPublisher(context.Background(), srcHost, srcStore, srcLnkS, "legs/testtopic")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -270,11 +251,7 @@ func TestPartialSync(t *testing.T) {
 		t.Fatal(err)
 	}
 	dstLnkS := mkLinkSystem(dstStore)
-	dstdt, err := MakeLegTransport(context.Background(), dstHost, dstStore, dstLnkS, "legs/testtopic")
-	if err != nil {
-		t.Fatal(err)
-	}
-	ls, err := NewSubscriberPartiallySynced(context.Background(), dstdt, nil, chainLnks[3].(cidlink.Link).Cid)
+	ls, err := NewSubscriberPartiallySynced(context.Background(), dstHost, dstStore, dstLnkS, "legs/testtopic", chainLnks[3].(cidlink.Link).Cid)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -285,14 +262,14 @@ func TestPartialSync(t *testing.T) {
 
 	watcher, cncl := ls.OnChange()
 
-	t.Cleanup(clean(lp, ls, srcdt, dstdt, cncl))
+	t.Cleanup(clean(lp, ls, cncl))
 
 	// Fetching first few nodes.
-	newUpdateTest(t, lp, ls, watcher, chainLnks[2], false, chainLnks[2].(cidlink.Link).Cid)
+	newUpdateTest(t, lp, ls, dstStore, watcher, chainLnks[2], false, chainLnks[2].(cidlink.Link).Cid)
 
 	// Check that first nodes hadn't been synced
 	lsT := ls.(*legSubscriber)
-	if _, err := lsT.transfer.ds.Get(datastore.NewKey(chainLnks[3].(cidlink.Link).Cid.String())); err != datastore.ErrNotFound {
+	if _, err := dstStore.Get(datastore.NewKey(chainLnks[3].(cidlink.Link).Cid.String())); err != datastore.ErrNotFound {
 		t.Fatalf("data should not be in receiver store: %v", err)
 	}
 
@@ -305,10 +282,10 @@ func TestPartialSync(t *testing.T) {
 		t.Fatal("latestSync not set correctly", lsT.latestSync)
 	}
 	// Update all the chain from scratch again.
-	newUpdateTest(t, lp, ls, watcher, chainLnks[0], false, chainLnks[0].(cidlink.Link).Cid)
+	newUpdateTest(t, lp, ls, dstStore, watcher, chainLnks[0], false, chainLnks[0].(cidlink.Link).Cid)
 
 	// Check if the node we pass through was retrieved
-	if _, err := lsT.transfer.ds.Get(datastore.NewKey(chainLnks[1].(cidlink.Link).Cid.String())); err != datastore.ErrNotFound {
+	if _, err := dstStore.Get(datastore.NewKey(chainLnks[1].(cidlink.Link).Cid.String())); err != datastore.ErrNotFound {
 		t.Fatalf("data should not be in receiver store: %v", err)
 	}
 }
@@ -317,11 +294,7 @@ func TestStepByStepSync(t *testing.T) {
 	dstStore := dssync.MutexWrap(datastore.NewMapDatastore())
 	srcHost := mkTestHost()
 	srcLnkS := mkLinkSystem(srcStore)
-	srcdt, err := MakeLegTransport(context.Background(), srcHost, srcStore, srcLnkS, "legs/testtopic")
-	if err != nil {
-		t.Fatal(err)
-	}
-	lp, err := NewPublisher(context.Background(), srcdt)
+	lp, err := NewPublisher(context.Background(), srcHost, srcStore, srcLnkS, "legs/testtopic")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -333,11 +306,7 @@ func TestStepByStepSync(t *testing.T) {
 		t.Fatal(err)
 	}
 	dstLnkS := mkLinkSystem(dstStore)
-	dstdt, err := MakeLegTransport(context.Background(), dstHost, dstStore, dstLnkS, "legs/testtopic")
-	if err != nil {
-		t.Fatal(err)
-	}
-	ls, err := NewSubscriber(context.Background(), dstdt, nil)
+	ls, err := NewSubscriber(context.Background(), dstHost, dstStore, dstLnkS, "legs/testtopic")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -353,11 +322,11 @@ func TestStepByStepSync(t *testing.T) {
 	// to simulate the partial sync.
 	mkChain(dstLnkS, true)
 
-	t.Cleanup(clean(lp, ls, srcdt, dstdt, cncl))
+	t.Cleanup(clean(lp, ls, cncl))
 
 	// Sync the rest of the chain
-	newUpdateTest(t, lp, ls, watcher, chainLnks[1], false, chainLnks[1].(cidlink.Link).Cid)
-	newUpdateTest(t, lp, ls, watcher, chainLnks[0], false, chainLnks[0].(cidlink.Link).Cid)
+	newUpdateTest(t, lp, ls, dstStore, watcher, chainLnks[1], false, chainLnks[1].(cidlink.Link).Cid)
+	newUpdateTest(t, lp, ls, dstStore, watcher, chainLnks[0], false, chainLnks[0].(cidlink.Link).Cid)
 
 }
 
@@ -366,11 +335,7 @@ func TestLatestSyncFailure(t *testing.T) {
 	dstStore := dssync.MutexWrap(datastore.NewMapDatastore())
 	srcHost := mkTestHost()
 	srcLnkS := mkLinkSystem(srcStore)
-	srcdt, err := MakeLegTransport(context.Background(), srcHost, srcStore, srcLnkS, "legs/testtopic")
-	if err != nil {
-		t.Fatal(err)
-	}
-	lp, err := NewPublisher(context.Background(), srcdt)
+	lp, err := NewPublisher(context.Background(), srcHost, srcStore, srcLnkS, "legs/testtopic")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -384,11 +349,7 @@ func TestLatestSyncFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 	dstLnkS := mkLinkSystem(dstStore)
-	dstdt, err := MakeLegTransport(context.Background(), dstHost, dstStore, dstLnkS, "legs/testtopic")
-	if err != nil {
-		t.Fatal(err)
-	}
-	ls, err := NewSubscriberPartiallySynced(context.Background(), dstdt, nil, chainLnks[3].(cidlink.Link).Cid)
+	ls, err := NewSubscriberPartiallySynced(context.Background(), dstHost, dstStore, dstLnkS, "legs/testtopic", chainLnks[3].(cidlink.Link).Cid)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -397,22 +358,18 @@ func TestLatestSyncFailure(t *testing.T) {
 	ls.Close()
 
 	// The other end doesn't have the data
-	newUpdateTest(t, lp, ls, watcher, cidlink.Link{Cid: cid.Undef}, true, chainLnks[3].(cidlink.Link).Cid)
+	newUpdateTest(t, lp, ls, dstStore, watcher, cidlink.Link{Cid: cid.Undef}, true, chainLnks[3].(cidlink.Link).Cid)
 	dstStore = dssync.MutexWrap(datastore.NewMapDatastore())
-	dstdt, err = MakeLegTransport(context.Background(), dstHost, dstStore, dstLnkS, "legs/testtopic")
+	ls, err = NewSubscriberPartiallySynced(context.Background(), dstHost, dstStore, dstLnkS, "legs/testtopic", chainLnks[3].(cidlink.Link).Cid)
 	if err != nil {
 		t.Fatal(err)
 	}
-	ls, err = NewSubscriberPartiallySynced(context.Background(), dstdt, nil, chainLnks[3].(cidlink.Link).Cid)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(clean(lp, ls, srcdt, dstdt, cncl))
+	t.Cleanup(clean(lp, ls, cncl))
 	// We are not able to run the full exchange
-	newUpdateTest(t, lp, ls, watcher, chainLnks[2], true, chainLnks[3].(cidlink.Link).Cid)
+	newUpdateTest(t, lp, ls, dstStore, watcher, chainLnks[2], true, chainLnks[3].(cidlink.Link).Cid)
 }
 
-func newUpdateTest(t *testing.T, lp LegPublisher, ls LegSubscriber, watcher chan cid.Cid, lnk ipld.Link, withFailure bool, expectedSync cid.Cid) {
+func newUpdateTest(t *testing.T, lp LegPublisher, ls LegSubscriber, dstStore datastore.Batching, watcher chan cid.Cid, lnk ipld.Link, withFailure bool, expectedSync cid.Cid) {
 	if err := lp.UpdateRoot(context.Background(), lnk.(cidlink.Link).Cid); err != nil {
 		t.Fatal(err)
 	}
@@ -437,7 +394,7 @@ func newUpdateTest(t *testing.T, lp LegPublisher, ls LegSubscriber, watcher chan
 			if !downstream.Equals(lnk.(cidlink.Link).Cid) {
 				t.Fatalf("sync'd sid unexpected %s vs %s", downstream, lnk)
 			}
-			if _, err := lsT.transfer.ds.Get(datastore.NewKey(downstream.String())); err != nil {
+			if _, err := dstStore.Get(datastore.NewKey(downstream.String())); err != nil {
 				t.Fatalf("data not in receiver store: %v", err)
 			}
 		}
@@ -447,12 +404,10 @@ func newUpdateTest(t *testing.T, lp LegPublisher, ls LegSubscriber, watcher chan
 	}
 }
 
-func clean(lp LegPublisher, ls LegSubscriber, srcdt, dstdt *LegTransport, cncl context.CancelFunc) func() {
+func clean(lp LegPublisher, ls LegSubscriber, cncl context.CancelFunc) func() {
 	return func() {
 		cncl()
 		lp.Close()
 		ls.Close()
-		srcdt.Close(context.Background())
-		dstdt.Close(context.Background())
 	}
 }

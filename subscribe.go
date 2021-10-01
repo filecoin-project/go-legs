@@ -6,9 +6,11 @@ import (
 
 	dt "github.com/filecoin-project/go-data-transfer"
 	"github.com/ipfs/go-cid"
+	"github.com/ipfs/go-datastore"
 	logging "github.com/ipfs/go-log/v2"
 	"github.com/ipld/go-ipld-prime"
 	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
+	"github.com/libp2p/go-libp2p-core/host"
 	"github.com/libp2p/go-libp2p-core/peer"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 )
@@ -16,8 +18,10 @@ import (
 var log = logging.Logger("go-legs")
 
 type legSubscriber struct {
-	updates  chan cid.Cid
-	transfer *LegTransport
+	updates chan cid.Cid
+	topic   *pubsub.Topic
+	dt      dt.Manager
+	onClose func() error
 
 	submtx sync.Mutex
 	subs   []chan cid.Cid
@@ -33,19 +37,33 @@ type legSubscriber struct {
 
 // NewSubscriber creates a new leg subscriber listening to a specific pubsub topic
 // with a specific policyHandle to determine when to perform exchanges
-func NewSubscriber(ctx context.Context, dt *LegTransport,
-	policy PolicyHandler) (LegSubscriber, error) {
-	return newSubscriber(ctx, dt, policy)
+func NewSubscriber(ctx context.Context,
+	host host.Host,
+	ds datastore.Batching,
+	lsys ipld.LinkSystem,
+	topic string) (LegSubscriber, error) {
+	ss, err := newSimpleSetup(ctx, host, ds, lsys, topic)
+	if err != nil {
+		return nil, err
+	}
+	return newSubscriber(ctx, ss.dt, ss.t, ss.onClose, nil)
 }
 
 // NewSubscriberPartiallySynced creates a new leg subscriber with a specific latestSync.
 // LegSubscribers don't persist their latestSync. With this, users are able to
 // start a new subscriber with knowledge about what has already been synced.
 func NewSubscriberPartiallySynced(
-	ctx context.Context, dt *LegTransport, policy PolicyHandler,
+	ctx context.Context,
+	host host.Host,
+	ds datastore.Batching,
+	lsys ipld.LinkSystem,
+	topic string,
 	latestSync cid.Cid) (LegSubscriber, error) {
-
-	l, err := newSubscriber(ctx, dt, policy)
+	ss, err := newSimpleSetup(ctx, host, ds, lsys, topic)
+	if err != nil {
+		return nil, err
+	}
+	l, err := newSubscriber(ctx, ss.dt, ss.t, ss.onClose, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -57,14 +75,16 @@ func NewSubscriberPartiallySynced(
 	return l, nil
 }
 
-func newSubscriber(ctx context.Context, dt *LegTransport, policy PolicyHandler) (*legSubscriber, error) {
+func newSubscriber(ctx context.Context, dt dt.Manager, topic *pubsub.Topic, onClose func() error, policy PolicyHandler) (*legSubscriber, error) {
 
 	ls := &legSubscriber{
-		transfer: dt,
-		updates:  make(chan cid.Cid, 5),
-		subs:     make([]chan cid.Cid, 0),
-		cancel:   nil,
-		policy:   policy,
+		dt:      dt,
+		topic:   topic,
+		onClose: onClose,
+		updates: make(chan cid.Cid, 5),
+		subs:    make([]chan cid.Cid, 0),
+		cancel:  nil,
+		policy:  policy,
 	}
 
 	// Start subscription
@@ -72,20 +92,18 @@ func newSubscriber(ctx context.Context, dt *LegTransport, policy PolicyHandler) 
 	if err != nil {
 		return nil, err
 	}
-	// Add refC to track how many subscribers are using the transport.
-	dt.AddReference()
 
 	return ls, nil
 }
 
 func (ls *legSubscriber) subscribe(ctx context.Context) error {
-	psub, err := ls.transfer.topic.Subscribe()
+	psub, err := ls.topic.Subscribe()
 	if err != nil {
 		return err
 	}
 	cctx, cancel := context.WithCancel(ctx)
 
-	unsub := ls.transfer.t.SubscribeToEvents(ls.onEvent)
+	unsub := ls.dt.SubscribeToEvents(ls.onEvent)
 	ls.cancel = func() {
 		unsub()
 		psub.Cancel()
@@ -177,7 +195,7 @@ func (ls *legSubscriber) watch(ctx context.Context, sub *pubsub.Subscription) {
 			ls.syncmtx.Lock()
 			log.Debugf("Starting data channel (cid: %s, latestSync: %s)", c, ls.latestSync)
 			ls.syncing = c
-			_, err = ls.transfer.t.OpenPullDataChannel(ctx, src, &v, c, LegSelector(ls.latestSync))
+			_, err = ls.dt.OpenPullDataChannel(ctx, src, &v, c, LegSelector(ls.latestSync))
 			if err != nil {
 				// Log error for now.
 				log.Errorf("Error in data channel: %v", err)
@@ -228,9 +246,9 @@ func (ls *legSubscriber) OnChange() (chan cid.Cid, context.CancelFunc) {
 }
 
 func (ls *legSubscriber) Close() error {
-	ls.transfer.RemoveReference()
+	err := ls.onClose()
 	ls.cancel()
-	return nil
+	return err
 }
 
 func (ls *legSubscriber) unlockOnce(ulOnce *sync.Once) {
@@ -244,8 +262,8 @@ func (ls *legSubscriber) Sync(ctx context.Context, p peer.ID, c cid.Cid) (chan c
 
 	ls.syncmtx.Lock()
 
-	unsub := ls.transfer.t.SubscribeToEvents(ls.onSyncEvent(c, out, &ulOnce))
-	_, err := ls.transfer.t.OpenPullDataChannel(ctx, p, &v, c, LegSelector(ls.latestSync))
+	unsub := ls.dt.SubscribeToEvents(ls.onSyncEvent(c, out, &ulOnce))
+	_, err := ls.dt.OpenPullDataChannel(ctx, p, &v, c, LegSelector(ls.latestSync))
 	if err != nil {
 		log.Errorf("Error in data channel for sync: %v", err)
 		ls.syncmtx.Unlock()
