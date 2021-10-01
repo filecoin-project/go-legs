@@ -2,31 +2,36 @@ package legs
 
 import (
 	"context"
-	"sync/atomic"
 
 	"github.com/ipfs/go-cid"
+	pubsub "github.com/libp2p/go-libp2p-pubsub"
 )
 
 type legPublisher struct {
-	transfer *LegTransport
+	r     Reference
+	topic *pubsub.Topic
 }
 
 // NewPublisher creates a new legs publisher
 func NewPublisher(ctx context.Context, dt *LegTransport) (LegPublisher, error) {
+	return NewPublisherFromDeps(ctx, dt, dt.topic)
+}
 
-	// Track how many publishers are using this transport
-	dt.addRefc()
-
+// NewPublisherFromDeps instantiates go-legs from direct dependencies
+func NewPublisherFromDeps(ctx context.Context, r Reference, topic *pubsub.Topic) (LegPublisher, error) {
+	r.AddReference()
 	return &legPublisher{
-		transfer: dt}, nil
+		r:     r,
+		topic: topic,
+	}, nil
 }
 
 func (lp *legPublisher) UpdateRoot(ctx context.Context, c cid.Cid) error {
 	log.Debugf("Published CID in pubsub channel: %s", c)
-	return lp.transfer.topic.Publish(ctx, c.Bytes())
+	return lp.topic.Publish(ctx, c.Bytes())
 }
 
 func (lp *legPublisher) Close() error {
-	atomic.AddInt32(&lp.transfer.refc, -1)
+	lp.r.RemoveReference()
 	return nil
 }

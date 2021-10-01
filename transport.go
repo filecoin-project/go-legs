@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io/ioutil"
 	"os"
-	"sync/atomic"
 
 	dt "github.com/filecoin-project/go-data-transfer"
 	datatransfer "github.com/filecoin-project/go-data-transfer/impl"
@@ -30,20 +29,18 @@ const (
 	directConnectTicks uint64 = 30
 )
 
-// LegTransport wraps all the assets to set-up the data transfer.
 type LegTransport struct {
 	tmpDir string
 	ds     datastore.Batching
 	t      dt.Manager
 	Gs     graphsync.GraphExchange
 	topic  *pubsub.Topic
-
-	refc int32
+	reference
 }
 
 // MakeLegTransport creates a new datatransfer transport to use with go-legs
 func MakeLegTransport(ctx context.Context, host host.Host, ds datastore.Batching, lsys ipld.LinkSystem, topic string) (*LegTransport, error) {
-	t, err := makePubsub(ctx, host, topic)
+	t, err := MakePubsub(ctx, host, topic)
 	if err != nil {
 		return nil, err
 	}
@@ -90,10 +87,6 @@ func MakeLegTransport(ctx context.Context, host host.Host, ds datastore.Batching
 	}, nil
 }
 
-func (lt *LegTransport) addRefc() {
-	atomic.AddInt32(&lt.refc, 1)
-}
-
 // Fetch starts a new transfer with a peer for certain CID using the selector passed as argument.
 //
 // sel determines the selector to use for the exchange
@@ -130,7 +123,7 @@ func (lt *LegTransport) onFetchFinished(c cid.Cid, out chan cid.Cid, onFinish fu
 // Close closes the LegTransport. It returns an error if it still
 // has an active publisher or subscriber attached to the transport.
 func (lt *LegTransport) Close(ctx context.Context) error {
-	refc := atomic.LoadInt32(&lt.refc)
+	refc := lt.RefCount()
 	if refc == 0 {
 		err := lt.t.Stop(ctx)
 		err2 := os.RemoveAll(lt.tmpDir)
@@ -148,7 +141,7 @@ func (lt *LegTransport) Close(ctx context.Context) error {
 	return nil
 }
 
-func makePubsub(ctx context.Context, h host.Host, topic string) (*pubsub.Topic, error) {
+func MakePubsub(ctx context.Context, h host.Host, topic string) (*pubsub.Topic, error) {
 	p, err := pubsub.NewGossipSub(ctx, h,
 		pubsub.WithPeerExchange(true),
 		pubsub.WithMessageIdFn(func(pmsg *pubsubpb.Message) string {
