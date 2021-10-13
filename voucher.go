@@ -40,6 +40,7 @@ type legsValidator struct {
 
 func (vl *legsValidator) ValidatePush(
 	isRestart bool,
+	chid datatransfer.ChannelID,
 	sender peer.ID,
 	voucher datatransfer.Voucher,
 	baseCid cid.Cid,
@@ -51,6 +52,7 @@ func (vl *legsValidator) ValidatePush(
 
 func (vl *legsValidator) ValidatePull(
 	isRestart bool,
+	chid datatransfer.ChannelID,
 	receiver peer.ID,
 	voucher datatransfer.Voucher,
 	baseCid cid.Cid,
