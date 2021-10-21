@@ -84,7 +84,7 @@ func newSubscriber(ctx context.Context, dt dt.Manager, topic *pubsub.Topic, onCl
 		dt:              dt,
 		topic:           topic,
 		onClose:         onClose,
-		updates:         make(chan cid.Cid, 5),
+		updates:         make(chan cid.Cid, 1),
 		subs:            make([]chan cid.Cid, 0),
 		cancel:          nil,
 		policy:          policy,

@@ -163,14 +163,26 @@ func (h *httpSubscriber) background() {
 	var sel ipld.Node
 	var xsel selector.Selector
 	var err error
+	defaultRate := time.NewTimer(defaultPollTime)
 	for {
+		// finish up from previous iteration
+		if workResp != nil {
+			workResp <- nextCid
+			close(workResp)
+			workResp = nil
+		}
+		if !defaultRate.Stop() {
+			<-defaultRate.C
+		}
+		defaultRate.Reset(defaultPollTime)
 		select {
+
 		case r := <-h.reqs:
 			nextCid = r.Cid
 			workResp = r.resp
 			sel = r.Selector
 			ctx = r.ctx
-		case <-time.After(defaultPollTime):
+		case <-defaultRate.C:
 			nextCid = cid.Undef
 			workResp = nil
 			ctx = context.Background()
@@ -185,32 +197,25 @@ func (h *httpSubscriber) background() {
 		if err != nil {
 			log.Warnf("failed to fetch new head: %s", err)
 			err = nil
-			goto next
+			continue
 		}
 		sel = legs.ExploreRecursiveWithStopNode(selector.RecursionLimitNone(),
 			sel,
 			cidlink.Link{Cid: h.head})
 		if err := h.fetchBlock(ctx, nextCid); err != nil {
 			//log
-			goto next
+			continue
 		}
 		xsel, err = selector.CompileSelector(sel)
 		if err != nil {
 			//log
-			goto next
+			continue
 		}
 
 		err = h.walkFetch(ctx, nextCid, xsel)
 		if err != nil {
 			//log
-			goto next
-		}
-
-	next:
-		if workResp != nil {
-			workResp <- nextCid
-			close(workResp)
-			workResp = nil
+			continue
 		}
 	}
 }
@@ -241,17 +246,14 @@ func (h *httpSubscriber) walkFetch(ctx context.Context, root cid.Cid, sel select
 		LastBlock: struct {
 			Path datamodel.Path
 			Link datamodel.Link
-		}{
-			Path: ipld.Path{},
-			Link: nil,
-		},
+		}{},
 	}
 	// get the direct node.
 	rootNode, err := getMissingLs.Load(ipld.LinkContext{}, cidlink.Link{Cid: root}, basicnode.Prototype.Any)
 	if err != nil {
 		return err
 	}
-	return progress.WalkAdv(rootNode, sel, func(p traversal.Progress, n datamodel.Node, vr traversal.VisitReason) error {
+	return progress.WalkMatching(rootNode, sel, func(p traversal.Progress, n datamodel.Node) error {
 		return nil
 	})
 }
