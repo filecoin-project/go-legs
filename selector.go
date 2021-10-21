@@ -12,6 +12,18 @@ import (
 // until the link stopLnk is seen. It prevents from having to sync DAGs from
 // scratch with every update.
 func ExploreRecursiveWithStop(limit selector.RecursionLimit, sequence selectorbuilder.SelectorSpec, stopLnk ipld.Link) ipld.Node {
+	return ExploreRecursiveWithStopNode(limit, sequence.Node(), stopLnk)
+}
+
+// ExploreRecursiveWithStopNode builds a selector that recursively syncs a DAG
+// until the link stopLnk is seen. It prevents from having to sync DAGs from
+// scratch with every update.
+func ExploreRecursiveWithStopNode(limit selector.RecursionLimit, sequence ipld.Node, stopLnk ipld.Link) ipld.Node {
+	if sequence == nil {
+		np := basicnode.Prototype__Any{}
+		ssb := selectorbuilder.NewSelectorSpecBuilder(np)
+		sequence = ssb.ExploreAll(ssb.ExploreRecursiveEdge()).Node()
+	}
 	np := basicnode.Prototype__Map{}
 	return fluent.MustBuildMap(np, 1, func(na fluent.MapAssembler) {
 		// RecursionLimit
@@ -27,7 +39,7 @@ func ExploreRecursiveWithStop(limit selector.RecursionLimit, sequence selectorbu
 				}
 			})
 			// Sequence
-			na.AssembleEntry(selector.SelectorKey_Sequence).AssignNode(sequence.Node())
+			na.AssembleEntry(selector.SelectorKey_Sequence).AssignNode(sequence)
 
 			// Stop condition
 			if stopLnk != nil {
@@ -38,7 +50,6 @@ func ExploreRecursiveWithStop(limit selector.RecursionLimit, sequence selectorbu
 			}
 		})
 	})
-
 }
 
 // LegSelector is a convenient function that returns the selector

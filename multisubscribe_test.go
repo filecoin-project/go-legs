@@ -44,7 +44,7 @@ func TestMultiSusbscribeRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	dstLnkS := mkLinkSystem(dstStore)
-	ms, err := legs.NewMultiSubscriber(context.Background(), dstHost, dstStore, dstLnkS, "legs/testtopic")
+	ms, err := legs.NewMultiSubscriber(context.Background(), dstHost, dstStore, dstLnkS, "legs/testtopic", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -117,7 +117,7 @@ func TestCloseTransport(t *testing.T) {
 	st := dssync.MutexWrap(datastore.NewMapDatastore())
 	sh := mkTestHost()
 	lsys := mkLinkSystem(st)
-	ms, err := legs.NewMultiSubscriber(context.Background(), sh, st, lsys, "legs/testtopic")
+	ms, err := legs.NewMultiSubscriber(context.Background(), sh, st, lsys, "legs/testtopic", nil)
 	if err != nil {
 		t.Fatal(err)
 	}

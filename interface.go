@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/ipfs/go-cid"
+	"github.com/ipld/go-ipld-prime"
 	"github.com/libp2p/go-libp2p-core/peer"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 )
@@ -29,12 +30,15 @@ type LegSubscriber interface {
 	OnChange() (chan cid.Cid, context.CancelFunc)
 	// SetPolicyHandler triggered to know if an exchange needs to be made.
 	SetPolicyHandler(PolicyHandler) error
-	// SetLatestSync updates the latest sync of a subcriber in case it has
-	// already update some data off-band.
+	// SetLatestSync updates the latest sync of a subcriber to account for
+	// out of band updates.
 	SetLatestSync(c cid.Cid) error
 	// Sync to a specific Cid of a peer's DAG without having to wait for a
 	// publication.
-	Sync(ctx context.Context, p peer.ID, c cid.Cid) (chan cid.Cid, context.CancelFunc, error)
+	// Returns a channel that will resolve with the same cid, c that was passed as input when
+	// the dag from 'c' is available, a function to cancel, or a synchronous error if
+	// the subscriber is not in a state where it can sync from the specified peer.
+	Sync(ctx context.Context, p peer.ID, c cid.Cid, s ipld.Node) (chan cid.Cid, context.CancelFunc, error)
 	// Close subscriber
 	Close() error
 }

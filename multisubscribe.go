@@ -32,16 +32,17 @@ type LegMultiSubscriber interface {
 }
 
 type legMultiSubscriber struct {
-	ctx    context.Context
-	tmpDir string
-	t      dt.Manager
-	gs     graphsync.GraphExchange
-	topic  *pubsub.Topic
-	refc   int32
+	ctx             context.Context
+	tmpDir          string
+	t               dt.Manager
+	gs              graphsync.GraphExchange
+	topic           *pubsub.Topic
+	refc            int32
+	defaultSelector ipld.Node
 }
 
 // NewMultiSubscriber sets up a new instance of a multi subscriber
-func NewMultiSubscriber(ctx context.Context, host host.Host, ds datastore.Batching, lsys ipld.LinkSystem, topic string) (LegMultiSubscriber, error) {
+func NewMultiSubscriber(ctx context.Context, host host.Host, ds datastore.Batching, lsys ipld.LinkSystem, topic string, selector ipld.Node) (LegMultiSubscriber, error) {
 	t, err := makePubsub(ctx, host, topic)
 	if err != nil {
 		return nil, err
@@ -53,17 +54,18 @@ func NewMultiSubscriber(ctx context.Context, host host.Host, ds datastore.Batchi
 	}
 
 	return &legMultiSubscriber{
-		ctx:    ctx,
-		tmpDir: tmpDir,
-		t:      dt,
-		gs:     gs,
-		topic:  t,
+		ctx:             ctx,
+		tmpDir:          tmpDir,
+		t:               dt,
+		gs:              gs,
+		topic:           t,
+		defaultSelector: selector,
 	}, nil
 }
 
 func (lt *legMultiSubscriber) NewSubscriber(policy PolicyHandler) (LegSubscriber, error) {
 
-	l, err := newSubscriber(lt.ctx, lt.t, lt.topic, lt.onCloseSubscriber, policy)
+	l, err := newSubscriber(lt.ctx, lt.t, lt.topic, lt.onCloseSubscriber, policy, lt.defaultSelector)
 	if err != nil {
 		return nil, err
 	}
@@ -72,7 +74,7 @@ func (lt *legMultiSubscriber) NewSubscriber(policy PolicyHandler) (LegSubscriber
 }
 
 func (lt *legMultiSubscriber) NewSubscriberPartiallySynced(policy PolicyHandler, latestSync cid.Cid) (LegSubscriber, error) {
-	l, err := newSubscriber(lt.ctx, lt.t, lt.topic, lt.onCloseSubscriber, policy)
+	l, err := newSubscriber(lt.ctx, lt.t, lt.topic, lt.onCloseSubscriber, policy, lt.defaultSelector)
 	if err != nil {
 		return nil, err
 	}
