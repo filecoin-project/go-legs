@@ -83,6 +83,8 @@ type httpSubscriber struct {
 	subs []chan cid.Cid
 }
 
+var _ (legs.LegSubscriber) = (*httpSubscriber)(nil)
+
 type req struct {
 	cid.Cid
 	Selector ipld.Node
