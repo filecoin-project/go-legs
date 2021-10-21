@@ -1,7 +1,6 @@
 package http
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -23,7 +22,6 @@ import (
 	peer "github.com/libp2p/go-libp2p-peer"
 	"github.com/multiformats/go-multiaddr"
 	manet "github.com/multiformats/go-multiaddr/net"
-	"github.com/multiformats/go-multicodec"
 )
 
 var defaultPollTime = time.Hour
@@ -224,20 +222,8 @@ func (h *httpSubscriber) walkFetch(ctx context.Context, root cid.Cid, sel select
 			return r, nil
 		}
 		// get.
-		writer, committer, err := h.lsys.StorageWriteOpener(lc)
-		if err != nil {
-			return nil, err
-		}
 		c := l.(cidlink.Link).Cid
-		if err := h.fetch(ctx, c.String(), func(r io.Reader) error {
-			if _, err := io.Copy(writer, r); err != nil {
-				return err
-			}
-			return nil
-		}); err != nil {
-			return nil, err
-		}
-		if err := committer(l); err != nil {
+		if err := h.fetchBlock(ctx, c); err != nil {
 			return nil, err
 		}
 		return h.lsys.StorageReadOpener(lc, l)
@@ -305,22 +291,13 @@ func (h *httpSubscriber) fetchBlock(ctx context.Context, c cid.Cid) error {
 	}
 
 	return h.fetch(ctx, c.String(), func(data io.Reader) error {
-		buf := bytes.NewBuffer(nil)
-		if _, err := io.Copy(buf, data); err != nil {
-			return err
-		}
-		b := basicnode.NewBytes(buf.Bytes())
-		// we're storing just as 'raw', but will later interpret with c's codec
-		pref := c.Prefix()
-		pref.Codec = uint64(multicodec.Raw)
-		ec, err := h.lsys.Store(ipld.LinkContext{}, cidlink.LinkPrototype{Prefix: pref}, b)
+		writer, committer, err := h.lsys.StorageWriteOpener(ipld.LinkContext{})
 		if err != nil {
 			return err
 		}
-
-		if ec.(cidlink.Link).Cid.Hash().B58String() != c.Hash().B58String() {
-			return fmt.Errorf("content did not match expected hash: %s vs %s", ec, c)
+		if _, err := io.Copy(writer, data); err != nil {
+			return err
 		}
-		return nil
+		return committer(cidlink.Link{Cid: c})
 	})
 }
