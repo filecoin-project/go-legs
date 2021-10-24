@@ -1,26 +1,22 @@
 package legs_test
 
 import (
-	"bytes"
 	"context"
-	"io"
 	"testing"
 	"time"
 
-	"github.com/ipfs/go-cid"
 	"github.com/ipfs/go-datastore"
 	dssync "github.com/ipfs/go-datastore/sync"
-	"github.com/ipld/go-ipld-prime"
 
 	// dagjson codec registered for encoding
 	legs "github.com/filecoin-project/go-legs"
+	"github.com/filecoin-project/go-legs/test"
 	_ "github.com/ipld/go-ipld-prime/codec/dagcbor"
 	_ "github.com/ipld/go-ipld-prime/codec/dagjson"
 	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
 	basicnode "github.com/ipld/go-ipld-prime/node/basic"
 	"github.com/libp2p/go-libp2p"
 	"github.com/libp2p/go-libp2p-core/host"
-	"github.com/multiformats/go-multicodec"
 )
 
 func mkTestHost() host.Host {
@@ -28,29 +24,9 @@ func mkTestHost() host.Host {
 	return h
 }
 
-func mkLinkSystem(ds datastore.Batching) ipld.LinkSystem {
-	lsys := cidlink.DefaultLinkSystem()
-	lsys.StorageReadOpener = func(_ ipld.LinkContext, lnk ipld.Link) (io.Reader, error) {
-		c := lnk.(cidlink.Link).Cid
-		val, err := ds.Get(datastore.NewKey(c.String()))
-		if err != nil {
-			return nil, err
-		}
-		return bytes.NewBuffer(val), nil
-	}
-	lsys.StorageWriteOpener = func(_ ipld.LinkContext) (io.Writer, ipld.BlockWriteCommitter, error) {
-		buf := bytes.NewBuffer(nil)
-		return buf, func(lnk ipld.Link) error {
-			c := lnk.(cidlink.Link).Cid
-			return ds.Put(datastore.NewKey(c.String()), buf.Bytes())
-		}, nil
-	}
-	return lsys
-}
-
 func initPubSub(t *testing.T, srcStore, dstStore datastore.Batching) (host.Host, host.Host, legs.LegPublisher, legs.LegSubscriber) {
 	srcHost := mkTestHost()
-	srcLnkS := mkLinkSystem(srcStore)
+	srcLnkS := test.MkLinkSystem(srcStore)
 	lp, err := legs.NewPublisher(context.Background(), srcHost, srcStore, srcLnkS, "legs/testtopic")
 	if err != nil {
 		t.Fatal(err)
@@ -62,33 +38,12 @@ func initPubSub(t *testing.T, srcStore, dstStore datastore.Batching) (host.Host,
 	if err := srcHost.Connect(context.Background(), dstHost.Peerstore().PeerInfo(dstHost.ID())); err != nil {
 		t.Fatal(err)
 	}
-	dstLnkS := mkLinkSystem(dstStore)
+	dstLnkS := test.MkLinkSystem(dstStore)
 	ls, err := legs.NewSubscriber(context.Background(), dstHost, dstStore, dstLnkS, "legs/testtopic", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	return srcHost, dstHost, lp, ls
-}
-
-func mkRoot(srcStore datastore.Batching, n ipld.Node) (ipld.Link, error) {
-	linkproto := cidlink.LinkPrototype{
-		Prefix: cid.Prefix{
-			Version:  1,
-			Codec:    uint64(multicodec.DagJson),
-			MhType:   uint64(multicodec.Sha2_256),
-			MhLength: 16,
-		},
-	}
-	lsys := cidlink.DefaultLinkSystem()
-	lsys.StorageWriteOpener = func(_ ipld.LinkContext) (io.Writer, ipld.BlockWriteCommitter, error) {
-		buf := bytes.NewBuffer(nil)
-		return buf, func(lnk ipld.Link) error {
-			c := lnk.(cidlink.Link).Cid
-			return srcStore.Put(datastore.NewKey(c.String()), buf.Bytes())
-		}, nil
-	}
-
-	return lsys.Store(ipld.LinkContext{}, linkproto, n)
 }
 
 func TestRoundTrip(t *testing.T) {
@@ -101,7 +56,7 @@ func TestRoundTrip(t *testing.T) {
 
 	// Update root with item
 	itm := basicnode.NewString("hello world")
-	lnk, err := mkRoot(srcStore, itm)
+	lnk, err := test.Store(srcStore, itm)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -160,7 +115,7 @@ func TestSetAndFilterPeerPolicy(t *testing.T) {
 	ma.AssembleValue().AssignBool(true)
 	ma.Finish()
 	n := nb.Build()
-	lnk, err := mkRoot(srcStore, n)
+	lnk, err := test.Store(srcStore, n)
 	if err != nil {
 		t.Fatal(err)
 	}

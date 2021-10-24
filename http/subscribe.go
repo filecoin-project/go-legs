@@ -6,11 +6,13 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"path"
 	"sync"
 	"time"
 
 	"github.com/filecoin-project/go-legs"
+	maurl "github.com/filecoin-project/go-legs/http/multiaddr"
 	"github.com/ipfs/go-cid"
 	logging "github.com/ipfs/go-log/v2"
 	"github.com/ipld/go-ipld-prime"
@@ -21,7 +23,6 @@ import (
 	"github.com/ipld/go-ipld-prime/traversal/selector"
 	peer "github.com/libp2p/go-libp2p-core/peer"
 	"github.com/multiformats/go-multiaddr"
-	manet "github.com/multiformats/go-multiaddr/net"
 )
 
 var defaultPollTime = time.Hour
@@ -31,14 +32,14 @@ var log = logging.Logger("go-legs")
 // NewHTTPSubscriber creates a legs subcriber that provides subscriptions
 // from publishers identified by
 func NewHTTPSubscriber(ctx context.Context, host *http.Client, publisher multiaddr.Multiaddr, lsys *ipld.LinkSystem, topic string, selector ipld.Node) (legs.LegSubscriber, error) {
-	url, err := toURL(publisher)
+	url, err := maurl.ToURL(publisher)
 	if err != nil {
 		return nil, err
 	}
 	hs := httpSubscriber{
 		host,
 		cid.Undef,
-		url,
+		*url,
 
 		lsys,
 		selector,
@@ -50,30 +51,10 @@ func NewHTTPSubscriber(ctx context.Context, host *http.Client, publisher multiad
 	return &hs, nil
 }
 
-// toURL takes a multiaddr of the form:
-// /dnsaddr/thing.com/http/path/to/root
-// /ip/192.168.0.1/http
-// TODO: doesn't support including a signing key definition yet
-func toURL(ma multiaddr.Multiaddr) (string, error) {
-	// host should be either the dns name or the IP
-	_, host, err := manet.DialArgs(ma)
-	if err != nil {
-		return "", err
-	}
-	_, http := multiaddr.SplitFunc(ma, func(c multiaddr.Component) bool {
-		return c.Protocol().Code == multiaddr.P_HTTP
-	})
-	if len(http.Bytes()) == 0 {
-		return "", fmt.Errorf("publisher must be HTTP protocol for this subscriber, was: %s", ma)
-	}
-	_, path := multiaddr.SplitFirst(http)
-	return fmt.Sprintf("https://%s/%s", host, path), nil
-}
-
 type httpSubscriber struct {
 	*http.Client
 	head cid.Cid
-	root string
+	root url.URL
 
 	lsys            *ipld.LinkSystem
 	defaultSelector ipld.Node
@@ -258,8 +239,11 @@ func (h *httpSubscriber) walkFetch(ctx context.Context, root cid.Cid, sel select
 	})
 }
 
-func (h *httpSubscriber) fetch(ctx context.Context, url string, cb func(io.Reader) error) error {
-	req, err := http.NewRequestWithContext(ctx, "GET", path.Join(h.root, url), nil)
+func (h *httpSubscriber) fetch(ctx context.Context, rsrc string, cb func(io.Reader) error) error {
+	localURL := h.root
+	localURL.Path = path.Join(h.root.Path, rsrc)
+
+	req, err := http.NewRequestWithContext(ctx, "GET", localURL.String(), nil)
 	if err != nil {
 		return err
 	}
@@ -268,7 +252,7 @@ func (h *httpSubscriber) fetch(ctx context.Context, url string, cb func(io.Reade
 		return err
 	}
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("non success http code at %s/%s: %d", h.root, url, resp.StatusCode)
+		return fmt.Errorf("non success http code at %s: %d", localURL.String(), resp.StatusCode)
 	}
 
 	defer resp.Body.Close()
