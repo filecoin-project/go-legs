@@ -44,7 +44,7 @@ func (h *httpPublisher) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		out, err := json.Marshal(h.root.String())
 		if err != nil {
 			w.WriteHeader(500)
-			//todo: log
+			log.Infow("failed to serve root", "err", err)
 		} else {
 			_, _ = w.Write(out)
 		}
@@ -66,7 +66,7 @@ func (h *httpPublisher) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		w.WriteHeader(http.StatusInternalServerError)
 		w.Write([]byte("unable to load data for cid"))
-		// todo: log
+		log.Infow("failed to load requested block", "err", err)
 		return
 	}
 	// marshal to json and serve.

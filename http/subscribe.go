@@ -27,7 +27,7 @@ import (
 
 var defaultPollTime = time.Hour
 
-var log = logging.Logger("go-legs")
+var log = logging.Logger("go-legs-http")
 
 // NewHTTPSubscriber creates a legs subcriber that provides subscriptions
 // from publishers identified by
@@ -184,18 +184,18 @@ func (h *httpSubscriber) background() {
 			sel,
 			cidlink.Link{Cid: h.head})
 		if err := h.fetchBlock(ctx, nextCid); err != nil {
-			//log
+			log.Infow("failed to fetch requested block", "err", err)
 			continue
 		}
 		xsel, err = selector.CompileSelector(sel)
 		if err != nil {
-			//log
+			log.Infow("failed to compile selector", "err", err, "selector", sel)
 			continue
 		}
 
 		err = h.walkFetch(ctx, nextCid, xsel)
 		if err != nil {
-			//log
+			log.Infow("failed to walk requested dag", "err", err, "root", nextCid)
 			continue
 		}
 	}
