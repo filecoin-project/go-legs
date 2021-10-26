@@ -2,7 +2,6 @@ package multiaddr
 
 import (
 	"bytes"
-	"encoding/base64"
 	"fmt"
 	"net"
 	"net/url"
@@ -42,7 +41,7 @@ var protoHTTPath = multiaddr.Protocol{
 }
 
 // ToURL takes a multiaddr of the form:
-// /dns/thing.com/http/base64<path/to/root>
+// /dns/thing.com/http/urlescape<path/to/root>
 // /ip/192.168.0.1/tcp/80/http
 func ToURL(ma multiaddr.Multiaddr) (*url.URL, error) {
 	// host should be either the dns name or the IP
@@ -73,9 +72,9 @@ func ToURL(ma multiaddr.Multiaddr) (*url.URL, error) {
 
 	path := ""
 	if pb, ok := pm[protoHTTPath.Code]; ok {
-		pathDec, err := base64.URLEncoding.DecodeString(pb)
-		if err == nil {
-			path = string(pathDec)
+		path, err = url.PathUnescape(pb)
+		if err != nil {
+			path = ""
 		}
 	}
 
@@ -88,7 +87,7 @@ func ToURL(ma multiaddr.Multiaddr) (*url.URL, error) {
 }
 
 // ToMA takes a url and converts it into a multiaddr.
-// converts scheme://host:port/path -> /ip/host/tcp/port/scheme/base64{path}
+// converts scheme://host:port/path -> /ip/host/tcp/port/scheme/urlescape{path}
 func ToMA(u *url.URL) (*multiaddr.Multiaddr, error) {
 	h := u.Hostname()
 	var addr *multiaddr.Multiaddr
@@ -124,8 +123,7 @@ func ToMA(u *url.URL) (*multiaddr.Multiaddr, error) {
 
 	joint := multiaddr.Join(*addr, http)
 	if u.Path != "" {
-		path := base64.URLEncoding.EncodeToString([]byte(u.Path))
-		httpath, err := multiaddr.NewComponent(protoHTTPath.Name, path)
+		httpath, err := multiaddr.NewComponent(protoHTTPath.Name, url.PathEscape(u.Path))
 		if err != nil {
 			return nil, err
 		}
