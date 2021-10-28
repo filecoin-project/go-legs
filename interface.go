@@ -38,7 +38,7 @@ type LegSubscriber interface {
 	// Returns a channel that will resolve with the same cid, c that was passed as input when
 	// the dag from 'c' is available, a function to cancel, or a synchronous error if
 	// the subscriber is not in a state where it can sync from the specified peer.
-	Sync(ctx context.Context, p peer.ID, c cid.Cid, s ipld.Node) (chan cid.Cid, context.CancelFunc, error)
+	Sync(ctx context.Context, p peer.ID, c cid.Cid, selector ipld.Node) (<-chan cid.Cid, context.CancelFunc, error)
 	// Close subscriber
 	Close() error
 }

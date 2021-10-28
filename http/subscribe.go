@@ -37,15 +37,15 @@ func NewHTTPSubscriber(ctx context.Context, host *http.Client, publisher multiad
 		return nil, err
 	}
 	hs := httpSubscriber{
-		host,
-		cid.Undef,
-		*url,
+		Client: host,
+		head:   cid.Undef,
+		root:   *url,
 
-		lsys,
-		selector,
-		sync.Mutex{},
-		make(chan req, 1),
-		make([]chan cid.Cid, 1),
+		lsys:            lsys,
+		defaultSelector: selector,
+		mtx:             sync.Mutex{},
+		reqs:            make(chan req, 1),
+		subs:            make([]chan cid.Cid, 1),
 	}
 	go hs.background()
 	return &hs, nil
@@ -53,18 +53,20 @@ func NewHTTPSubscriber(ctx context.Context, host *http.Client, publisher multiad
 
 type httpSubscriber struct {
 	*http.Client
-	head cid.Cid
 	root url.URL
 
 	lsys            *ipld.LinkSystem
 	defaultSelector ipld.Node
-	submtx          sync.Mutex
 	// reqs is inbound requests for syncs from `Sync` calls
 	reqs chan req
+
+	// mtx protects state below accessed both by the background thread and public state
+	mtx  sync.Mutex
+	head cid.Cid
 	subs []chan cid.Cid
 }
 
-var _ (legs.LegSubscriber) = (*httpSubscriber)(nil)
+var _ legs.LegSubscriber = (*httpSubscriber)(nil)
 
 type req struct {
 	cid.Cid
@@ -75,12 +77,12 @@ type req struct {
 
 func (h *httpSubscriber) OnChange() (chan cid.Cid, context.CancelFunc) {
 	ch := make(chan cid.Cid)
-	h.submtx.Lock()
-	defer h.submtx.Unlock()
+	h.mtx.Lock()
+	defer h.mtx.Unlock()
 	h.subs = append(h.subs, ch)
 	cncl := func() {
-		h.submtx.Lock()
-		defer h.submtx.Unlock()
+		h.mtx.Lock()
+		defer h.mtx.Unlock()
 		for i, ca := range h.subs {
 			if ca == ch {
 				h.subs[i] = h.subs[len(h.subs)-1]
@@ -101,17 +103,16 @@ func (h *httpSubscriber) SetPolicyHandler(p legs.PolicyHandler) error {
 }
 
 func (h *httpSubscriber) SetLatestSync(c cid.Cid) error {
-	h.submtx.Lock()
-	defer h.submtx.Unlock()
+	h.mtx.Lock()
+	defer h.mtx.Unlock()
 	h.head = c
 	return nil
 }
 
-func (h *httpSubscriber) Sync(ctx context.Context, p peer.ID, c cid.Cid, selector ipld.Node) (chan cid.Cid, context.CancelFunc, error) {
+func (h *httpSubscriber) Sync(ctx context.Context, p peer.ID, c cid.Cid, selector ipld.Node) (<-chan cid.Cid, context.CancelFunc, error) {
 	respChan := make(chan cid.Cid, 1)
 	cctx, cncl := context.WithCancel(ctx)
-	h.submtx.Lock()
-	defer h.submtx.Unlock()
+
 	// todo: error if reqs is full
 	h.reqs <- req{
 		Cid:      c,
@@ -125,8 +126,8 @@ func (h *httpSubscriber) Sync(ctx context.Context, p peer.ID, c cid.Cid, selecto
 func (h *httpSubscriber) Close() error {
 	// cancel out subscribers.
 	h.Client.CloseIdleConnections()
-	h.submtx.Lock()
-	defer h.submtx.Unlock()
+	h.mtx.Lock()
+	defer h.mtx.Unlock()
 	for _, ca := range h.subs {
 		close(ca)
 	}
@@ -180,9 +181,12 @@ func (h *httpSubscriber) background() {
 			err = nil
 			continue
 		}
+		h.mtx.Lock()
+		currHead := h.head
+		h.mtx.Unlock()
 		sel = legs.ExploreRecursiveWithStopNode(selector.RecursionLimitNone(),
 			sel,
-			cidlink.Link{Cid: h.head})
+			cidlink.Link{Cid: currHead})
 		if err := h.fetchBlock(ctx, nextCid); err != nil {
 			log.Infow("failed to fetch requested block", "err", err)
 			continue
@@ -198,11 +202,16 @@ func (h *httpSubscriber) background() {
 			log.Infow("failed to walk requested dag", "err", err, "root", nextCid)
 			continue
 		}
+		// now head is updated. save it.
+		h.mtx.Lock()
+		h.head = nextCid
+		h.mtx.Unlock()
 	}
 }
 
 func (h *httpSubscriber) walkFetch(ctx context.Context, root cid.Cid, sel selector.Selector) error {
 	getMissingLs := cidlink.DefaultLinkSystem()
+	// trusted because it'll be hashed/verified on the way into the link system when fetched.
 	getMissingLs.TrustedStorage = true
 	getMissingLs.StorageReadOpener = func(lc ipld.LinkContext, l ipld.Link) (io.Reader, error) {
 		r, err := h.lsys.StorageReadOpener(lc, l)

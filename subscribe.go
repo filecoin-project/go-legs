@@ -86,7 +86,6 @@ func newSubscriber(ctx context.Context, dt dt.Manager, topic *pubsub.Topic, onCl
 		onClose:         onClose,
 		updates:         make(chan cid.Cid, 1),
 		subs:            make([]chan cid.Cid, 0),
-		cancel:          nil,
 		policy:          policy,
 		defaultSelector: selector,
 	}
@@ -263,7 +262,7 @@ func (ls *legSubscriber) unlockOnce(ulOnce *sync.Once) {
 	ulOnce.Do(ls.syncmtx.Unlock)
 }
 
-func (ls *legSubscriber) Sync(ctx context.Context, p peer.ID, c cid.Cid, s ipld.Node) (chan cid.Cid, context.CancelFunc, error) {
+func (ls *legSubscriber) Sync(ctx context.Context, p peer.ID, c cid.Cid, s ipld.Node) (<-chan cid.Cid, context.CancelFunc, error) {
 	out := make(chan cid.Cid)
 	v := Voucher{&c}
 	var ulOnce sync.Once
