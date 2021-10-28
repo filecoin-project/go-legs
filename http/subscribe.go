@@ -233,10 +233,6 @@ func (h *httpSubscriber) walkFetch(ctx context.Context, root cid.Cid, sel select
 			LinkTargetNodePrototypeChooser: basicnode.Chooser,
 		},
 		Path: datamodel.NewPath([]datamodel.PathSegment{}),
-		LastBlock: struct {
-			Path datamodel.Path
-			Link datamodel.Link
-		}{},
 	}
 	// get the direct node.
 	rootNode, err := getMissingLs.Load(ipld.LinkContext{}, cidlink.Link{Cid: root}, basicnode.Prototype.Any)
