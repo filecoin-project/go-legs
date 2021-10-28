@@ -144,7 +144,7 @@ func TestLatestSyncSuccess(t *testing.T) {
 		t.Fatal(err)
 	}
 	dstLnkS := mkLinkSystem(dstStore)
-	ls, err := NewSubscriber(context.Background(), dstHost, dstStore, dstLnkS, "legs/testtopic")
+	ls, err := NewSubscriber(context.Background(), dstHost, dstStore, dstLnkS, "legs/testtopic", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -180,7 +180,7 @@ func TestSyncFn(t *testing.T) {
 	}
 	dstLnkS := mkLinkSystem(dstStore)
 
-	ls, err := NewSubscriber(context.Background(), dstHost, dstStore, dstLnkS, "legs/testtopic")
+	ls, err := NewSubscriber(context.Background(), dstHost, dstStore, dstLnkS, "legs/testtopic", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -196,7 +196,7 @@ func TestSyncFn(t *testing.T) {
 	// Try to sync with a non-existing cid, and cancel right away.
 	// This is to check that we unlock syncmtx if the exchange is cancelled.
 	cids, _ := RandomCids(1)
-	_, syncncl, err := ls.Sync(context.Background(), srcHost.ID(), cids[0])
+	_, syncncl, err := ls.Sync(context.Background(), srcHost.ID(), cids[0], LegSelector(nil))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -206,7 +206,7 @@ func TestSyncFn(t *testing.T) {
 	lnk := chainLnks[1]
 	lsT := ls.(*legSubscriber)
 	// Proactively sync with publisher without him publishing to gossipsub channel.
-	out, syncncl, err := ls.Sync(context.Background(), srcHost.ID(), lnk.(cidlink.Link).Cid)
+	out, syncncl, err := ls.Sync(context.Background(), srcHost.ID(), lnk.(cidlink.Link).Cid, LegSelector(nil))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -251,7 +251,7 @@ func TestPartialSync(t *testing.T) {
 		t.Fatal(err)
 	}
 	dstLnkS := mkLinkSystem(dstStore)
-	ls, err := NewSubscriberPartiallySynced(context.Background(), dstHost, dstStore, dstLnkS, "legs/testtopic", chainLnks[3].(cidlink.Link).Cid)
+	ls, err := NewSubscriberPartiallySynced(context.Background(), dstHost, dstStore, dstLnkS, "legs/testtopic", chainLnks[3].(cidlink.Link).Cid, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -306,7 +306,7 @@ func TestStepByStepSync(t *testing.T) {
 		t.Fatal(err)
 	}
 	dstLnkS := mkLinkSystem(dstStore)
-	ls, err := NewSubscriber(context.Background(), dstHost, dstStore, dstLnkS, "legs/testtopic")
+	ls, err := NewSubscriber(context.Background(), dstHost, dstStore, dstLnkS, "legs/testtopic", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -349,7 +349,7 @@ func TestLatestSyncFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 	dstLnkS := mkLinkSystem(dstStore)
-	ls, err := NewSubscriberPartiallySynced(context.Background(), dstHost, dstStore, dstLnkS, "legs/testtopic", chainLnks[3].(cidlink.Link).Cid)
+	ls, err := NewSubscriberPartiallySynced(context.Background(), dstHost, dstStore, dstLnkS, "legs/testtopic", chainLnks[3].(cidlink.Link).Cid, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -360,7 +360,7 @@ func TestLatestSyncFailure(t *testing.T) {
 	// The other end doesn't have the data
 	newUpdateTest(t, lp, ls, dstStore, watcher, cidlink.Link{Cid: cid.Undef}, true, chainLnks[3].(cidlink.Link).Cid)
 	dstStore = dssync.MutexWrap(datastore.NewMapDatastore())
-	ls, err = NewSubscriberPartiallySynced(context.Background(), dstHost, dstStore, dstLnkS, "legs/testtopic", chainLnks[3].(cidlink.Link).Cid)
+	ls, err = NewSubscriberPartiallySynced(context.Background(), dstHost, dstStore, dstLnkS, "legs/testtopic", chainLnks[3].(cidlink.Link).Cid, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/filecoin-project/go-legs"
+	"github.com/filecoin-project/go-legs/test"
 	"github.com/ipfs/go-datastore"
 	dssync "github.com/ipfs/go-datastore/sync"
 	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
@@ -16,7 +17,7 @@ func TestMultiSusbscribeRoundTrip(t *testing.T) {
 	// Init legs publisher and subscriber
 	srcStore1 := dssync.MutexWrap(datastore.NewMapDatastore())
 	srcHost1 := mkTestHost()
-	srcLnkS1 := mkLinkSystem(srcStore1)
+	srcLnkS1 := test.MkLinkSystem(srcStore1)
 
 	lp1, err := legs.NewPublisher(context.Background(), srcHost1, srcStore1, srcLnkS1, "legs/testtopic")
 	if err != nil {
@@ -25,7 +26,7 @@ func TestMultiSusbscribeRoundTrip(t *testing.T) {
 
 	srcStore2 := dssync.MutexWrap(datastore.NewMapDatastore())
 	srcHost2 := mkTestHost()
-	srcLnkS2 := mkLinkSystem(srcStore2)
+	srcLnkS2 := test.MkLinkSystem(srcStore2)
 	lp2, err := legs.NewPublisher(context.Background(), srcHost2, srcStore2, srcLnkS2, "legs/testtopic")
 	if err != nil {
 		t.Fatal(err)
@@ -43,8 +44,8 @@ func TestMultiSusbscribeRoundTrip(t *testing.T) {
 	if err := srcHost2.Connect(context.Background(), dstHost.Peerstore().PeerInfo(dstHost.ID())); err != nil {
 		t.Fatal(err)
 	}
-	dstLnkS := mkLinkSystem(dstStore)
-	ms, err := legs.NewMultiSubscriber(context.Background(), dstHost, dstStore, dstLnkS, "legs/testtopic")
+	dstLnkS := test.MkLinkSystem(dstStore)
+	ms, err := legs.NewMultiSubscriber(context.Background(), dstHost, dstStore, dstLnkS, "legs/testtopic", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -62,13 +63,13 @@ func TestMultiSusbscribeRoundTrip(t *testing.T) {
 
 	// Update root on publisher one with item
 	itm1 := basicnode.NewString("hello world")
-	lnk1, err := mkRoot(srcStore1, itm1)
+	lnk1, err := test.Store(srcStore1, itm1)
 	if err != nil {
 		t.Fatal(err)
 	}
 	// Update root on publisher one with item
 	itm2 := basicnode.NewString("hello world 2")
-	lnk2, err := mkRoot(srcStore2, itm2)
+	lnk2, err := test.Store(srcStore2, itm2)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -116,8 +117,8 @@ func TestMultiSusbscribeRoundTrip(t *testing.T) {
 func TestCloseTransport(t *testing.T) {
 	st := dssync.MutexWrap(datastore.NewMapDatastore())
 	sh := mkTestHost()
-	lsys := mkLinkSystem(st)
-	ms, err := legs.NewMultiSubscriber(context.Background(), sh, st, lsys, "legs/testtopic")
+	lsys := test.MkLinkSystem(st)
+	ms, err := legs.NewMultiSubscriber(context.Background(), sh, st, lsys, "legs/testtopic", nil)
 	if err != nil {
 		t.Fatal(err)
 	}

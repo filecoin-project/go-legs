@@ -10,6 +10,7 @@ import (
 	logging "github.com/ipfs/go-log/v2"
 	"github.com/ipld/go-ipld-prime"
 	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
+	"github.com/ipld/go-ipld-prime/traversal/selector"
 	"github.com/libp2p/go-libp2p-core/host"
 	"github.com/libp2p/go-libp2p-core/peer"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
@@ -27,8 +28,9 @@ type legSubscriber struct {
 	subs   []chan cid.Cid
 	cancel context.CancelFunc
 
-	hndmtx sync.RWMutex
-	policy PolicyHandler
+	hndmtx          sync.RWMutex
+	policy          PolicyHandler
+	defaultSelector ipld.Node
 
 	syncmtx    sync.Mutex
 	latestSync ipld.Link
@@ -41,12 +43,13 @@ func NewSubscriber(ctx context.Context,
 	host host.Host,
 	ds datastore.Batching,
 	lsys ipld.LinkSystem,
-	topic string) (LegSubscriber, error) {
+	topic string,
+	selector ipld.Node) (LegSubscriber, error) {
 	ss, err := newSimpleSetup(ctx, host, ds, lsys, topic)
 	if err != nil {
 		return nil, err
 	}
-	return newSubscriber(ctx, ss.dt, ss.t, ss.onClose, nil)
+	return newSubscriber(ctx, ss.dt, ss.t, ss.onClose, nil, selector)
 }
 
 // NewSubscriberPartiallySynced creates a new leg subscriber with a specific latestSync.
@@ -58,12 +61,13 @@ func NewSubscriberPartiallySynced(
 	ds datastore.Batching,
 	lsys ipld.LinkSystem,
 	topic string,
-	latestSync cid.Cid) (LegSubscriber, error) {
+	latestSync cid.Cid,
+	selector ipld.Node) (LegSubscriber, error) {
 	ss, err := newSimpleSetup(ctx, host, ds, lsys, topic)
 	if err != nil {
 		return nil, err
 	}
-	l, err := newSubscriber(ctx, ss.dt, ss.t, ss.onClose, nil)
+	l, err := newSubscriber(ctx, ss.dt, ss.t, ss.onClose, nil, selector)
 	if err != nil {
 		return nil, err
 	}
@@ -75,16 +79,15 @@ func NewSubscriberPartiallySynced(
 	return l, nil
 }
 
-func newSubscriber(ctx context.Context, dt dt.Manager, topic *pubsub.Topic, onClose func() error, policy PolicyHandler) (*legSubscriber, error) {
-
+func newSubscriber(ctx context.Context, dt dt.Manager, topic *pubsub.Topic, onClose func() error, policy PolicyHandler, selector ipld.Node) (*legSubscriber, error) {
 	ls := &legSubscriber{
-		dt:      dt,
-		topic:   topic,
-		onClose: onClose,
-		updates: make(chan cid.Cid, 5),
-		subs:    make([]chan cid.Cid, 0),
-		cancel:  nil,
-		policy:  policy,
+		dt:              dt,
+		topic:           topic,
+		onClose:         onClose,
+		updates:         make(chan cid.Cid, 1),
+		subs:            make([]chan cid.Cid, 0),
+		policy:          policy,
+		defaultSelector: selector,
 	}
 
 	// Start subscription
@@ -195,7 +198,11 @@ func (ls *legSubscriber) watch(ctx context.Context, sub *pubsub.Subscription) {
 			ls.syncmtx.Lock()
 			log.Debugf("Starting data channel (cid: %s, latestSync: %s)", c, ls.latestSync)
 			ls.syncing = c
-			_, err = ls.dt.OpenPullDataChannel(ctx, src, &v, c, LegSelector(ls.latestSync))
+			_, err = ls.dt.OpenPullDataChannel(ctx, src, &v, c,
+				ExploreRecursiveWithStopNode(
+					selector.RecursionLimitNone(),
+					ls.defaultSelector,
+					ls.latestSync))
 			if err != nil {
 				// Log error for now.
 				log.Errorf("Error in data channel: %v", err)
@@ -255,7 +262,7 @@ func (ls *legSubscriber) unlockOnce(ulOnce *sync.Once) {
 	ulOnce.Do(ls.syncmtx.Unlock)
 }
 
-func (ls *legSubscriber) Sync(ctx context.Context, p peer.ID, c cid.Cid) (chan cid.Cid, context.CancelFunc, error) {
+func (ls *legSubscriber) Sync(ctx context.Context, p peer.ID, c cid.Cid, s ipld.Node) (<-chan cid.Cid, context.CancelFunc, error) {
 	out := make(chan cid.Cid)
 	v := Voucher{&c}
 	var ulOnce sync.Once
@@ -263,7 +270,7 @@ func (ls *legSubscriber) Sync(ctx context.Context, p peer.ID, c cid.Cid) (chan c
 	ls.syncmtx.Lock()
 
 	unsub := ls.dt.SubscribeToEvents(ls.onSyncEvent(c, out, &ulOnce))
-	_, err := ls.dt.OpenPullDataChannel(ctx, p, &v, c, LegSelector(ls.latestSync))
+	_, err := ls.dt.OpenPullDataChannel(ctx, p, &v, c, s)
 	if err != nil {
 		log.Errorf("Error in data channel for sync: %v", err)
 		ls.syncmtx.Unlock()
