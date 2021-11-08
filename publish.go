@@ -47,9 +47,15 @@ func NewPublisherFromExisting(ctx context.Context,
 	return &legPublisher{t, t.Close}, nil
 }
 
-func (lp *legPublisher) UpdateRoot(ctx context.Context, c cid.Cid) error {
+func (lp *legPublisher) UpdateRoot(ctx context.Context, c cid.Cid, opts ...pubsub.PubOpt) error {
+	// By default, we block until we have one other peer in the topic.
+	// This ensures UpdateRoot never succeeds when there aren't any peers,
+	// in which case performing the Publish would probably be pointless.
+	// The user can override this default by supplying their own WithReadiness.
+	opts = append([]pubsub.PubOpt{pubsub.WithReadiness(pubsub.MinTopicSize(1))}, opts...)
+
 	log.Debugf("Published CID in pubsub channel: %s", c)
-	return lp.topic.Publish(ctx, c.Bytes())
+	return lp.topic.Publish(ctx, c.Bytes(), opts...)
 }
 
 func (lp *legPublisher) Close() error {

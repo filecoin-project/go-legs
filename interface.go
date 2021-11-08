@@ -14,8 +14,8 @@ import (
 
 // LegPublisher is an interface for updating the published dag.
 type LegPublisher interface {
-	// Publishes and update for the DAG in the pubsub channel.
-	UpdateRoot(context.Context, cid.Cid) error
+	// UpdateRoot publishes and update for the DAG in the pubsub channel.
+	UpdateRoot(context.Context, cid.Cid, ...pubsub.PubOpt) error
 	// Close publisher
 	Close() error
 }

@@ -15,6 +15,7 @@ import (
 	"github.com/ipld/go-ipld-prime/codec/dagjson"
 	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
 	basicnode "github.com/ipld/go-ipld-prime/node/basic"
+	pubsub "github.com/libp2p/go-libp2p-pubsub"
 )
 
 type httpPublisher struct {
@@ -73,7 +74,7 @@ func (h *httpPublisher) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	_ = dagjson.Encode(item, w)
 }
 
-func (h *httpPublisher) UpdateRoot(ctx context.Context, c cid.Cid) error {
+func (h *httpPublisher) UpdateRoot(ctx context.Context, c cid.Cid, opts ...pubsub.PubOpt) error {
 	h.rl.Lock()
 	defer h.rl.Unlock()
 	h.root = c
