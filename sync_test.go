@@ -223,9 +223,7 @@ func TestSyncFn(t *testing.T) {
 	}
 	// Stop listening to sync events.
 	syncncl()
-	if lsT.latestSync.(cidlink.Link).Cid != lnk.(cidlink.Link).Cid {
-		t.Fatal("latestSync not updated correctly", lsT.latestSync)
-	}
+	assertLatestSyncEquals(t, lsT, lnk.(cidlink.Link).Cid)
 	// Now sync after a gossipsub publication.
 	newUpdateTest(t, lp, ls, dstStore, watcher, chainLnks[0], false, chainLnks[0].(cidlink.Link).Cid)
 }
@@ -278,9 +276,7 @@ func TestPartialSync(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if lsT.latestSync.(cidlink.Link).Cid != chainLnks[1].(cidlink.Link).Cid {
-		t.Fatal("latestSync not set correctly", lsT.latestSync)
-	}
+	assertLatestSyncEquals(t, lsT, chainLnks[1].(cidlink.Link).Cid)
 	// Update all the chain from scratch again.
 	newUpdateTest(t, lp, ls, dstStore, watcher, chainLnks[0], false, chainLnks[0].(cidlink.Link).Cid)
 
@@ -379,17 +375,15 @@ func newUpdateTest(t *testing.T, lp LegPublisher, ls LegSubscriber, dstStore dat
 	// If failure latestSync shouldn't be updated
 	if withFailure {
 		select {
-		case <-time.After(time.Second * 2):
-			if lsT.latestSync.(cidlink.Link).Cid != expectedSync {
-				t.Fatal("latestSync shouldn't have been updated", lsT.latestSync)
-			}
+		case <-time.After(time.Second * 5):
+			assertLatestSyncEquals(t, lsT, expectedSync)
 		case <-watcher:
 			t.Fatal("no exchange should have been performed")
 		}
 	} else {
 		select {
-		case <-time.After(time.Second * 2):
-			t.Fatal("timed out waiting for sync to propogate")
+		case <-time.After(time.Second * 5):
+			t.Fatal("timed out waiting for sync to propagate")
 		case downstream := <-watcher:
 			if !downstream.Equals(lnk.(cidlink.Link).Cid) {
 				t.Fatalf("sync'd sid unexpected %s vs %s", downstream, lnk)
@@ -398,9 +392,14 @@ func newUpdateTest(t *testing.T, lp LegPublisher, ls LegSubscriber, dstStore dat
 				t.Fatalf("data not in receiver store: %v", err)
 			}
 		}
-		if lsT.latestSync.(cidlink.Link).Cid != expectedSync {
-			t.Fatal("latestSync not updated correctly", lsT.latestSync)
-		}
+		assertLatestSyncEquals(t, lsT, expectedSync)
+	}
+}
+
+func assertLatestSyncEquals(t *testing.T, sub *legSubscriber, want cid.Cid) {
+	got := sub.getLatestSync().(cidlink.Link)
+	if got.Cid != want {
+		t.Fatal("latestSync not updated correctly", got)
 	}
 }
 

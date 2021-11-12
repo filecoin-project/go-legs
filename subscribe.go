@@ -32,6 +32,7 @@ type legSubscriber struct {
 	policy          PolicyHandler
 	defaultSelector ipld.Node
 
+	// syncmtx synchronizes read/write for latestSync and syncing
 	syncmtx    sync.Mutex
 	latestSync ipld.Link
 	syncing    cid.Cid
@@ -304,4 +305,12 @@ func (ls *legSubscriber) onSyncEvent(c cid.Cid, out chan cid.Cid, ulOnce *sync.O
 			}
 		}
 	}
+}
+
+// getLatestSync gets the latest synced link.
+// This function is safe to call from multiple goroutines and exposed for testing purposes only.
+func (ls *legSubscriber) getLatestSync() ipld.Link {
+	ls.syncmtx.Lock()
+	defer ls.syncmtx.Unlock()
+	return ls.latestSync
 }
