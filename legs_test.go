@@ -102,9 +102,9 @@ func TestRoundTripExistingDataTransfer(t *testing.T) {
 	srcLnkS := test.MkLinkSystem(srcStore)
 
 	gsnet := gsnet.NewFromLibp2pHost(srcHost)
-	gs := gsimpl.New(context.Background(), gsnet, fakeLsys)
-	tp := gstransport.NewTransport(srcHost.ID(), gs)
 	dtNet := dtnetwork.NewFromLibp2pHost(srcHost)
+	gs := gsimpl.New(context.Background(), gsnet, fakeLsys)
+	tp := gstransport.NewTransport(srcHost.ID(), gs, dtNet)
 
 	// DataTransfer channels use this file to track cidlist of exchanges
 	// NOTE: It needs to be initialized for the datatransfer not to fail, but

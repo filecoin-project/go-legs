@@ -3,12 +3,12 @@ module github.com/filecoin-project/go-legs
 go 1.16
 
 require (
-	github.com/filecoin-project/go-data-transfer v1.10.1
+	github.com/filecoin-project/go-data-transfer v1.11.4
 	github.com/ipfs/go-cid v0.1.0
 	github.com/ipfs/go-datastore v0.4.6
-	github.com/ipfs/go-graphsync v0.9.3
+	github.com/ipfs/go-graphsync v0.10.0
 	github.com/ipfs/go-log/v2 v2.3.0
-	github.com/ipld/go-ipld-prime v0.12.0
+	github.com/ipld/go-ipld-prime v0.12.3
 	github.com/libp2p/go-libp2p v0.15.0
 	github.com/libp2p/go-libp2p-core v0.9.0
 	github.com/libp2p/go-libp2p-pubsub v0.5.4
