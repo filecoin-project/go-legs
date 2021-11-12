@@ -21,6 +21,9 @@ func TestRoundtrip(t *testing.T) {
 			t.Fatal(err)
 		}
 		u2, err := ToURL(*mu)
+		if err != nil {
+			t.Fatal(err)
+		}
 		if u2.Scheme != u.Scheme {
 			t.Fatalf("scheme didn't roundtrip. got %s expected %s", u2.Scheme, u.Scheme)
 		}

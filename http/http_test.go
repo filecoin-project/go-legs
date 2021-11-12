@@ -48,6 +48,9 @@ func TestManualSync(t *testing.T) {
 	}
 
 	rootLnk, err := test.Store(srcStore, basicnode.NewString("hello world"))
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := p.UpdateRoot(context.Background(), rootLnk.(cidlink.Link).Cid); err != nil {
 		t.Fatal(err)
 	}
