@@ -80,9 +80,9 @@ func makePubsub(ctx context.Context, h host.Host, topic string) (*pubsub.Topic, 
 func makeDataTransfer(ctx context.Context, host host.Host, ds datastore.Batching, lsys ipld.LinkSystem) (dt.Manager, graphsync.GraphExchange, string, error) {
 
 	gsnet := gsnet.NewFromLibp2pHost(host)
-	gs := gsimpl.New(context.Background(), gsnet, lsys)
-	tp := gstransport.NewTransport(host.ID(), gs)
 	dtNet := dtnetwork.NewFromLibp2pHost(host)
+	gs := gsimpl.New(context.Background(), gsnet, lsys)
+	tp := gstransport.NewTransport(host.ID(), gs, dtNet)
 
 	// DataTransfer channels use this file to track cidlist of exchanges
 	// NOTE: It needs to be initialized for the datatransfer not to fail, but
