@@ -17,6 +17,8 @@ import (
 	basicnode "github.com/ipld/go-ipld-prime/node/basic"
 	"github.com/libp2p/go-libp2p"
 	"github.com/libp2p/go-libp2p-core/host"
+	"github.com/libp2p/go-libp2p-core/peer"
+	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	"github.com/multiformats/go-multicodec"
 )
 
@@ -27,12 +29,21 @@ var prefix = cid.Prefix{
 	MhLength: 16,
 }
 
-func mkTestHost() host.Host {
-	h, _ := libp2p.New(context.Background(), libp2p.ListenAddrStrings("/ip4/0.0.0.0/tcp/0"))
+const (
+	testCidPropagationTimeout       = time.Second * 10
+	testPeerConnectionMaxRetry      = 10
+	testPeerConnectionRetryInterval = time.Second
+)
+
+func requireNewHost(t *testing.T) host.Host {
+	h, err := libp2p.New(context.Background(), libp2p.ListenAddrStrings("/ip4/0.0.0.0/tcp/0"))
+	if err != nil {
+		t.Fatal(err)
+	}
 	return h
 }
 
-func mkLinkSystem(ds datastore.Batching) ipld.LinkSystem {
+func newLinkSystem(ds datastore.Batching) ipld.LinkSystem {
 	lsys := cidlink.DefaultLinkSystem()
 	lsys.StorageReadOpener = func(lctx ipld.LinkContext, lnk ipld.Link) (io.Reader, error) {
 		c := lnk.(cidlink.Link).Cid
@@ -52,28 +63,26 @@ func mkLinkSystem(ds datastore.Batching) ipld.LinkSystem {
 	return lsys
 }
 
-func RandomCids(n int) ([]cid.Cid, error) {
-	var prng = rand.New(rand.NewSource(time.Now().UnixNano()))
-
-	res := make([]cid.Cid, n)
-	for i := 0; i < n; i++ {
-		b := make([]byte, 10*n)
+func requireRandomCids(t *testing.T, prng *rand.Rand, count int) []cid.Cid {
+	cids := make([]cid.Cid, count)
+	for i := 0; i < count; i++ {
+		b := make([]byte, 10*count)
 		prng.Read(b)
 		c, err := prefix.Sum(b)
 		if err != nil {
-			return nil, err
+			t.Fatal(err)
 		}
-		res[i] = c
+		cids[i] = c
 	}
-	return res, nil
+	return cids
 }
 
-// Return the chain with all nodes or just half of it for testing
-func mkChain(lsys ipld.LinkSystem, full bool) []ipld.Link {
+// requireChain return the chain with all nodes or just half of it for testing
+func requireChain(t *testing.T, lsys ipld.LinkSystem, full bool) []ipld.Link {
 	out := make([]ipld.Link, 4)
-	_, leafAlphaLnk := encode(lsys, basicnode.NewString("alpha"))
-	_, leafBetaLnk := encode(lsys, basicnode.NewString("beta"))
-	_, middleMapNodeLnk := encode(lsys, fluent.MustBuildMap(basicnode.Prototype__Map{}, 3, func(na fluent.MapAssembler) {
+	_, leafAlphaLnk := requireEncode(t, lsys, basicnode.NewString("alpha"))
+	_, leafBetaLnk := requireEncode(t, lsys, basicnode.NewString("beta"))
+	_, middleMapNodeLnk := requireEncode(t, lsys, fluent.MustBuildMap(basicnode.Prototype__Map{}, 3, func(na fluent.MapAssembler) {
 		na.AssembleEntry("foo").AssignBool(true)
 		na.AssembleEntry("bar").AssignBool(false)
 		na.AssembleEntry("nested").CreateMap(2, func(na fluent.MapAssembler) {
@@ -81,29 +90,29 @@ func mkChain(lsys ipld.LinkSystem, full bool) []ipld.Link {
 			na.AssembleEntry("nonlink").AssignString("zoo")
 		})
 	}))
-	_, middleListNodeLnk := encode(lsys, fluent.MustBuildList(basicnode.Prototype__List{}, 4, func(na fluent.ListAssembler) {
+	_, middleListNodeLnk := requireEncode(t, lsys, fluent.MustBuildList(basicnode.Prototype__List{}, 4, func(na fluent.ListAssembler) {
 		na.AssembleValue().AssignLink(leafAlphaLnk)
 		na.AssembleValue().AssignLink(leafAlphaLnk)
 		na.AssembleValue().AssignLink(leafBetaLnk)
 		na.AssembleValue().AssignLink(leafAlphaLnk)
 	}))
 
-	_, ch1Lnk := encode(lsys, fluent.MustBuildMap(basicnode.Prototype__Map{}, 4, func(na fluent.MapAssembler) {
+	_, ch1Lnk := requireEncode(t, lsys, fluent.MustBuildMap(basicnode.Prototype__Map{}, 4, func(na fluent.MapAssembler) {
 		na.AssembleEntry("linkedList").AssignLink(middleListNodeLnk)
 	}))
 	out[3] = ch1Lnk
-	_, ch2Lnk := encode(lsys, fluent.MustBuildMap(basicnode.Prototype__Map{}, 4, func(na fluent.MapAssembler) {
+	_, ch2Lnk := requireEncode(t, lsys, fluent.MustBuildMap(basicnode.Prototype__Map{}, 4, func(na fluent.MapAssembler) {
 		na.AssembleEntry("linkedMap").AssignLink(middleMapNodeLnk)
 		na.AssembleEntry("ch1").AssignLink(ch1Lnk)
 	}))
 	out[2] = ch2Lnk
 	if full {
-		_, ch3Lnk := encode(lsys, fluent.MustBuildMap(basicnode.Prototype__Map{}, 4, func(na fluent.MapAssembler) {
+		_, ch3Lnk := requireEncode(t, lsys, fluent.MustBuildMap(basicnode.Prototype__Map{}, 4, func(na fluent.MapAssembler) {
 			na.AssembleEntry("linkedString").AssignLink(leafAlphaLnk)
 			na.AssembleEntry("ch2").AssignLink(ch2Lnk)
 		}))
 		out[1] = ch3Lnk
-		_, headLnk := encode(lsys, fluent.MustBuildMap(basicnode.Prototype__Map{}, 4, func(na fluent.MapAssembler) {
+		_, headLnk := requireEncode(t, lsys, fluent.MustBuildMap(basicnode.Prototype__Map{}, 4, func(na fluent.MapAssembler) {
 			na.AssembleEntry("plain").AssignString("olde string")
 			na.AssembleEntry("ch3").AssignLink(ch3Lnk)
 		}))
@@ -112,17 +121,16 @@ func mkChain(lsys ipld.LinkSystem, full bool) []ipld.Link {
 	return out
 }
 
-// encode hardcodes some encoding choices for ease of use in fixture generation;
+// requireEncode hardcodes some encoding choices for ease of use in fixture generation;
 // just gimme a link and stuff the bytes in a map.
 // (also return the node again for convenient assignment.)
-func encode(lsys ipld.LinkSystem, n ipld.Node) (ipld.Node, ipld.Link) {
+func requireEncode(t *testing.T, lsys ipld.LinkSystem, n ipld.Node) (ipld.Node, ipld.Link) {
 	lp := cidlink.LinkPrototype{
 		Prefix: prefix,
 	}
-
 	lnk, err := lsys.Store(ipld.LinkContext{}, lp, n)
 	if err != nil {
-		panic(err)
+		t.Fatal(err)
 	}
 	return n, lnk
 }
@@ -130,30 +138,31 @@ func encode(lsys ipld.LinkSystem, n ipld.Node) (ipld.Node, ipld.Link) {
 func TestLatestSyncSuccess(t *testing.T) {
 	srcStore := dssync.MutexWrap(datastore.NewMapDatastore())
 	dstStore := dssync.MutexWrap(datastore.NewMapDatastore())
-	srcHost := mkTestHost()
-	srcLnkS := mkLinkSystem(srcStore)
+	srcHost := requireNewHost(t)
+	srcLnkS := newLinkSystem(srcStore)
 	lp, err := NewPublisher(context.Background(), srcHost, srcStore, srcLnkS, "legs/testtopic")
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	dstHost := mkTestHost()
+	dstHost := requireNewHost(t)
 	srcHost.Peerstore().AddAddrs(dstHost.ID(), dstHost.Addrs(), time.Hour)
 	dstHost.Peerstore().AddAddrs(srcHost.ID(), srcHost.Addrs(), time.Hour)
 	if err := srcHost.Connect(context.Background(), dstHost.Peerstore().PeerInfo(dstHost.ID())); err != nil {
 		t.Fatal(err)
 	}
-	dstLnkS := mkLinkSystem(dstStore)
+	dstLnkS := newLinkSystem(dstStore)
 	ls, err := NewSubscriber(context.Background(), dstHost, dstStore, dstLnkS, "legs/testtopic", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	time.Sleep(1 * time.Second)
+	assertEventualConnectedPeers(t, testPeerConnectionMaxRetry, testPeerConnectionRetryInterval, ls.(*legSubscriber).topic, srcHost.ID(), dstHost.ID())
+	assertEventualConnectedPeers(t, testPeerConnectionMaxRetry, testPeerConnectionRetryInterval, lp.(*legPublisher).topic, srcHost.ID(), dstHost.ID())
 	watcher, cncl := ls.OnChange()
 
 	// Store the whole chain in source node
-	chainLnks := mkChain(srcLnkS, true)
+	chainLnks := requireChain(t, srcLnkS, true)
 
 	t.Cleanup(clean(lp, ls, cncl))
 
@@ -165,37 +174,39 @@ func TestLatestSyncSuccess(t *testing.T) {
 func TestSyncFn(t *testing.T) {
 	srcStore := dssync.MutexWrap(datastore.NewMapDatastore())
 	dstStore := dssync.MutexWrap(datastore.NewMapDatastore())
-	srcHost := mkTestHost()
-	srcLnkS := mkLinkSystem(srcStore)
+	srcHost := requireNewHost(t)
+	srcLnkS := newLinkSystem(srcStore)
 	lp, err := NewPublisher(context.Background(), srcHost, srcStore, srcLnkS, "legs/testtopic")
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	dstHost := mkTestHost()
+	dstHost := requireNewHost(t)
 	srcHost.Peerstore().AddAddrs(dstHost.ID(), dstHost.Addrs(), time.Hour)
 	dstHost.Peerstore().AddAddrs(srcHost.ID(), srcHost.Addrs(), time.Hour)
 	if err := srcHost.Connect(context.Background(), dstHost.Peerstore().PeerInfo(dstHost.ID())); err != nil {
 		t.Fatal(err)
 	}
-	dstLnkS := mkLinkSystem(dstStore)
+	dstLnkS := newLinkSystem(dstStore)
 
 	ls, err := NewSubscriber(context.Background(), dstHost, dstStore, dstLnkS, "legs/testtopic", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	time.Sleep(1 * time.Second)
+	assertEventualConnectedPeers(t, testPeerConnectionMaxRetry, testPeerConnectionRetryInterval, ls.(*legSubscriber).topic, srcHost.ID(), dstHost.ID())
+	assertEventualConnectedPeers(t, testPeerConnectionMaxRetry, testPeerConnectionRetryInterval, lp.(*legPublisher).topic, srcHost.ID(), dstHost.ID())
 	watcher, cncl := ls.OnChange()
 
 	t.Cleanup(clean(lp, ls, cncl))
 
 	// Store the whole chain in source node
-	chainLnks := mkChain(srcLnkS, true)
+	chainLnks := requireChain(t, srcLnkS, true)
 
 	// Try to sync with a non-existing cid, and cancel right away.
 	// This is to check that we unlock syncmtx if the exchange is cancelled.
-	cids, _ := RandomCids(1)
+	rng := rand.New(rand.NewSource(1413))
+	cids := requireRandomCids(t, rng, 1)
 	_, syncncl, err := ls.Sync(context.Background(), srcHost.ID(), cids[0], LegSelector(nil))
 	if err != nil {
 		t.Fatal(err)
@@ -211,7 +222,7 @@ func TestSyncFn(t *testing.T) {
 		t.Fatal(err)
 	}
 	select {
-	case <-time.After(time.Second * 2):
+	case <-time.After(testCidPropagationTimeout):
 		t.Fatal("timed out waiting for sync to propogate")
 	case downstream := <-out:
 		if !downstream.Equals(lnk.(cidlink.Link).Cid) {
@@ -232,31 +243,32 @@ func TestPartialSync(t *testing.T) {
 	srcStore := dssync.MutexWrap(datastore.NewMapDatastore())
 	testStore := dssync.MutexWrap(datastore.NewMapDatastore())
 	dstStore := dssync.MutexWrap(datastore.NewMapDatastore())
-	srcHost := mkTestHost()
-	srcLnkS := mkLinkSystem(srcStore)
-	testLnkS := mkLinkSystem(testStore)
+	srcHost := requireNewHost(t)
+	srcLnkS := newLinkSystem(srcStore)
+	testLnkS := newLinkSystem(testStore)
 	lp, err := NewPublisher(context.Background(), srcHost, srcStore, srcLnkS, "legs/testtopic")
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	chainLnks := mkChain(testLnkS, true)
+	chainLnks := requireChain(t, testLnkS, true)
 
-	dstHost := mkTestHost()
+	dstHost := requireNewHost(t)
 	srcHost.Peerstore().AddAddrs(dstHost.ID(), dstHost.Addrs(), time.Hour)
 	dstHost.Peerstore().AddAddrs(srcHost.ID(), srcHost.Addrs(), time.Hour)
 	if err := srcHost.Connect(context.Background(), dstHost.Peerstore().PeerInfo(dstHost.ID())); err != nil {
 		t.Fatal(err)
 	}
-	dstLnkS := mkLinkSystem(dstStore)
+	dstLnkS := newLinkSystem(dstStore)
 	ls, err := NewSubscriberPartiallySynced(context.Background(), dstHost, dstStore, dstLnkS, "legs/testtopic", chainLnks[3].(cidlink.Link).Cid, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	mkChain(srcLnkS, true)
+	assertEventualConnectedPeers(t, testPeerConnectionMaxRetry, testPeerConnectionRetryInterval, lp.(*legPublisher).topic, srcHost.ID(), dstHost.ID())
+	assertEventualConnectedPeers(t, testPeerConnectionMaxRetry, testPeerConnectionRetryInterval, ls.(*legSubscriber).topic, srcHost.ID(), dstHost.ID())
 
-	time.Sleep(1 * time.Second)
+	requireChain(t, srcLnkS, true)
 
 	watcher, cncl := ls.OnChange()
 
@@ -288,35 +300,36 @@ func TestPartialSync(t *testing.T) {
 func TestStepByStepSync(t *testing.T) {
 	srcStore := dssync.MutexWrap(datastore.NewMapDatastore())
 	dstStore := dssync.MutexWrap(datastore.NewMapDatastore())
-	srcHost := mkTestHost()
-	srcLnkS := mkLinkSystem(srcStore)
+	srcHost := requireNewHost(t)
+	srcLnkS := newLinkSystem(srcStore)
 	lp, err := NewPublisher(context.Background(), srcHost, srcStore, srcLnkS, "legs/testtopic")
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	dstHost := mkTestHost()
+	dstHost := requireNewHost(t)
 	srcHost.Peerstore().AddAddrs(dstHost.ID(), dstHost.Addrs(), time.Hour)
 	dstHost.Peerstore().AddAddrs(srcHost.ID(), srcHost.Addrs(), time.Hour)
 	if err := srcHost.Connect(context.Background(), dstHost.Peerstore().PeerInfo(dstHost.ID())); err != nil {
 		t.Fatal(err)
 	}
-	dstLnkS := mkLinkSystem(dstStore)
+	dstLnkS := newLinkSystem(dstStore)
 	ls, err := NewSubscriber(context.Background(), dstHost, dstStore, dstLnkS, "legs/testtopic", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	time.Sleep(1 * time.Second)
+	assertEventualConnectedPeers(t, testPeerConnectionMaxRetry, testPeerConnectionRetryInterval, ls.(*legSubscriber).topic, srcHost.ID(), dstHost.ID())
+	assertEventualConnectedPeers(t, testPeerConnectionMaxRetry, testPeerConnectionRetryInterval, lp.(*legPublisher).topic, srcHost.ID(), dstHost.ID())
 
 	watcher, cncl := ls.OnChange()
 
 	// Store the whole chain in source node
-	chainLnks := mkChain(srcLnkS, true)
+	chainLnks := requireChain(t, srcLnkS, true)
 
 	// Store half of the chain already in destination
 	// to simulate the partial sync.
-	mkChain(dstLnkS, true)
+	requireChain(t, dstLnkS, true)
 
 	t.Cleanup(clean(lp, ls, cncl))
 
@@ -329,22 +342,22 @@ func TestStepByStepSync(t *testing.T) {
 func TestLatestSyncFailure(t *testing.T) {
 	srcStore := dssync.MutexWrap(datastore.NewMapDatastore())
 	dstStore := dssync.MutexWrap(datastore.NewMapDatastore())
-	srcHost := mkTestHost()
-	srcLnkS := mkLinkSystem(srcStore)
+	srcHost := requireNewHost(t)
+	srcLnkS := newLinkSystem(srcStore)
 	lp, err := NewPublisher(context.Background(), srcHost, srcStore, srcLnkS, "legs/testtopic")
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	chainLnks := mkChain(srcLnkS, true)
+	chainLnks := requireChain(t, srcLnkS, true)
 
-	dstHost := mkTestHost()
+	dstHost := requireNewHost(t)
 	srcHost.Peerstore().AddAddrs(dstHost.ID(), dstHost.Addrs(), time.Hour)
 	dstHost.Peerstore().AddAddrs(srcHost.ID(), srcHost.Addrs(), time.Hour)
 	if err := srcHost.Connect(context.Background(), dstHost.Peerstore().PeerInfo(dstHost.ID())); err != nil {
 		t.Fatal(err)
 	}
-	dstLnkS := mkLinkSystem(dstStore)
+	dstLnkS := newLinkSystem(dstStore)
 	ls, err := NewSubscriberPartiallySynced(context.Background(), dstHost, dstStore, dstLnkS, "legs/testtopic", chainLnks[3].(cidlink.Link).Cid, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -375,14 +388,14 @@ func newUpdateTest(t *testing.T, lp LegPublisher, ls LegSubscriber, dstStore dat
 	// If failure latestSync shouldn't be updated
 	if withFailure {
 		select {
-		case <-time.After(time.Second * 5):
+		case <-time.After(testCidPropagationTimeout):
 			assertLatestSyncEquals(t, lsT, expectedSync)
 		case <-watcher:
 			t.Fatal("no exchange should have been performed")
 		}
 	} else {
 		select {
-		case <-time.After(time.Second * 5):
+		case <-time.After(testCidPropagationTimeout):
 			t.Fatal("timed out waiting for sync to propagate")
 		case downstream := <-watcher:
 			if !downstream.Equals(lnk.(cidlink.Link).Cid) {
@@ -400,6 +413,40 @@ func assertLatestSyncEquals(t *testing.T, sub *legSubscriber, want cid.Cid) {
 	got := sub.getLatestSync().(cidlink.Link)
 	if got.Cid != want {
 		t.Fatal("latestSync not updated correctly", got)
+	}
+}
+
+// assertEventualConnectedPeers asserts that the want peer IDs are eventually connected to the given topic.
+// The function attempts to assert connected peers up to a maximum of maxRetry with the delay of retryInterval between each successive attempt.
+func assertEventualConnectedPeers(t *testing.T, maxRetry int, retryInterval time.Duration, topic *pubsub.Topic, want ...peer.ID) {
+	wantSeen := map[peer.ID]bool{}
+	for _, w := range want {
+		wantSeen[w] = false
+	}
+
+	for try := 1; try <= maxRetry; try++ {
+		var unseenCount int
+		for _, got := range topic.ListPeers() {
+			_, exists := wantSeen[got]
+			if exists {
+				wantSeen[got] = true
+			} else {
+				unseenCount++
+			}
+		}
+
+		if unseenCount == 0 {
+			return
+		}
+
+		if try == maxRetry {
+			t.Logf("Faild to see wanted peer connections after %d attempts", try)
+			for w, seen := range wantSeen {
+				t.Logf("\tpeer ID: %v \t seen: %v", w, seen)
+			}
+			t.Fail()
+		}
+		time.Sleep(retryInterval)
 	}
 }
 
