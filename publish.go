@@ -4,6 +4,7 @@ import (
 	"context"
 
 	dt "github.com/filecoin-project/go-data-transfer"
+	adv "github.com/filecoin-project/go-legs/p2p/protocol/adv"
 	"github.com/ipfs/go-cid"
 	"github.com/ipfs/go-datastore"
 	"github.com/ipld/go-ipld-prime"
@@ -12,9 +13,10 @@ import (
 )
 
 type legPublisher struct {
-	topic   *pubsub.Topic
-	onClose func() error
-	host    host.Host
+	topic        *pubsub.Topic
+	onClose      func() error
+	host         host.Host
+	advPublisher *adv.AdvPublisher
 }
 
 // NewPublisher creates a new legs publisher
@@ -27,7 +29,11 @@ func NewPublisher(ctx context.Context,
 	if err != nil {
 		return nil, err
 	}
-	return &legPublisher{ss.t, ss.onClose, host}, nil
+
+	advPublisher := &adv.AdvPublisher{}
+	go advPublisher.Serve(ctx, host, topic)
+
+	return &legPublisher{ss.t, ss.onClose, host, advPublisher}, nil
 }
 
 // NewPublisherFromExisting instantiates go-legs publishing on an existing
@@ -45,7 +51,10 @@ func NewPublisherFromExisting(ctx context.Context,
 	if err != nil {
 		return nil, err
 	}
-	return &legPublisher{t, t.Close, host}, nil
+	advPublisher := &adv.AdvPublisher{}
+	go advPublisher.Serve(ctx, host, topic)
+
+	return &legPublisher{t, t.Close, host, advPublisher}, nil
 }
 
 func (lp *legPublisher) UpdateRoot(ctx context.Context, c cid.Cid) error {
@@ -54,7 +63,12 @@ func (lp *legPublisher) UpdateRoot(ctx context.Context, c cid.Cid) error {
 		cid:   c,
 		addrs: lp.host.Addrs(),
 	}
-	return lp.topic.Publish(ctx, encodeMessage(msg))
+	err1 := lp.topic.Publish(ctx, encodeMessage(msg))
+	err2 := lp.advPublisher.UpdateRoot(ctx, c)
+	if err1 != nil {
+		return err1
+	}
+	return err2
 }
 
 func (lp *legPublisher) Close() error {

@@ -5,6 +5,7 @@ import (
 	"sync"
 
 	dt "github.com/filecoin-project/go-data-transfer"
+	adv "github.com/filecoin-project/go-legs/p2p/protocol/adv"
 	"github.com/ipfs/go-cid"
 	"github.com/ipfs/go-datastore"
 	logging "github.com/ipfs/go-log/v2"
@@ -38,6 +39,7 @@ type legSubscriber struct {
 	syncmtx    sync.Mutex
 	latestSync ipld.Link
 	syncing    cid.Cid
+	host       host.Host
 }
 
 // NewSubscriber creates a new leg subscriber listening to a specific pubsub topic
@@ -52,7 +54,7 @@ func NewSubscriber(ctx context.Context,
 	if err != nil {
 		return nil, err
 	}
-	return newSubscriber(ctx, ss.dt, ss.t, ss.onClose, host, nil, selector)
+	return newSubscriber(ctx, host, ss.dt, ss.t, ss.onClose, host, nil, selector)
 }
 
 // NewSubscriberPartiallySynced creates a new leg subscriber with a specific latestSync.
@@ -298,6 +300,19 @@ func (ls *legSubscriber) Sync(ctx context.Context, p peer.ID, c cid.Cid, ss ipld
 	out := make(chan cid.Cid)
 	v := Voucher{&c}
 	var ulOnce sync.Once
+
+	if cid.Undef.Equals(c) {
+		// Query the peer for the latest CID
+		// Note, if this path is common enough, we can cache the client.
+		advClient, err := adv.NewAdvClient(ctx, ls.host, ls.topic.String(), p)
+		if err != nil {
+			return nil, nil, err
+		}
+		c, err = advClient.QueryLatestCid(ctx)
+		if err != nil {
+			return nil, nil, err
+		}
+	}
 
 	ls.syncmtx.Lock()
 
