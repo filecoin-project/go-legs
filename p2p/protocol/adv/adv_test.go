@@ -43,7 +43,7 @@ func TestFetchLatestAdv(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cid, err := advClient.QueryLatestCid(ctx)
+	cid, err := advClient.QueryRootCid(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -308,7 +308,7 @@ func (ls *legSubscriber) Sync(ctx context.Context, p peer.ID, c cid.Cid, ss ipld
 		if err != nil {
 			return nil, nil, err
 		}
-		c, err = advClient.QueryLatestCid(ctx)
+		c, err = advClient.QueryRootCid(ctx)
 		if err != nil {
 			return nil, nil, err
 		}

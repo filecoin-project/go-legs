@@ -66,7 +66,7 @@ func NewAdvClient(ctx context.Context, host host.Host, topic string, peer peer.I
 	}, err
 }
 
-func (c *AdvClient) QueryLatestCid(ctx context.Context) (cid.Cid, error) {
+func (c *AdvClient) QueryRootCid(ctx context.Context) (cid.Cid, error) {
 	// The httpclient expects there to be a host here. `.invalid` is a reserved
 	// TLD for this purpose. See
 	// https://datatracker.ietf.org/doc/html/rfc2606#section-2
