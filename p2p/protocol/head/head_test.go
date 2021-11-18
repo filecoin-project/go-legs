@@ -1,11 +1,11 @@
-package adv_test
+package head_test
 
 import (
 	"context"
 	"testing"
 	"time"
 
-	"github.com/filecoin-project/go-legs/p2p/protocol/adv"
+	"github.com/filecoin-project/go-legs/p2p/protocol/head"
 	"github.com/filecoin-project/go-legs/test"
 	"github.com/ipfs/go-datastore"
 	dssync "github.com/ipfs/go-datastore/sync"
@@ -15,7 +15,7 @@ import (
 	"github.com/libp2p/go-libp2p"
 )
 
-func TestFetchLatestAdv(t *testing.T) {
+func TestFetchLatestHead(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -31,18 +31,14 @@ func TestFetchLatestAdv(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	p := &adv.AdvPublisher{}
+	p := &head.Publisher{}
 	go p.Serve(ctx, publisher, "test")
 
 	if err := p.UpdateRoot(context.Background(), rootLnk.(cidlink.Link).Cid); err != nil {
 		t.Fatal(err)
 	}
 
-	advClient, err := adv.NewAdvClient(ctx, client, "test", publisher.ID())
-	if err != nil {
-		t.Fatal(err)
-	}
-	cid, err := advClient.QueryRootCid(ctx)
+	cid, err := head.QueryRootCid(ctx, client, "test", publisher.ID())
 	if err != nil {
 		t.Fatal(err)
 	}

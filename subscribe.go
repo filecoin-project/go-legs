@@ -5,7 +5,7 @@ import (
 	"sync"
 
 	dt "github.com/filecoin-project/go-data-transfer"
-	adv "github.com/filecoin-project/go-legs/p2p/protocol/adv"
+	"github.com/filecoin-project/go-legs/p2p/protocol/head"
 	"github.com/ipfs/go-cid"
 	"github.com/ipfs/go-datastore"
 	logging "github.com/ipfs/go-log/v2"
@@ -304,11 +304,8 @@ func (ls *legSubscriber) Sync(ctx context.Context, p peer.ID, c cid.Cid, ss ipld
 	if cid.Undef.Equals(c) {
 		// Query the peer for the latest CID
 		// Note, if this path is common enough, we can cache the client.
-		advClient, err := adv.NewAdvClient(ctx, ls.host, ls.topic.String(), p)
-		if err != nil {
-			return nil, nil, err
-		}
-		c, err = advClient.QueryRootCid(ctx)
+		var err error
+		c, err = head.QueryRootCid(ctx, ls.host, ls.topic.String(), p)
 		if err != nil {
 			return nil, nil, err
 		}
