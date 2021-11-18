@@ -12,16 +12,15 @@ import (
 	_ "github.com/ipld/go-ipld-prime/codec/dagjson"
 	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
 	"github.com/ipld/go-ipld-prime/node/basicnode"
-	blhost "github.com/libp2p/go-libp2p-blankhost"
-	swarmt "github.com/libp2p/go-libp2p-swarm/testing"
+	"github.com/libp2p/go-libp2p"
 )
 
 func TestFetchLatestAdv(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	publisher := blhost.NewBlankHost(swarmt.GenSwarm(t, ctx))
-	client := blhost.NewBlankHost(swarmt.GenSwarm(t, ctx))
+	publisher, _ := libp2p.New(context.Background())
+	client, _ := libp2p.New(context.Background())
 
 	// Provide multiaddrs to connect to
 	client.Peerstore().AddAddrs(publisher.ID(), publisher.Addrs(), time.Hour)
