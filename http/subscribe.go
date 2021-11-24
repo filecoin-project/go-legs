@@ -29,9 +29,19 @@ var defaultPollTime = time.Hour
 
 var log = logging.Logger("go-legs-http")
 
-// NewHTTPSubscriber creates a legs subcriber that provides subscriptions
+// NewHTTPSubscriber creates a legs subscriber that provides subscriptions
 // from publishers identified by
-func NewHTTPSubscriber(ctx context.Context, host *http.Client, publisher multiaddr.Multiaddr, lsys *ipld.LinkSystem, topic string, selector ipld.Node) (legs.LegSubscriber, error) {
+//
+// A default selector sequence, dss, may optionally be specified. The selector sequence is used
+// during sync traversal to define the extent by which a node is explored. If unspecified, all edges
+// of nodes are recursively explored.
+//
+// Note that the default selector sequence is wrapped with a selector logic that will stop the
+// traversal when the latest synced link is reached. Therefore, it must only specify the selection
+// sequence itself.
+//
+// See: legs.ExploreRecursiveWithStopNode.
+func NewHTTPSubscriber(ctx context.Context, host *http.Client, publisher multiaddr.Multiaddr, lsys *ipld.LinkSystem, topic string, dss ipld.Node) (legs.LegSubscriber, error) {
 	url, err := maurl.ToURL(publisher)
 	if err != nil {
 		return nil, err
@@ -41,11 +51,11 @@ func NewHTTPSubscriber(ctx context.Context, host *http.Client, publisher multiad
 		head:   cid.Undef,
 		root:   *url,
 
-		lsys:            lsys,
-		defaultSelector: selector,
-		mtx:             sync.Mutex{},
-		reqs:            make(chan req, 1),
-		subs:            make([]chan cid.Cid, 1),
+		lsys: lsys,
+		dss:  dss,
+		mtx:  sync.Mutex{},
+		reqs: make(chan req, 1),
+		subs: make([]chan cid.Cid, 1),
 	}
 	go hs.background()
 	return &hs, nil
@@ -55,8 +65,8 @@ type httpSubscriber struct {
 	*http.Client
 	root url.URL
 
-	lsys            *ipld.LinkSystem
-	defaultSelector ipld.Node
+	lsys *ipld.LinkSystem
+	dss  ipld.Node
 	// reqs is inbound requests for syncs from `Sync` calls
 	reqs chan req
 
@@ -70,9 +80,9 @@ var _ legs.LegSubscriber = (*httpSubscriber)(nil)
 
 type req struct {
 	cid.Cid
-	Selector ipld.Node
-	ctx      context.Context
-	resp     chan cid.Cid
+	dss  ipld.Node
+	ctx  context.Context
+	resp chan cid.Cid
 }
 
 func (h *httpSubscriber) OnChange() (chan cid.Cid, context.CancelFunc) {
@@ -109,16 +119,29 @@ func (h *httpSubscriber) SetLatestSync(c cid.Cid) error {
 	return nil
 }
 
-func (h *httpSubscriber) Sync(ctx context.Context, p peer.ID, c cid.Cid, selector ipld.Node) (<-chan cid.Cid, context.CancelFunc, error) {
+// Sync performs a one-off explicit sync from the given peer for a specific cid and updates the latest
+// synced link to it.
+//
+// It is the responsibility of the caller to make sure the given CID appears after the latest sync
+// in order to avid re-syncing of content that may have previously been synced.
+//
+// The selector sequence, ss, can optionally be specified to customize the selection sequence during traversal.
+// If unspecified, the subscriber's default selector sequence is used.
+//
+// Note that the selector sequence is wrapped with a selector logic that will stop traversal when
+// the latest synced link is reached. Therefore, it must only specify the selection sequence itself.
+//
+// See: legs.ExploreRecursiveWithStopNode.
+func (h *httpSubscriber) Sync(ctx context.Context, p peer.ID, c cid.Cid, dss ipld.Node) (<-chan cid.Cid, context.CancelFunc, error) {
 	respChan := make(chan cid.Cid, 1)
 	cctx, cncl := context.WithCancel(ctx)
 
 	// todo: error if reqs is full
 	h.reqs <- req{
-		Cid:      c,
-		Selector: selector,
-		ctx:      cctx,
-		resp:     respChan,
+		Cid:  c,
+		dss:  dss,
+		ctx:  cctx,
+		resp: respChan,
 	}
 	return respChan, cncl, nil
 }
@@ -142,7 +165,7 @@ func (h *httpSubscriber) background() {
 	var nextCid cid.Cid
 	var workResp chan cid.Cid
 	var ctx context.Context
-	var sel ipld.Node
+	var dss ipld.Node
 	var xsel selector.Selector
 	var err error
 	defaultRate := time.NewTimer(defaultPollTime)
@@ -162,19 +185,19 @@ func (h *httpSubscriber) background() {
 		case r := <-h.reqs:
 			nextCid = r.Cid
 			workResp = r.resp
-			sel = r.Selector
+			dss = r.dss
 			ctx = r.ctx
 		case <-defaultRate.C:
 			nextCid = cid.Undef
 			workResp = nil
 			ctx = context.Background()
-			sel = nil
+			dss = nil
 		}
 		if nextCid == cid.Undef {
 			nextCid, err = h.fetchHead(ctx)
 		}
-		if sel == nil {
-			sel = h.defaultSelector
+		if dss == nil {
+			dss = h.dss
 		}
 		if err != nil {
 			log.Warnf("failed to fetch new head: %s", err)
@@ -184,8 +207,8 @@ func (h *httpSubscriber) background() {
 		h.mtx.Lock()
 		currHead := h.head
 		h.mtx.Unlock()
-		sel = legs.ExploreRecursiveWithStopNode(selector.RecursionLimitNone(),
-			sel,
+		sel := legs.ExploreRecursiveWithStopNode(selector.RecursionLimitNone(),
+			dss,
 			cidlink.Link{Cid: currHead})
 		if err := h.fetchBlock(ctx, nextCid); err != nil {
 			log.Infow("failed to fetch requested block", "err", err)
