@@ -32,17 +32,29 @@ type LegMultiSubscriber interface {
 }
 
 type legMultiSubscriber struct {
-	ctx             context.Context
-	tmpDir          string
-	t               dt.Manager
-	gs              graphsync.GraphExchange
-	topic           *pubsub.Topic
-	refc            int32
-	defaultSelector ipld.Node
+	ctx    context.Context
+	tmpDir string
+	t      dt.Manager
+	gs     graphsync.GraphExchange
+	topic  *pubsub.Topic
+	refc   int32
+
+	// dss captures the default selector sequence passed to ExploreRecursiveWithStopNode
+	dss ipld.Node
 }
 
-// NewMultiSubscriber sets up a new instance of a multi subscriber
-func NewMultiSubscriber(ctx context.Context, host host.Host, ds datastore.Batching, lsys ipld.LinkSystem, topic string, selector ipld.Node) (LegMultiSubscriber, error) {
+// NewMultiSubscriber sets up a new instance of a multi subscriber.
+//
+// A default selector sequence, dss, may optionally be specified. The selector sequence is used
+// during sync traversal to define the extent by which a node is explored. If unspecified, all edges
+// of nodes are recursively explored.
+//
+// Note that the default selector sequence is wrapped with a selector logic that will stop the
+// traversal when the latest synced link is reached. Therefore, it must only specify the selection
+// sequence itself.
+//
+// See: ExploreRecursiveWithStopNode.
+func NewMultiSubscriber(ctx context.Context, host host.Host, ds datastore.Batching, lsys ipld.LinkSystem, topic string, dss ipld.Node) (LegMultiSubscriber, error) {
 	t, err := makePubsub(ctx, host, topic)
 	if err != nil {
 		return nil, err
@@ -54,18 +66,18 @@ func NewMultiSubscriber(ctx context.Context, host host.Host, ds datastore.Batchi
 	}
 
 	return &legMultiSubscriber{
-		ctx:             ctx,
-		tmpDir:          tmpDir,
-		t:               dt,
-		gs:              gs,
-		topic:           t,
-		defaultSelector: selector,
+		ctx:    ctx,
+		tmpDir: tmpDir,
+		t:      dt,
+		gs:     gs,
+		topic:  t,
+		dss:    dss,
 	}, nil
 }
 
 func (lt *legMultiSubscriber) NewSubscriber(policy PolicyHandler) (LegSubscriber, error) {
 
-	l, err := newSubscriber(lt.ctx, lt.t, lt.topic, lt.onCloseSubscriber, policy, lt.defaultSelector)
+	l, err := newSubscriber(lt.ctx, lt.t, lt.topic, lt.onCloseSubscriber, policy, lt.dss)
 	if err != nil {
 		return nil, err
 	}
@@ -74,7 +86,7 @@ func (lt *legMultiSubscriber) NewSubscriber(policy PolicyHandler) (LegSubscriber
 }
 
 func (lt *legMultiSubscriber) NewSubscriberPartiallySynced(policy PolicyHandler, latestSync cid.Cid) (LegSubscriber, error) {
-	l, err := newSubscriber(lt.ctx, lt.t, lt.topic, lt.onCloseSubscriber, policy, lt.defaultSelector)
+	l, err := newSubscriber(lt.ctx, lt.t, lt.topic, lt.onCloseSubscriber, policy, lt.dss)
 	if err != nil {
 		return nil, err
 	}

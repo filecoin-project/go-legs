@@ -196,7 +196,7 @@ func TestSyncFn(t *testing.T) {
 	// Try to sync with a non-existing cid, and cancel right away.
 	// This is to check that we unlock syncmtx if the exchange is cancelled.
 	cids, _ := RandomCids(1)
-	_, syncncl, err := ls.Sync(context.Background(), srcHost.ID(), cids[0], LegSelector(nil))
+	_, syncncl, err := ls.Sync(context.Background(), srcHost.ID(), cids[0], nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -206,7 +206,7 @@ func TestSyncFn(t *testing.T) {
 	lnk := chainLnks[1]
 	lsT := ls.(*legSubscriber)
 	// Proactively sync with publisher without him publishing to gossipsub channel.
-	out, syncncl, err := ls.Sync(context.Background(), srcHost.ID(), lnk.(cidlink.Link).Cid, LegSelector(nil))
+	out, syncncl, err := ls.Sync(context.Background(), srcHost.ID(), lnk.(cidlink.Link).Cid, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
