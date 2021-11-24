@@ -28,9 +28,9 @@ type legSubscriber struct {
 	subs   []chan cid.Cid
 	cancel context.CancelFunc
 
-	hndmtx          sync.RWMutex
-	policy          PolicyHandler
-	defaultSelector ipld.Node
+	hndmtx sync.RWMutex
+	policy PolicyHandler
+	dss    ipld.Node
 
 	// syncmtx synchronizes read/write for latestSync and syncing
 	syncmtx    sync.Mutex
@@ -80,15 +80,15 @@ func NewSubscriberPartiallySynced(
 	return l, nil
 }
 
-func newSubscriber(ctx context.Context, dt dt.Manager, topic *pubsub.Topic, onClose func() error, policy PolicyHandler, selector ipld.Node) (*legSubscriber, error) {
+func newSubscriber(ctx context.Context, dt dt.Manager, topic *pubsub.Topic, onClose func() error, policy PolicyHandler, dss ipld.Node) (*legSubscriber, error) {
 	ls := &legSubscriber{
-		dt:              dt,
-		topic:           topic,
-		onClose:         onClose,
-		updates:         make(chan cid.Cid, 1),
-		subs:            make([]chan cid.Cid, 0),
-		policy:          policy,
-		defaultSelector: selector,
+		dt:      dt,
+		topic:   topic,
+		onClose: onClose,
+		updates: make(chan cid.Cid, 1),
+		subs:    make([]chan cid.Cid, 0),
+		policy:  policy,
+		dss:     dss,
 	}
 
 	// Start subscription
@@ -202,7 +202,7 @@ func (ls *legSubscriber) watch(ctx context.Context, sub *pubsub.Subscription) {
 			_, err = ls.dt.OpenPullDataChannel(ctx, src, &v, c,
 				ExploreRecursiveWithStopNode(
 					selector.RecursionLimitNone(),
-					ls.defaultSelector,
+					ls.dss,
 					ls.latestSync))
 			if err != nil {
 				// Log error for now.
@@ -263,7 +263,20 @@ func (ls *legSubscriber) unlockOnce(ulOnce *sync.Once) {
 	ulOnce.Do(ls.syncmtx.Unlock)
 }
 
-func (ls *legSubscriber) Sync(ctx context.Context, p peer.ID, c cid.Cid, s ipld.Node) (<-chan cid.Cid, context.CancelFunc, error) {
+// Sync performs a one-off explicit sync from the given peer for a specific cid and updates the latest
+// synced link to it.
+//
+// It is the responsibility of the caller to make sure the given CID appears after the latest sync
+// in order to avid re-syncing of content that may have previously been synced.
+//
+// The selector sequence, ss, can optionally be specified to customize the selection sequence during traversal.
+// If unspecified, the subscriber's default selector sequence is used.
+//
+// Note that the selector sequence is wrapped with a selector logic that will stop traversal when
+// the latest synced link is reached. Therefore, it must only specify the selection sequence itself.
+//
+// See: ExploreRecursiveWithStopNode.
+func (ls *legSubscriber) Sync(ctx context.Context, p peer.ID, c cid.Cid, ss ipld.Node) (<-chan cid.Cid, context.CancelFunc, error) {
 	out := make(chan cid.Cid)
 	v := Voucher{&c}
 	var ulOnce sync.Once
@@ -271,6 +284,13 @@ func (ls *legSubscriber) Sync(ctx context.Context, p peer.ID, c cid.Cid, s ipld.
 	ls.syncmtx.Lock()
 
 	unsub := ls.dt.SubscribeToEvents(ls.onSyncEvent(c, out, &ulOnce))
+
+	// Fall back onto the default selector sequence if one is not given.
+	if ss == nil {
+		ss = ls.dss
+	}
+	// Construct a selector consistent with the way background selector is constructed in legSubscriber.watch
+	s := ExploreRecursiveWithStopNode(selector.RecursionLimitNone(), ss, ls.latestSync)
 	_, err := ls.dt.OpenPullDataChannel(ctx, p, &v, c, s)
 	if err != nil {
 		log.Errorf("Error in data channel for sync: %v", err)
