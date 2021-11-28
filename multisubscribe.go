@@ -38,6 +38,7 @@ type legMultiSubscriber struct {
 	gs     graphsync.GraphExchange
 	topic  *pubsub.Topic
 	refc   int32
+	host   host.Host
 
 	// dss captures the default selector sequence passed to ExploreRecursiveWithStopNode
 	dss ipld.Node
@@ -71,13 +72,13 @@ func NewMultiSubscriber(ctx context.Context, host host.Host, ds datastore.Batchi
 		t:      dt,
 		gs:     gs,
 		topic:  t,
+		host:   host,
 		dss:    dss,
 	}, nil
 }
 
 func (lt *legMultiSubscriber) NewSubscriber(policy PolicyHandler) (LegSubscriber, error) {
-
-	l, err := newSubscriber(lt.ctx, lt.t, lt.topic, lt.onCloseSubscriber, policy, lt.dss)
+	l, err := newSubscriber(lt.ctx, lt.t, lt.topic, lt.onCloseSubscriber, lt.host, policy, lt.dss)
 	if err != nil {
 		return nil, err
 	}
@@ -86,7 +87,7 @@ func (lt *legMultiSubscriber) NewSubscriber(policy PolicyHandler) (LegSubscriber
 }
 
 func (lt *legMultiSubscriber) NewSubscriberPartiallySynced(policy PolicyHandler, latestSync cid.Cid) (LegSubscriber, error) {
-	l, err := newSubscriber(lt.ctx, lt.t, lt.topic, lt.onCloseSubscriber, policy, lt.dss)
+	l, err := newSubscriber(lt.ctx, lt.t, lt.topic, lt.onCloseSubscriber, lt.host, policy, lt.dss)
 	if err != nil {
 		return nil, err
 	}

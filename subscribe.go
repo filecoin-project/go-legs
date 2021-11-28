@@ -3,6 +3,7 @@ package legs
 import (
 	"context"
 	"sync"
+	"time"
 
 	dt "github.com/filecoin-project/go-data-transfer"
 	"github.com/ipfs/go-cid"
@@ -23,6 +24,7 @@ type legSubscriber struct {
 	topic   *pubsub.Topic
 	dt      dt.Manager
 	onClose func() error
+	host    host.Host
 
 	submtx sync.Mutex
 	subs   []chan cid.Cid
@@ -50,7 +52,7 @@ func NewSubscriber(ctx context.Context,
 	if err != nil {
 		return nil, err
 	}
-	return newSubscriber(ctx, ss.dt, ss.t, ss.onClose, nil, selector)
+	return newSubscriber(ctx, ss.dt, ss.t, ss.onClose, host, nil, selector)
 }
 
 // NewSubscriberPartiallySynced creates a new leg subscriber with a specific latestSync.
@@ -68,7 +70,7 @@ func NewSubscriberPartiallySynced(
 	if err != nil {
 		return nil, err
 	}
-	l, err := newSubscriber(ctx, ss.dt, ss.t, ss.onClose, nil, selector)
+	l, err := newSubscriber(ctx, ss.dt, ss.t, ss.onClose, host, nil, selector)
 	if err != nil {
 		return nil, err
 	}
@@ -80,11 +82,12 @@ func NewSubscriberPartiallySynced(
 	return l, nil
 }
 
-func newSubscriber(ctx context.Context, dt dt.Manager, topic *pubsub.Topic, onClose func() error, policy PolicyHandler, dss ipld.Node) (*legSubscriber, error) {
+func newSubscriber(ctx context.Context, dt dt.Manager, topic *pubsub.Topic, onClose func() error, host host.Host, policy PolicyHandler, dss ipld.Node) (*legSubscriber, error) {
 	ls := &legSubscriber{
 		dt:      dt,
 		topic:   topic,
 		onClose: onClose,
+		host:    host,
 		updates: make(chan cid.Cid, 1),
 		subs:    make([]chan cid.Cid, 0),
 		policy:  policy,
@@ -168,51 +171,65 @@ func (ls *legSubscriber) watch(ctx context.Context, sub *pubsub.Subscription) {
 			return
 		}
 
-		// Run policy from pubsub message to see if exchange needs to be run
-		allow := true
+		// Run policy from pubsub message to see if exchange needs to be run.
+		//
+		// TODO: Change this to call callback to evaluate peer using policy
+		// callback provided to go-legs.
 		if ls.policy != nil {
+			var allow bool
 			ls.hndmtx.RLock()
 			allow, err = ls.policy(msg)
 			if err != nil {
 				log.Errorf("Error running policy: %v", err)
 			}
 			ls.hndmtx.RUnlock()
+			if !allow {
+				log.Infow("Message from peer not allowed by legs policy")
+				return
+			}
 		}
 
-		if allow {
-			log.Debugf("Pubsub message received. Policy says we are allowed to process")
-			src, err := peer.IDFromBytes(msg.From)
-			if err != nil {
-				continue
-			}
+		log.Debugf("Pubsub message received. Policy says we are allowed to process")
+		src, err := peer.IDFromBytes(msg.From)
+		if err != nil {
+			continue
+		}
 
-			c, err := cid.Cast(msg.Data)
-			if err != nil {
-				log.Warnf("Couldn't cast CID from pubsub message")
-				continue
-			}
-			v := Voucher{&c}
+		// Decode cid and originator addresses from message.
+		c, addrs, err := decodeMessage(msg.Data)
+		if err != nil {
+			log.Warnf("Could not decode pubsub message: %s", err)
+			continue
+		}
+		v := Voucher{&c}
 
-			// Locking latestSync to avoid data races by several updates
-			// This sync is unlocked when the transfer is finished or if
-			// there is an error in the channel.
-			ls.syncmtx.Lock()
-			log.Debugf("Starting data channel (cid: %s, latestSync: %s)", c, ls.latestSync)
-			ls.syncing = c
-			_, err = ls.dt.OpenPullDataChannel(ctx, src, &v, c,
-				ExploreRecursiveWithStopNode(
-					selector.RecursionLimitNone(),
-					ls.dss,
-					ls.latestSync))
-			if err != nil {
-				// Log error for now.
-				log.Errorf("Error in data channel: %v", err)
-				// There has been an error, no FinishTransfer event will be triggered,
-				// so we need to release the lock here.
-				ls.syncmtx.Unlock()
+		// Add the message originator's address to the peerstore.  This
+		// allows a connection, back to that provider that sent the
+		// message, to retrieve advertisements.
+		peerStore := ls.host.Peerstore()
+		if peerStore != nil {
+			peerStore.AddAddrs(src, addrs, 5*time.Minute)
+		}
 
-				// TODO: Should we retry if there's an error in the exchange?
-			}
+		// Locking latestSync to avoid data races by several updates
+		// This sync is unlocked when the transfer is finished or if
+		// there is an error in the channel.
+		ls.syncmtx.Lock()
+		log.Debugf("Starting data channel (cid: %s, latestSync: %s)", c, ls.latestSync)
+		ls.syncing = c
+		_, err = ls.dt.OpenPullDataChannel(ctx, src, &v, c,
+			ExploreRecursiveWithStopNode(
+				selector.RecursionLimitNone(),
+				ls.dss,
+				ls.latestSync))
+		if err != nil {
+			// Log error for now.
+			log.Errorf("Error in data channel: %v", err)
+			// There has been an error, no FinishTransfer event will be triggered,
+			// so we need to release the lock here.
+			ls.syncmtx.Unlock()
+
+			// TODO: Should we retry if there's an error in the exchange?
 		}
 	}
 }
