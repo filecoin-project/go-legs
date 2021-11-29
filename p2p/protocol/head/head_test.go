@@ -32,7 +32,8 @@ func TestFetchLatestHead(t *testing.T) {
 	}
 
 	p := &head.Publisher{}
-	go p.Serve(ctx, publisher, "test")
+	go p.Serve(publisher, "test")
+	defer p.Close()
 
 	if err := p.UpdateRoot(context.Background(), rootLnk.(cidlink.Link).Cid); err != nil {
 		t.Fatal(err)

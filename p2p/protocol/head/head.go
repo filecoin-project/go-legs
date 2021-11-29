@@ -17,30 +17,22 @@ import (
 	gostream "github.com/libp2p/go-libp2p-gostream"
 )
 
+const closeTimeout = 30 * time.Second
+
 var log = logging.Logger("go-legs-head")
 
 func deriveProtocolID(topic string) protocol.ID {
 	return protocol.ID("/legs/head/" + topic + "/0.0.1")
 }
 
-func (p *Publisher) Serve(ctx context.Context, host host.Host, topic string) error {
+func (p *Publisher) Serve(host host.Host, topic string) error {
 	l, err := gostream.Listen(host, deriveProtocolID(topic))
 	if err != nil {
 		return err
 	}
 
 	p.server = &http.Server{Handler: http.Handler(p)}
-	errChan := make(chan error)
-	go func() {
-		errChan <- p.server.Serve(l)
-	}()
-
-	select {
-	case err := <-errChan:
-		return err
-	case <-ctx.Done():
-		return p.server.Close()
-	}
+	return p.server.Serve(l)
 }
 
 func QueryRootCid(ctx context.Context, host host.Host, topic string, peer peer.ID) (cid.Cid, error) {
@@ -77,19 +69,19 @@ type Publisher struct {
 }
 
 func (p *Publisher) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	ask := path.Base(r.URL.Path)
-	if ask == "head" {
-		p.rl.RLock()
-		defer p.rl.RUnlock()
-		out, err := json.Marshal(p.root.String())
-		if err != nil {
-			w.WriteHeader(500)
-			log.Infow("failed to serve root", "err", err)
-		} else {
-			_, _ = w.Write(out)
-		}
+	if path.Base(r.URL.Path) != "head" {
+		http.Error(w, "", http.StatusNotFound)
+		return
+	}
+
+	p.rl.RLock()
+	defer p.rl.RUnlock()
+	out, err := json.Marshal(p.root.String())
+	if err != nil {
+		log.Infow("failed to serve root", "err", err)
+		http.Error(w, "", http.StatusInternalServerError)
 	} else {
-		w.WriteHeader(404)
+		_, _ = w.Write(out)
 	}
 }
 
@@ -101,7 +93,7 @@ func (p *Publisher) UpdateRoot(_ context.Context, c cid.Cid) error {
 }
 
 func (p *Publisher) Close() error {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), closeTimeout)
 	defer cancel()
 	return p.server.Shutdown(ctx)
 }

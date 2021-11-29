@@ -2,6 +2,7 @@ package legs
 
 import (
 	"context"
+	"net/http"
 
 	dt "github.com/filecoin-project/go-data-transfer"
 	"github.com/filecoin-project/go-legs/p2p/protocol/head"
@@ -31,7 +32,13 @@ func NewPublisher(ctx context.Context,
 	}
 
 	headPublisher := &head.Publisher{}
-	go headPublisher.Serve(ctx, host, topic)
+	go func() {
+		err := headPublisher.Serve(host, topic)
+		if err != http.ErrServerClosed {
+			// We got an error that isn't "the server was closed".
+			log.Warnf("Error in serving headPublisher", err)
+		}
+	}()
 
 	return &legPublisher{ss.t, ss.onClose, host, headPublisher}, nil
 }
@@ -52,7 +59,7 @@ func NewPublisherFromExisting(ctx context.Context,
 		return nil, err
 	}
 	headPublisher := &head.Publisher{}
-	go headPublisher.Serve(ctx, host, topic)
+	go headPublisher.Serve(host, topic)
 
 	return &legPublisher{t, t.Close, host, headPublisher}, nil
 }
@@ -72,5 +79,11 @@ func (lp *legPublisher) UpdateRoot(ctx context.Context, c cid.Cid) error {
 }
 
 func (lp *legPublisher) Close() error {
-	return lp.onClose()
+	err1 := lp.headPublisher.Close()
+	err2 := lp.onClose()
+
+	if err1 != nil {
+		return err1
+	}
+	return err2
 }

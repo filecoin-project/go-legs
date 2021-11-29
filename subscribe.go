@@ -301,7 +301,7 @@ func (ls *legSubscriber) Sync(ctx context.Context, p peer.ID, c cid.Cid, ss ipld
 	v := Voucher{&c}
 	var ulOnce sync.Once
 
-	if cid.Undef.Equals(c) {
+	if c == cid.Undef {
 		// Query the peer for the latest CID
 		// Note, if this path is common enough, we can cache the client.
 		var err error
