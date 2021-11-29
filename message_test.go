@@ -22,25 +22,29 @@ func TestEncodeDecodeMessage(t *testing.T) {
 	if err != nil {
 		panic(err)
 	}
-	maddrs := []multiaddr.Multiaddr{maddrA, maddrB}
 
-	data := encodeMessage(c, maddrs)
+	msg1 := message{
+		cid:   c,
+		addrs: []multiaddr.Multiaddr{maddrA, maddrB},
+	}
 
-	c2, maddrs2, err := decodeMessage(data)
+	data := encodeMessage(msg1)
+
+	msg2, err := decodeMessage(data)
 	if err != nil {
 		t.Fatalf("Failed to decode message: %s", err)
 	}
 
-	if !c2.Equals(c) {
+	if !msg2.cid.Equals(msg1.cid) {
 		t.Fatal("Decoded cid is not equal to original")
 	}
 
-	if len(maddrs2) != len(maddrs) {
-		t.Fatalf("Wrong number of addresses, expected 2 got %d", len(maddrs2))
+	if len(msg2.addrs) != len(msg1.addrs) {
+		t.Fatalf("Wrong number of addresses, expected 2 got %d", len(msg2.addrs))
 	}
-	for i := range maddrs2 {
-		if !maddrs2[i].Equal(maddrs[i]) {
-			t.Fatalf("Decoded multiaddr %d %q is not equal to original %q", i, maddrs2[i], maddrs[i])
+	for i := range msg2.addrs {
+		if !msg2.addrs[i].Equal(msg1.addrs[i]) {
+			t.Fatalf("Decoded multiaddr %d %q is not equal to original %q", i, msg2.addrs[i], msg1.addrs[i])
 		}
 	}
 }

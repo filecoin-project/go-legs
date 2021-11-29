@@ -3,7 +3,6 @@ package legs
 import (
 	"context"
 	"sync"
-	"time"
 
 	dt "github.com/filecoin-project/go-data-transfer"
 	"github.com/ipfs/go-cid"
@@ -14,6 +13,7 @@ import (
 	"github.com/ipld/go-ipld-prime/traversal/selector"
 	"github.com/libp2p/go-libp2p-core/host"
 	"github.com/libp2p/go-libp2p-core/peer"
+	"github.com/libp2p/go-libp2p-core/peerstore"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 )
 
@@ -196,11 +196,12 @@ func (ls *legSubscriber) watch(ctx context.Context, sub *pubsub.Subscription) {
 		}
 
 		// Decode cid and originator addresses from message.
-		c, addrs, err := decodeMessage(msg.Data)
+		m, err := decodeMessage(msg.Data)
 		if err != nil {
 			log.Warnf("Could not decode pubsub message: %s", err)
 			continue
 		}
+		c := m.cid
 		v := Voucher{&c}
 
 		// Add the message originator's address to the peerstore.  This
@@ -208,7 +209,7 @@ func (ls *legSubscriber) watch(ctx context.Context, sub *pubsub.Subscription) {
 		// message, to retrieve advertisements.
 		peerStore := ls.host.Peerstore()
 		if peerStore != nil {
-			peerStore.AddAddrs(src, addrs, 5*time.Minute)
+			peerStore.AddAddrs(src, m.addrs, peerstore.ProviderAddrTTL)
 		}
 
 		// Locking latestSync to avoid data races by several updates

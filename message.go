@@ -8,11 +8,16 @@ import (
 	"github.com/multiformats/go-varint"
 )
 
-func encodeMessage(c cid.Cid, addrs []multiaddr.Multiaddr) []byte {
+type message struct {
+	cid   cid.Cid
+	addrs []multiaddr.Multiaddr
+}
+
+func encodeMessage(m message) []byte {
 	// Get size
 	var size, maxVarintLen int
-	for i := range addrs {
-		addrBytes := addrs[i].Bytes()
+	for _, addr := range m.addrs {
+		addrBytes := addr.Bytes()
 		varintLen := varint.UvarintSize(uint64(len(addrBytes)))
 		if varintLen > maxVarintLen {
 			maxVarintLen = varintLen
@@ -22,12 +27,12 @@ func encodeMessage(c cid.Cid, addrs []multiaddr.Multiaddr) []byte {
 
 	vibuf := make([]byte, maxVarintLen)
 	var b bytes.Buffer
-	b.Grow(c.ByteLen() + size)
+	b.Grow(m.cid.ByteLen() + size)
 	// CID already contains encoded length, so no need to add length to data.
-	c.WriteBytes(&b)
+	m.cid.WriteBytes(&b)
 
-	for i := range addrs {
-		addrBytes := addrs[i].Bytes()
+	for _, addr := range m.addrs {
+		addrBytes := addr.Bytes()
 		n := varint.PutUvarint(vibuf, uint64(len(addrBytes)))
 		b.Write(vibuf[:n])
 		b.Write(addrBytes)
@@ -36,10 +41,10 @@ func encodeMessage(c cid.Cid, addrs []multiaddr.Multiaddr) []byte {
 	return b.Bytes()
 }
 
-func decodeMessage(data []byte) (cid.Cid, []multiaddr.Multiaddr, error) {
+func decodeMessage(data []byte) (message, error) {
 	n, c, err := cid.CidFromBytes(data)
 	if err != nil {
-		return cid.Undef, nil, err
+		return message{}, err
 	}
 	data = data[n:]
 
@@ -47,17 +52,20 @@ func decodeMessage(data []byte) (cid.Cid, []multiaddr.Multiaddr, error) {
 	for len(data) != 0 {
 		val, n, err := varint.FromUvarint(data)
 		if err != nil {
-			return cid.Undef, nil, err
+			return message{}, err
 		}
 		data = data[n:]
 
 		addr, err := multiaddr.NewMultiaddrBytes(data[:val])
 		if err != nil {
-			return cid.Undef, nil, err
+			return message{}, err
 		}
 		data = data[val:]
 		addrs = append(addrs, addr)
 	}
 
-	return c, addrs, nil
+	return message{
+		cid:   c,
+		addrs: addrs,
+	}, nil
 }
