@@ -294,6 +294,8 @@ func (ls *legSubscriber) Sync(ctx context.Context, p peer.ID, c cid.Cid, ss ipld
 	_, err := ls.dt.OpenPullDataChannel(ctx, p, &v, c, s)
 	if err != nil {
 		log.Errorf("Error in data channel for sync: %v", err)
+		unsub()
+		close(out)
 		ls.syncmtx.Unlock()
 		return nil, nil, err
 	}
