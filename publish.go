@@ -14,6 +14,7 @@ import (
 type legPublisher struct {
 	topic   *pubsub.Topic
 	onClose func() error
+	host    host.Host
 }
 
 // NewPublisher creates a new legs publisher
@@ -26,7 +27,7 @@ func NewPublisher(ctx context.Context,
 	if err != nil {
 		return nil, err
 	}
-	return &legPublisher{ss.t, ss.onClose}, nil
+	return &legPublisher{ss.t, ss.onClose, host}, nil
 }
 
 // NewPublisherFromExisting instantiates go-legs publishing on an existing
@@ -44,12 +45,16 @@ func NewPublisherFromExisting(ctx context.Context,
 	if err != nil {
 		return nil, err
 	}
-	return &legPublisher{t, t.Close}, nil
+	return &legPublisher{t, t.Close, host}, nil
 }
 
 func (lp *legPublisher) UpdateRoot(ctx context.Context, c cid.Cid) error {
-	log.Debugf("Published CID in pubsub channel: %s", c)
-	return lp.topic.Publish(ctx, c.Bytes())
+	log.Debugf("Published CID and addresses in pubsub channel: %s", c)
+	msg := message{
+		cid:   c,
+		addrs: lp.host.Addrs(),
+	}
+	return lp.topic.Publish(ctx, encodeMessage(msg))
 }
 
 func (lp *legPublisher) Close() error {
