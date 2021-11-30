@@ -59,7 +59,13 @@ func NewPublisherFromExisting(ctx context.Context,
 		return nil, err
 	}
 	headPublisher := &head.Publisher{}
-	go headPublisher.Serve(host, topic)
+	go func() {
+		err := headPublisher.Serve(host, topic)
+		if err != http.ErrServerClosed {
+			// We got an error that isn't "the server was closed".
+			log.Warnf("Error in serving headPublisher", err)
+		}
+	}()
 
 	return &legPublisher{t, t.Close, host, headPublisher}, nil
 }

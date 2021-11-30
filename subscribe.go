@@ -302,7 +302,6 @@ func (ls *legSubscriber) Sync(ctx context.Context, p peer.ID, c cid.Cid, ss ipld
 
 	if c == cid.Undef {
 		// Query the peer for the latest CID
-		// Note, if this path is common enough, we can cache the client.
 		var err error
 		c, err = head.QueryRootCid(ctx, ls.host, ls.topic.String(), p)
 		if err != nil {
