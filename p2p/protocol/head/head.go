@@ -80,9 +80,10 @@ func (p *Publisher) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		log.Infow("failed to serve root", "err", err)
 		http.Error(w, "", http.StatusInternalServerError)
-	} else {
-		_, _ = w.Write(out)
+		return
 	}
+
+	_, _ = w.Write(out)
 }
 
 func (p *Publisher) UpdateRoot(_ context.Context, c cid.Cid) error {

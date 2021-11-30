@@ -35,11 +35,16 @@ func TestFetchLatestHead(t *testing.T) {
 	go p.Serve(publisher, "test")
 	defer p.Close()
 
+	cid, err := head.QueryRootCid(ctx, client, "test", publisher.ID())
+	if err == nil {
+		t.Fatal("Expected to get an error because there is no root")
+	}
+
 	if err := p.UpdateRoot(context.Background(), rootLnk.(cidlink.Link).Cid); err != nil {
 		t.Fatal(err)
 	}
 
-	cid, err := head.QueryRootCid(ctx, client, "test", publisher.ID())
+	cid, err = head.QueryRootCid(ctx, client, "test", publisher.ID())
 	if err != nil {
 		t.Fatal(err)
 	}
