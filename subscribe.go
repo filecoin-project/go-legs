@@ -39,7 +39,6 @@ type legSubscriber struct {
 	syncmtx    sync.Mutex
 	latestSync ipld.Link
 	syncing    cid.Cid
-	host       host.Host
 }
 
 // NewSubscriber creates a new leg subscriber listening to a specific pubsub topic
@@ -54,7 +53,7 @@ func NewSubscriber(ctx context.Context,
 	if err != nil {
 		return nil, err
 	}
-	return newSubscriber(ctx, host, ss.dt, ss.t, ss.onClose, host, nil, selector)
+	return newSubscriber(ctx, ss.dt, ss.t, ss.onClose, host, nil, selector)
 }
 
 // NewSubscriberPartiallySynced creates a new leg subscriber with a specific latestSync.
