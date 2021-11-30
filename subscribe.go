@@ -5,6 +5,7 @@ import (
 	"sync"
 
 	dt "github.com/filecoin-project/go-data-transfer"
+	"github.com/filecoin-project/go-legs/p2p/protocol/head"
 	"github.com/ipfs/go-cid"
 	"github.com/ipfs/go-datastore"
 	logging "github.com/ipfs/go-log/v2"
@@ -298,6 +299,15 @@ func (ls *legSubscriber) Sync(ctx context.Context, p peer.ID, c cid.Cid, ss ipld
 	out := make(chan cid.Cid)
 	v := Voucher{&c}
 	var ulOnce sync.Once
+
+	if c == cid.Undef {
+		// Query the peer for the latest CID
+		var err error
+		c, err = head.QueryRootCid(ctx, ls.host, ls.topic.String(), p)
+		if err != nil {
+			return nil, nil, err
+		}
+	}
 
 	ls.syncmtx.Lock()
 

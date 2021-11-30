@@ -2,8 +2,10 @@ package legs
 
 import (
 	"context"
+	"net/http"
 
 	dt "github.com/filecoin-project/go-data-transfer"
+	"github.com/filecoin-project/go-legs/p2p/protocol/head"
 	"github.com/ipfs/go-cid"
 	"github.com/ipfs/go-datastore"
 	"github.com/ipld/go-ipld-prime"
@@ -12,9 +14,10 @@ import (
 )
 
 type legPublisher struct {
-	topic   *pubsub.Topic
-	onClose func() error
-	host    host.Host
+	topic         *pubsub.Topic
+	onClose       func() error
+	host          host.Host
+	headPublisher *head.Publisher
 }
 
 // NewPublisher creates a new legs publisher
@@ -27,7 +30,17 @@ func NewPublisher(ctx context.Context,
 	if err != nil {
 		return nil, err
 	}
-	return &legPublisher{ss.t, ss.onClose, host}, nil
+
+	headPublisher := &head.Publisher{}
+	go func() {
+		err := headPublisher.Serve(host, topic)
+		if err != http.ErrServerClosed {
+			// We got an error that isn't "the server was closed".
+			log.Warnf("Error in serving headPublisher", err)
+		}
+	}()
+
+	return &legPublisher{ss.t, ss.onClose, host, headPublisher}, nil
 }
 
 // NewPublisherFromExisting instantiates go-legs publishing on an existing
@@ -45,7 +58,16 @@ func NewPublisherFromExisting(ctx context.Context,
 	if err != nil {
 		return nil, err
 	}
-	return &legPublisher{t, t.Close, host}, nil
+	headPublisher := &head.Publisher{}
+	go func() {
+		err := headPublisher.Serve(host, topic)
+		if err != http.ErrServerClosed {
+			// We got an error that isn't "the server was closed".
+			log.Warnf("Error in serving headPublisher", err)
+		}
+	}()
+
+	return &legPublisher{t, t.Close, host, headPublisher}, nil
 }
 
 func (lp *legPublisher) UpdateRoot(ctx context.Context, c cid.Cid) error {
@@ -54,9 +76,20 @@ func (lp *legPublisher) UpdateRoot(ctx context.Context, c cid.Cid) error {
 		cid:   c,
 		addrs: lp.host.Addrs(),
 	}
-	return lp.topic.Publish(ctx, encodeMessage(msg))
+	err1 := lp.topic.Publish(ctx, encodeMessage(msg))
+	err2 := lp.headPublisher.UpdateRoot(ctx, c)
+	if err1 != nil {
+		return err1
+	}
+	return err2
 }
 
 func (lp *legPublisher) Close() error {
-	return lp.onClose()
+	err1 := lp.headPublisher.Close()
+	err2 := lp.onClose()
+
+	if err1 != nil {
+		return err1
+	}
+	return err2
 }
