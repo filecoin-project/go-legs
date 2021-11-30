@@ -185,7 +185,7 @@ func (ls *legSubscriber) watch(ctx context.Context, sub *pubsub.Subscription) {
 			ls.hndmtx.RUnlock()
 			if !allow {
 				log.Infow("Message from peer not allowed by legs policy")
-				return
+				continue
 			}
 		}
 
