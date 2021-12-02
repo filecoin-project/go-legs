@@ -186,9 +186,11 @@ func TestSyncFn(t *testing.T) {
 	}
 
 	time.Sleep(1 * time.Second)
-	watcher, cncl := ls.OnChange()
 
-	t.Cleanup(clean(lp, ls, cncl))
+	t.Cleanup(func() {
+		lp.Close()
+		ls.Close()
+	})
 
 	// Store the whole chain in source node
 	chainLnks := mkChain(srcLnkS, true)
@@ -215,7 +217,7 @@ func TestSyncFn(t *testing.T) {
 		t.Fatal("timed out waiting for sync to propogate")
 	case downstream := <-out:
 		if !downstream.Equals(lnk.(cidlink.Link).Cid) {
-			t.Fatalf("sync'd sid unexpected %s vs %s", downstream, lnk)
+			t.Fatalf("sync'd cid unexpected %s vs %s", downstream, lnk)
 		}
 		if _, err := dstStore.Get(datastore.NewKey(downstream.String())); err != nil {
 			t.Fatalf("data not in receiver store: %v", err)
@@ -223,9 +225,35 @@ func TestSyncFn(t *testing.T) {
 	}
 	// Stop listening to sync events.
 	syncncl()
-	assertLatestSyncEquals(t, lsT, lnk.(cidlink.Link).Cid)
-	// Now sync after a gossipsub publication.
-	newUpdateTest(t, lp, ls, dstStore, watcher, chainLnks[0], false, chainLnks[0].(cidlink.Link).Cid)
+
+	// Assert the latestSync is not updated by explicit sync when cid is set
+	if lsT.getLatestSync() != nil {
+		t.Fatal("Sync should not update latestSync")
+	}
+
+	// Assert the latestSync is updated by explicit sync when cid and selector are unset
+	newHead := chainLnks[0].(cidlink.Link).Cid
+	if err := lp.UpdateRoot(context.Background(), newHead); err != nil {
+		t.Fatal(err)
+	}
+
+	out, syncncl, err = ls.Sync(context.Background(), srcHost.ID(), cid.Undef, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-time.After(time.Second * 2):
+		t.Fatal("timed out waiting for sync to propogate")
+	case downstream := <-out:
+		if !downstream.Equals(newHead) {
+			t.Fatalf("sync'd cid unexpected %s vs %s", downstream, lnk)
+		}
+		if _, err := dstStore.Get(datastore.NewKey(downstream.String())); err != nil {
+			t.Fatalf("data not in receiver store: %v", err)
+		}
+	}
+	syncncl()
+	assertLatestSyncEquals(t, lsT, newHead)
 }
 
 func TestPartialSync(t *testing.T) {
@@ -386,7 +414,7 @@ func newUpdateTest(t *testing.T, lp LegPublisher, ls LegSubscriber, dstStore dat
 			t.Fatal("timed out waiting for sync to propagate")
 		case downstream := <-watcher:
 			if !downstream.Equals(lnk.(cidlink.Link).Cid) {
-				t.Fatalf("sync'd sid unexpected %s vs %s", downstream, lnk)
+				t.Fatalf("sync'd cid unexpected %s vs %s", downstream, lnk)
 			}
 			if _, err := dstStore.Get(datastore.NewKey(downstream.String())); err != nil {
 				t.Fatalf("data not in receiver store: %v", err)
