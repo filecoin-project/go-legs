@@ -7,6 +7,7 @@ import (
 
 	"github.com/filecoin-project/go-legs/p2p/protocol/head"
 	"github.com/filecoin-project/go-legs/test"
+	"github.com/ipfs/go-cid"
 	"github.com/ipfs/go-datastore"
 	dssync "github.com/ipfs/go-datastore/sync"
 	_ "github.com/ipld/go-ipld-prime/codec/dagjson"
@@ -35,21 +36,21 @@ func TestFetchLatestHead(t *testing.T) {
 	go p.Serve(publisher, "test")
 	defer p.Close()
 
-	cid, err := head.QueryRootCid(ctx, client, "test", publisher.ID())
-	if err == nil {
-		t.Fatal("Expected to get an error because there is no root")
+	c, err := head.QueryRootCid(ctx, client, "test", publisher.ID())
+	if err != nil && c != cid.Undef {
+		t.Fatal("Expected to get a nil error and a cid undef because there is no root")
 	}
 
 	if err := p.UpdateRoot(context.Background(), rootLnk.(cidlink.Link).Cid); err != nil {
 		t.Fatal(err)
 	}
 
-	cid, err = head.QueryRootCid(ctx, client, "test", publisher.ID())
+	c, err = head.QueryRootCid(ctx, client, "test", publisher.ID())
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	if !cid.Equals(rootLnk.(cidlink.Link).Cid) {
-		t.Fatalf("didn't get expected cid. expected %s, got %s", rootLnk, cid)
+	if !c.Equals(rootLnk.(cidlink.Link).Cid) {
+		t.Fatalf("didn't get expected cid. expected %s, got %s", rootLnk, c)
 	}
 }
