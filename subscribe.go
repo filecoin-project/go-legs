@@ -282,76 +282,86 @@ func (ls *legSubscriber) unlockOnce(ulOnce *sync.Once) {
 	ulOnce.Do(ls.syncmtx.Unlock)
 }
 
-// Sync performs a one-off explicit sync from the given peer for a specific cid and updates the latest
-// synced link to it.
+// Sync performs a one-off explicit sync from the given peer for a specific cid.
 //
-// It is the responsibility of the caller to make sure the given CID appears after the latest sync
-// in order to avid re-syncing of content that may have previously been synced.
+// Both cid and selector are optional parameters.
 //
-// The selector sequence, ss, can optionally be specified to customize the selection sequence during traversal.
-// If unspecified, the subscriber's default selector sequence is used.
+// If no cid is specified, i.e. the given cid equals cid.Undef, then the latest head is fetched from
+// the remote publisher and used instead.
 //
-// Note that the selector sequence is wrapped with a selector logic that will stop traversal when
-// the latest synced link is reached. Therefore, it must only specify the selection sequence itself.
+// If no selector is specified, the default selector sequence is used, wrapped with a logic that
+// stops the traversal upon encountering the current head. See: legs.ExploreRecursiveWithStopNode.
+// Otherwise, the given selector is used directly, without any wrapping.
 //
-// See: ExploreRecursiveWithStopNode.
+// Note that if both the CID and the selector are unspecified this function behaves exactly like the
+// background sync process, performing an explicit sync cycle for the latest head, updating the
+// current head upon successful resolution.
+//
+// Specifying either a CID or a selector will not update the current head. This allows the caller to
+// sync parts of a DAG selectively without updating the internal reference to the current head.
 func (ls *legSubscriber) Sync(ctx context.Context, p peer.ID, c cid.Cid, ss ipld.Node) (<-chan cid.Cid, context.CancelFunc, error) {
-	out := make(chan cid.Cid)
-	v := Voucher{&c}
-	var ulOnce sync.Once
-
+	var ulOnce *sync.Once
+	var updateLatestSync bool
 	if c == cid.Undef {
-		// Query the peer for the latest CID
 		var err error
 		c, err = head.QueryRootCid(ctx, ls.host, ls.topic.String(), p)
 		if err != nil {
 			return nil, nil, err
 		}
+		if ss == nil {
+			// Update the latestSync only if no CID and no selector given.
+			updateLatestSync = true
+			// Instantiate sync.Once to assure legSubscriber.syncmtx is unlocked exactly once.
+			ulOnce = &sync.Once{}
+			ls.syncmtx.Lock()
+			ss = ExploreRecursiveWithStopNode(selector.RecursionLimitNone(), ls.dss, ls.latestSync)
+		}
+	} else if ss == nil {
+		// Fall back onto the default selector sequence if one is not given.
+		// Note that if selector is specified it is used as is without any wrapping.
+		// Construct a selector consistent with the way background selector is constructed in legSubscriber.watch
+		ss = ExploreRecursiveWithStopNode(selector.RecursionLimitNone(), ls.dss, ls.getLatestSync())
 	}
 
-	ls.syncmtx.Lock()
+	done := make(chan cid.Cid)
+	unsub := ls.dt.SubscribeToEvents(ls.onSyncEvent(c, done, ulOnce))
 
-	unsub := ls.dt.SubscribeToEvents(ls.onSyncEvent(c, out, &ulOnce))
-
-	// Fall back onto the default selector sequence if one is not given.
-	if ss == nil {
-		ss = ls.dss
+	cancel := func() {
+		unsub()
+		close(done)
+		if updateLatestSync {
+			// Make sure legSubscriber.syncmtx is unlocked since it has been locked if we reach here.
+			ls.unlockOnce(ulOnce)
+		}
 	}
-	// Construct a selector consistent with the way background selector is constructed in legSubscriber.watch
-	s := ExploreRecursiveWithStopNode(selector.RecursionLimitNone(), ss, ls.latestSync)
-	_, err := ls.dt.OpenPullDataChannel(ctx, p, &v, c, s)
+
+	v := Voucher{&c}
+	_, err := ls.dt.OpenPullDataChannel(ctx, p, &v, c, ss)
 	if err != nil {
 		log.Errorf("Error in data channel for sync: %v", err)
-		unsub()
-		close(out)
-		ls.syncmtx.Unlock()
+		cancel()
 		return nil, nil, err
 	}
-	cncl := func() {
-		unsub()
-		close(out)
-		// if the mutex is lock, unlock it. This may happen
-		// if CancelFunc is called after the exchange has finished
-		// and the lock has unlocked.
-		// We need this sanity-check to avoid the mutex from being
-		// unlocked twice
-		ls.unlockOnce(&ulOnce)
-	}
-	return out, cncl, nil
+	return done, cancel, nil
 }
 
 func (ls *legSubscriber) onSyncEvent(c cid.Cid, out chan cid.Cid, ulOnce *sync.Once) func(dt.Event, dt.ChannelState) {
 	return func(event dt.Event, channelState dt.ChannelState) {
 		if event.Code == dt.FinishTransfer {
-			if c == channelState.BaseCID() {
-				out <- channelState.BaseCID()
-				log.Debugw("Exchange finished, updating latest to  %s", channelState.BaseCID())
-				// Update latest sync to the head we are proactively syncing to.
-				// Beware! This means that if we sync to a CID which is before
-				// the latest one it may require to resend content from the chain that
-				// we already have. This should be handled by users.
-				ls.latestSync = cidlink.Link{Cid: channelState.BaseCID()}
-				ls.unlockOnce(ulOnce)
+			baseCID := channelState.BaseCID()
+			if c == baseCID {
+				out <- baseCID
+				log.Debugw("Explicit sync finished transfer for cid: %s", baseCID)
+
+				if ulOnce != nil {
+					log.Debugw("Updating latestSync to: %s", baseCID)
+					// Update the latest sync to the head we are proactively syncing to.
+					// Beware! This means that if we sync to a CID, which is before
+					// the latest one it may require resending content from the chain that
+					// we already have. This should be handled by users.
+					ls.latestSync = cidlink.Link{Cid: baseCID}
+					ls.unlockOnce(ulOnce)
+				}
 			}
 		}
 	}

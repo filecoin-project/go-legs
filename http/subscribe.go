@@ -119,27 +119,31 @@ func (h *httpSubscriber) SetLatestSync(c cid.Cid) error {
 	return nil
 }
 
-// Sync performs a one-off explicit sync from the given peer for a specific cid and updates the latest
-// synced link to it.
+// Sync performs a one-off explicit sync from the given peer for a specific cid.
 //
-// It is the responsibility of the caller to make sure the given CID appears after the latest sync
-// in order to avid re-syncing of content that may have previously been synced.
+// Both cid and selector are optional parameters.
 //
-// The selector sequence, ss, can optionally be specified to customize the selection sequence during traversal.
-// If unspecified, the subscriber's default selector sequence is used.
+// If no cid is specified, i.e. the given cid equals cid.Undef, then the latest head is fetched from
+// the remote publisher and used instead.
 //
-// Note that the selector sequence is wrapped with a selector logic that will stop traversal when
-// the latest synced link is reached. Therefore, it must only specify the selection sequence itself.
+// If no selector is specified, the default selector sequence is used, wrapped with a logic that
+// stops the traversal upon encountering the current head. See: legs.ExploreRecursiveWithStopNode.
+// Otherwise, the given selector is used directly, without any wrapping.
 //
-// See: legs.ExploreRecursiveWithStopNode.
-func (h *httpSubscriber) Sync(ctx context.Context, p peer.ID, c cid.Cid, dss ipld.Node) (<-chan cid.Cid, context.CancelFunc, error) {
+// Note that if both the CID and the selector are unspecified this function behaves exactly like the
+// background sync process, performing an explicit sync cycle for the latest head, updating the
+// current head upon successful resolution.
+//
+// Specifying either a CID or a selector will not update the current head. This allows the caller to
+// sync parts of a DAG selectively without updating the internal reference to the current head.
+func (h *httpSubscriber) Sync(ctx context.Context, p peer.ID, c cid.Cid, selector ipld.Node) (<-chan cid.Cid, context.CancelFunc, error) {
 	respChan := make(chan cid.Cid, 1)
 	cctx, cncl := context.WithCancel(ctx)
 
 	// todo: error if reqs is full
 	h.reqs <- req{
 		Cid:  c,
-		dss:  dss,
+		dss:  selector,
 		ctx:  cctx,
 		resp: respChan,
 	}
@@ -158,19 +162,20 @@ func (h *httpSubscriber) Close() error {
 	return nil
 }
 
-// background event loop for scheduling
+// background event loop for scheduling:
 // a. time-scheduled fetches to the provider
 // b. interrupted fetches in response to synchronous 'Sync' calls.
 func (h *httpSubscriber) background() {
 	var nextCid cid.Cid
 	var workResp chan cid.Cid
 	var ctx context.Context
-	var dss ipld.Node
+	var sel ipld.Node
 	var xsel selector.Selector
 	var err error
+	var updateHead bool
 	defaultRate := time.NewTimer(defaultPollTime)
 	for {
-		// finish up from previous iteration
+		// Finish up from previous iteration
 		if workResp != nil {
 			workResp <- nextCid
 			close(workResp)
@@ -180,40 +185,48 @@ func (h *httpSubscriber) background() {
 			<-defaultRate.C
 		}
 		defaultRate.Reset(defaultPollTime)
-		select {
 
+		// Get next request to handle
+		select {
 		case r := <-h.reqs:
 			nextCid = r.Cid
 			workResp = r.resp
-			dss = r.dss
+			sel = r.dss
 			ctx = r.ctx
+			// Decide if successful resolution of nextCid should replace current head.
+			// Replace the current head if both the selector and nextCid are absent.
+			updateHead = sel == nil && nextCid == cid.Undef
 		case <-defaultRate.C:
 			nextCid = cid.Undef
 			workResp = nil
 			ctx = context.Background()
-			dss = nil
+			sel = nil
+			updateHead = true
 		}
+
+		// If no CID is given, use the latest head fetched from remote head publisher.
 		if nextCid == cid.Undef {
 			nextCid, err = h.fetchHead(ctx)
+			if err != nil {
+				log.Warnf("failed to fetch new head: %s", err)
+				err = nil
+				continue
+			}
 		}
-		if dss == nil {
-			dss = h.dss
+
+		// If no selector is given, use the default selector sequence wrapped with stop logic
+		if sel == nil {
+			h.mtx.Lock()
+			currHead := h.head
+			h.mtx.Unlock()
+			sel = legs.ExploreRecursiveWithStopNode(selector.RecursionLimitNone(), h.dss, cidlink.Link{Cid: currHead})
 		}
-		if err != nil {
-			log.Warnf("failed to fetch new head: %s", err)
-			err = nil
-			continue
-		}
-		h.mtx.Lock()
-		currHead := h.head
-		h.mtx.Unlock()
-		sel := legs.ExploreRecursiveWithStopNode(selector.RecursionLimitNone(),
-			dss,
-			cidlink.Link{Cid: currHead})
+
 		if err := h.fetchBlock(ctx, nextCid); err != nil {
 			log.Infow("failed to fetch requested block", "err", err)
 			continue
 		}
+
 		xsel, err = selector.CompileSelector(sel)
 		if err != nil {
 			log.Infow("failed to compile selector", "err", err, "selector", sel)
@@ -225,10 +238,13 @@ func (h *httpSubscriber) background() {
 			log.Infow("failed to walk requested dag", "err", err, "root", nextCid)
 			continue
 		}
-		// now head is updated. save it.
-		h.mtx.Lock()
-		h.head = nextCid
-		h.mtx.Unlock()
+
+		// If head should be updated, make it so.
+		if updateHead {
+			h.mtx.Lock()
+			h.head = nextCid
+			h.mtx.Unlock()
+		}
 	}
 }
 
