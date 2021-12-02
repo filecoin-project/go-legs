@@ -2,7 +2,7 @@ package head
 
 import (
 	"context"
-	"io"
+	"io/ioutil"
 	"net"
 	"net/http"
 	"path"
@@ -50,7 +50,7 @@ func QueryRootCid(ctx context.Context, host host.Host, topic string, peer peer.I
 	}
 	defer resp.Body.Close()
 
-	cidStr, err := io.ReadAll(resp.Body)
+	cidStr, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
 		return cid.Undef, err
 	}
