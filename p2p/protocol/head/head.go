@@ -2,7 +2,7 @@ package head
 
 import (
 	"context"
-	"encoding/json"
+	"io"
 	"net"
 	"net/http"
 	"path"
@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/ipfs/go-cid"
-	logging "github.com/ipfs/go-log/v2"
 	"github.com/libp2p/go-libp2p-core/host"
 	peer "github.com/libp2p/go-libp2p-core/peer"
 	"github.com/libp2p/go-libp2p-core/protocol"
@@ -18,8 +17,6 @@ import (
 )
 
 const closeTimeout = 30 * time.Second
-
-var log = logging.Logger("go-legs-head")
 
 func deriveProtocolID(topic string) protocol.ID {
 	return protocol.ID("/legs/head/" + topic + "/0.0.1")
@@ -53,13 +50,15 @@ func QueryRootCid(ctx context.Context, host host.Host, topic string, peer peer.I
 	}
 	defer resp.Body.Close()
 
-	var cidStr string
-	err = json.NewDecoder(resp.Body).Decode(&cidStr)
+	cidStr, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return cid.Undef, err
 	}
+	if len(cidStr) == 0 {
+		return cid.Undef, nil
+	}
 
-	return cid.Decode(cidStr)
+	return cid.Decode(string(cidStr))
 }
 
 type Publisher struct {
@@ -76,11 +75,9 @@ func (p *Publisher) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	p.rl.RLock()
 	defer p.rl.RUnlock()
-	out, err := json.Marshal(p.root.String())
-	if err != nil {
-		log.Infow("failed to serve root", "err", err)
-		http.Error(w, "", http.StatusInternalServerError)
-		return
+	var out []byte
+	if p.root != cid.Undef {
+		out = []byte(p.root.String())
 	}
 
 	_, _ = w.Write(out)
