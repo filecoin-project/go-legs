@@ -54,12 +54,14 @@ func decodeMessage(data []byte) (message, error) {
 	for len(data) != 0 {
 		val, n, err := varint.FromUvarint(data)
 		if err != nil {
+			log.Errorf("Failed to decode message: cannot read number of multiadds: %s", err)
 			return message{}, err
 		}
 		data = data[n:]
 
 		addr, err := multiaddr.NewMultiaddrBytes(data[:val])
 		if err != nil {
+			log.Errorf("Failed to decode message: cannot decode multiadds: %s", err)
 			return message{}, err
 		}
 		data = data[val:]

@@ -50,10 +50,11 @@ type PolicyHandler func(*pubsub.Message) (bool, error)
 // if the update is generated from a specific peer.
 func FilterPeerPolicy(p peer.ID) PolicyHandler {
 	return func(msg *pubsub.Message) (bool, error) {
-		src, err := peer.IDFromBytes(msg.From)
-		if err != nil {
-			return false, err
+		from := msg.GetFrom()
+		allow := from == p
+		if !allow {
+			log.Debugf("Filtered pubsub message from %s", from)
 		}
-		return src == p, nil
+		return allow, nil
 	}
 }
