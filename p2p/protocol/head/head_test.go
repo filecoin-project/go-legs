@@ -32,7 +32,7 @@ func TestFetchLatestHead(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	p := &head.Publisher{}
+	p := head.NewPublisher()
 	go p.Serve(publisher, "test")
 	defer p.Close()
 
