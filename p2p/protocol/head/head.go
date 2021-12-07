@@ -18,6 +18,20 @@ import (
 
 const closeTimeout = 30 * time.Second
 
+type Publisher struct {
+	rl     sync.RWMutex
+	root   cid.Cid
+	server *http.Server
+}
+
+func NewPublisher() *Publisher {
+	p := &Publisher{
+		server: &http.Server{},
+	}
+	p.server.Handler = http.Handler(p)
+	return p
+}
+
 func deriveProtocolID(topic string) protocol.ID {
 	return protocol.ID("/legs/head/" + topic + "/0.0.1")
 }
@@ -28,7 +42,6 @@ func (p *Publisher) Serve(host host.Host, topic string) error {
 		return err
 	}
 
-	p.server = &http.Server{Handler: http.Handler(p)}
 	return p.server.Serve(l)
 }
 
@@ -59,12 +72,6 @@ func QueryRootCid(ctx context.Context, host host.Host, topic string, peer peer.I
 	}
 
 	return cid.Decode(string(cidStr))
-}
-
-type Publisher struct {
-	rl     sync.RWMutex
-	root   cid.Cid
-	server *http.Server
 }
 
 func (p *Publisher) ServeHTTP(w http.ResponseWriter, r *http.Request) {

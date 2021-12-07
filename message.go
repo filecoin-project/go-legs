@@ -48,6 +48,8 @@ func decodeMessage(data []byte) (message, error) {
 	}
 	data = data[n:]
 
+	// Read multiaddrs if there is any more data in message data.  This allows
+	// backward-compatability with publishers that do not supply address data.
 	var addrs []multiaddr.Multiaddr
 	for len(data) != 0 {
 		val, n, err := varint.FromUvarint(data)

@@ -31,7 +31,7 @@ func NewPublisher(ctx context.Context,
 		return nil, err
 	}
 
-	headPublisher := &head.Publisher{}
+	headPublisher := head.NewPublisher()
 	go func() {
 		err := headPublisher.Serve(host, topic)
 		if err != http.ErrServerClosed {
@@ -58,7 +58,7 @@ func NewPublisherFromExisting(ctx context.Context,
 	if err != nil {
 		return nil, err
 	}
-	headPublisher := &head.Publisher{}
+	headPublisher := head.NewPublisher()
 	go func() {
 		err := headPublisher.Serve(host, topic)
 		if err != http.ErrServerClosed {

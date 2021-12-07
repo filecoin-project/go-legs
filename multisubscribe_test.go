@@ -13,7 +13,7 @@ import (
 	basicnode "github.com/ipld/go-ipld-prime/node/basic"
 )
 
-func TestMultiSusbscribeRoundTrip(t *testing.T) {
+func TestMultiSubscribeRoundTrip(t *testing.T) {
 	// Init legs publisher and subscriber
 	srcStore1 := dssync.MutexWrap(datastore.NewMapDatastore())
 	srcHost1 := mkTestHost()
@@ -38,15 +38,15 @@ func TestMultiSusbscribeRoundTrip(t *testing.T) {
 	dstHost.Peerstore().AddAddrs(srcHost1.ID(), srcHost1.Addrs(), time.Hour)
 	srcHost2.Peerstore().AddAddrs(dstHost.ID(), dstHost.Addrs(), time.Hour)
 	dstHost.Peerstore().AddAddrs(srcHost2.ID(), srcHost2.Addrs(), time.Hour)
+	dstLnkS := test.MkLinkSystem(dstStore)
+	ms, err := legs.NewMultiSubscriber(context.Background(), dstHost, dstStore, dstLnkS, "legs/testtopic", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := srcHost1.Connect(context.Background(), dstHost.Peerstore().PeerInfo(dstHost.ID())); err != nil {
 		t.Fatal(err)
 	}
 	if err := srcHost2.Connect(context.Background(), dstHost.Peerstore().PeerInfo(dstHost.ID())); err != nil {
-		t.Fatal(err)
-	}
-	dstLnkS := test.MkLinkSystem(dstStore)
-	ms, err := legs.NewMultiSubscriber(context.Background(), dstHost, dstStore, dstLnkS, "legs/testtopic", nil)
-	if err != nil {
 		t.Fatal(err)
 	}
 	ls1, err := ms.NewSubscriber(legs.FilterPeerPolicy(srcHost1.ID()))
