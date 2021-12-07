@@ -223,19 +223,19 @@ func (h *httpSubscriber) background() {
 		}
 
 		if err := h.fetchBlock(ctx, nextCid); err != nil {
-			log.Infow("failed to fetch requested block", "err", err)
+			log.Errorw("Failed to fetch requested block", "err", err)
 			continue
 		}
 
 		xsel, err = selector.CompileSelector(sel)
 		if err != nil {
-			log.Infow("failed to compile selector", "err", err, "selector", sel)
+			log.Errorw("Failed to compile selector", "err", err, "selector", sel)
 			continue
 		}
 
 		err = h.walkFetch(ctx, nextCid, xsel)
 		if err != nil {
-			log.Infow("failed to walk requested dag", "err", err, "root", nextCid)
+			log.Errorw("Failed to traverse requested dag", "err", err, "root", nextCid)
 			continue
 		}
 
@@ -255,11 +255,13 @@ func (h *httpSubscriber) walkFetch(ctx context.Context, root cid.Cid, sel select
 	getMissingLs.StorageReadOpener = func(lc ipld.LinkContext, l ipld.Link) (io.Reader, error) {
 		r, err := h.lsys.StorageReadOpener(lc, l)
 		if err == nil {
+			log.Errorw("Failed to get block read opener", "err", err, "link", l)
 			return r, nil
 		}
 		// get.
 		c := l.(cidlink.Link).Cid
 		if err := h.fetchBlock(ctx, c); err != nil {
+			log.Errorw("Failed to fetch block", "err", err, "cid", c)
 			return nil, err
 		}
 		return h.lsys.StorageReadOpener(lc, l)
@@ -276,6 +278,7 @@ func (h *httpSubscriber) walkFetch(ctx context.Context, root cid.Cid, sel select
 	// get the direct node.
 	rootNode, err := getMissingLs.Load(ipld.LinkContext{}, cidlink.Link{Cid: root}, basicnode.Prototype.Any)
 	if err != nil {
+		log.Errorw("Failed to load node", "root", root)
 		return err
 	}
 	return progress.WalkMatching(rootNode, sel, func(p traversal.Progress, n datamodel.Node) error {
@@ -293,10 +296,13 @@ func (h *httpSubscriber) fetch(ctx context.Context, rsrc string, cb func(io.Read
 	}
 	resp, err := h.Client.Do(req)
 	if err != nil {
+		log.Errorw("Failed to execute fetch request", "err", err)
 		return err
 	}
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("non success http code at %s: %d", localURL.String(), resp.StatusCode)
+		err := fmt.Errorf("non success http code at %s: %d", localURL.String(), resp.StatusCode)
+		log.Errorw("Fetch was not successful", "err", err)
+		return err
 	}
 
 	defer resp.Body.Close()
@@ -325,11 +331,16 @@ func (h *httpSubscriber) fetchBlock(ctx context.Context, c cid.Cid) error {
 	return h.fetch(ctx, c.String(), func(data io.Reader) error {
 		writer, committer, err := h.lsys.StorageWriteOpener(ipld.LinkContext{})
 		if err != nil {
+			log.Errorw("Failed to get write opener", "err", err)
 			return err
 		}
 		if _, err := io.Copy(writer, data); err != nil {
 			return err
 		}
-		return committer(cidlink.Link{Cid: c})
+		err = committer(cidlink.Link{Cid: c})
+		if err != nil {
+			log.Errorw("Failed to commit ")
+		}
+		return err
 	})
 }

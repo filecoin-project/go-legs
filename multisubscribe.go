@@ -2,6 +2,7 @@ package legs
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"sync/atomic"
 
@@ -13,7 +14,6 @@ import (
 	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
 	"github.com/libp2p/go-libp2p-core/host"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
-	errors "golang.org/x/xerrors"
 )
 
 const (
@@ -120,20 +120,28 @@ func (lt *legMultiSubscriber) onCloseSubscriber() error {
 // Close closes the legMultiSubscriber. It returns an error if it still
 // has an active publisher or subscriber attached to the transport.
 func (lt *legMultiSubscriber) Close(ctx context.Context) error {
+	log.Info("Closing multi subscriber")
 	refc := atomic.LoadInt32(&lt.refc)
 	if refc == 0 {
 		err := lt.t.Stop(ctx)
 		err2 := os.RemoveAll(lt.tmpDir)
 		err3 := lt.topic.Close()
 		if err != nil {
+			log.Errorf("Failed to stop datatransfer manager: %s", err)
 			return err
 		}
 		if err2 != nil {
+			log.Errorf("Failed to remove temp dir: %s", err)
 			return err2
+		}
+		if err3 != nil {
+			log.Errorf("Failed to close pubsub topic: %s", err)
 		}
 		return err3
 	} else if refc > 0 {
-		return errors.Errorf("can't close transport. %d pub/sub still active", refc)
+		err := fmt.Errorf("can't close transport. %d pub/sub still active", refc)
+		log.Errorf("Failed to close multi subscriber: %s", err)
+		return err
 	}
 	return nil
 }

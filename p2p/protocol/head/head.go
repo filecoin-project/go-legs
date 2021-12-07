@@ -2,6 +2,7 @@ package head
 
 import (
 	"context"
+	logging "github.com/ipfs/go-log/v2"
 	"io/ioutil"
 	"net"
 	"net/http"
@@ -17,6 +18,8 @@ import (
 )
 
 const closeTimeout = 30 * time.Second
+
+var log = logging.Logger("go-legs/head")
 
 type Publisher struct {
 	rl     sync.RWMutex
@@ -37,11 +40,13 @@ func deriveProtocolID(topic string) protocol.ID {
 }
 
 func (p *Publisher) Serve(host host.Host, topic string) error {
-	l, err := gostream.Listen(host, deriveProtocolID(topic))
+	pid := deriveProtocolID(topic)
+	l, err := gostream.Listen(host, pid)
 	if err != nil {
+		log.Errorf("Failed to listen to gostream on host %s with prpotocol ID %s", host.ID(), pid)
 		return err
 	}
-
+	log.Errorf("Serving gostream on host %s with prpotocol ID %s", host.ID(), pid)
 	return p.server.Serve(l)
 }
 
@@ -65,17 +70,28 @@ func QueryRootCid(ctx context.Context, host host.Host, topic string, peer peer.I
 
 	cidStr, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
+		log.Errorf("Failed to fully read response body: %s", err)
 		return cid.Undef, err
 	}
 	if len(cidStr) == 0 {
+		log.Debug("No head is set; returning cid.Undef")
 		return cid.Undef, nil
 	}
 
-	return cid.Decode(string(cidStr))
+	cs := string(cidStr)
+	decode, err := cid.Decode(cs)
+	if err != nil {
+		log.Errorf("Failed to decode CID %s: %s", cs, err)
+	} else {
+		log.Debugf("Sucessfully queried latest head %s", decode)
+	}
+	return decode, err
 }
 
 func (p *Publisher) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if path.Base(r.URL.Path) != "head" {
+	base := path.Base(r.URL.Path)
+	if base != "head" {
+		log.Debug("Only head is supported; rejecting reqpuest with base path: %s", base)
 		http.Error(w, "", http.StatusNotFound)
 		return
 	}
@@ -84,10 +100,17 @@ func (p *Publisher) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	defer p.rl.RUnlock()
 	var out []byte
 	if p.root != cid.Undef {
-		out = []byte(p.root.String())
+		currentHead := p.root.String()
+		log.Debug("Found current head: %s", currentHead)
+		out = []byte(currentHead)
+	} else {
+		log.Debug("No head is set; responding with empty")
 	}
 
-	_, _ = w.Write(out)
+	_, err := w.Write(out)
+	if err != nil {
+		log.Errorf("Failed to write response: %s", err)
+	}
 }
 
 func (p *Publisher) UpdateRoot(_ context.Context, c cid.Cid) error {

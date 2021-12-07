@@ -20,6 +20,7 @@ func ExploreRecursiveWithStop(limit selector.RecursionLimit, sequence selectorbu
 // scratch with every update.
 func ExploreRecursiveWithStopNode(limit selector.RecursionLimit, sequence ipld.Node, stopLnk ipld.Link) ipld.Node {
 	if sequence == nil {
+		log.Debug("No selector sequence specified; using default explore all with recursive edge.")
 		np := basicnode.Prototype__Any{}
 		ssb := selectorbuilder.NewSelectorSpecBuilder(np)
 		sequence = ssb.ExploreAll(ssb.ExploreRecursiveEdge()).Node()

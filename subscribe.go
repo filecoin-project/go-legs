@@ -107,10 +107,10 @@ func newSubscriber(ctx context.Context, dt dt.Manager, topic *pubsub.Topic, onCl
 func (ls *legSubscriber) subscribe(ctx context.Context) error {
 	psub, err := ls.topic.Subscribe()
 	if err != nil {
+		log.Errorf("Faield to subscribe to topic %s: %s", ls.topic, err)
 		return err
 	}
 	cctx, cancel := context.WithCancel(ctx)
-
 	unsub := ls.dt.SubscribeToEvents(ls.onEvent)
 	ls.cancel = func() {
 		unsub()
@@ -141,19 +141,27 @@ func (ls *legSubscriber) SetLatestSync(c cid.Cid) error {
 }
 
 func (ls *legSubscriber) onEvent(event dt.Event, channelState dt.ChannelState) {
+	baseCID := channelState.BaseCID()
+	log.Debugf("DataTransfer event with base CID %s from %s to %s: %s %s",
+		baseCID,
+		channelState.Sender(),
+		channelState.Recipient(),
+		dt.Events[event.Code],
+		event.Message)
+
 	if event.Code == dt.FinishTransfer {
 		// Now we share the data channel between different subscribers.
 		// When we receive a FinishTransfer we need to check if it belongs
 		// to us
-		if ls.syncing == channelState.BaseCID() {
+		if ls.syncing == baseCID {
 			ls.syncing = cid.Undef
-			ls.updates <- channelState.BaseCID()
+			ls.updates <- baseCID
 			// Update latest head seen.
 			// NOTE: This is not persisted anywhere. Is the top-level user's
 			// responsability to persist if needed to intialize a
 			// partiallySynced subscriber.
-			log.Debugw("Exchange finished, updating latest to  %s", channelState.BaseCID())
-			ls.latestSync = cidlink.Link{Cid: channelState.BaseCID()}
+			log.Debugw("Exchange finished, updating latest to  %s", baseCID)
+			ls.latestSync = cidlink.Link{Cid: baseCID}
 			// This Unlocks the syncMutex that was locked in watch(),
 			// refer to that function for the lock functionality.
 			ls.syncmtx.Unlock()
@@ -185,21 +193,18 @@ func (ls *legSubscriber) watch(ctx context.Context, sub *pubsub.Subscription) {
 			}
 			ls.hndmtx.RUnlock()
 			if !allow {
-				log.Infow("Message from peer not allowed by legs policy")
+				log.Infof("Message from peer %s not allowed by legs policy", msg.GetFrom())
 				continue
 			}
 		}
 
 		log.Debugf("Pubsub message received. Policy says we are allowed to process")
-		src, err := peer.IDFromBytes(msg.From)
-		if err != nil {
-			continue
-		}
+		src := msg.GetFrom()
 
 		// Decode cid and originator addresses from message.
-		m, err := decodeMessage(msg.Data)
+		m, err := decodeMessage(msg.GetData())
 		if err != nil {
-			log.Warnf("Could not decode pubsub message: %s", err)
+			log.Errorf("Failed to decode pubsub message: %s", err)
 			continue
 		}
 		c := m.cid
@@ -211,13 +216,14 @@ func (ls *legSubscriber) watch(ctx context.Context, sub *pubsub.Subscription) {
 		peerStore := ls.host.Peerstore()
 		if peerStore != nil {
 			peerStore.AddAddrs(src, m.addrs, peerstore.ProviderAddrTTL)
+			log.Debugf("Added multiaddr %v for peer ID %s", m.addrs, src)
 		}
 
 		// Locking latestSync to avoid data races by several updates
 		// This sync is unlocked when the transfer is finished or if
 		// there is an error in the channel.
 		ls.syncmtx.Lock()
-		log.Debugf("Starting data channel (cid: %s, latestSync: %s)", c, ls.latestSync)
+		log.Debugf("Starting data channel to %s for cid %s with latest synced %s", src, c, ls.latestSync)
 		ls.syncing = c
 		_, err = ls.dt.OpenPullDataChannel(ctx, src, &v, c,
 			ExploreRecursiveWithStopNode(
@@ -226,7 +232,7 @@ func (ls *legSubscriber) watch(ctx context.Context, sub *pubsub.Subscription) {
 				ls.latestSync))
 		if err != nil {
 			// Log error for now.
-			log.Errorf("Error in data channel: %v", err)
+			log.Errorf("Failed to open data channel to %s for cid %s with latest synced %s: %s", src, c, ls.latestSync, err)
 			// There has been an error, no FinishTransfer event will be triggered,
 			// so we need to release the lock here.
 			ls.syncmtx.Unlock()
@@ -303,9 +309,11 @@ func (ls *legSubscriber) Sync(ctx context.Context, p peer.ID, c cid.Cid, ss ipld
 	var ulOnce *sync.Once
 	var updateLatestSync bool
 	if c == cid.Undef {
+		log.Debug("No CID is specified; fetching latest head to use as CID")
 		var err error
 		c, err = head.QueryRootCid(ctx, ls.host, ls.topic.String(), p)
 		if err != nil {
+			log.Errorf("Failed to query latest head: %s", err)
 			return nil, nil, err
 		}
 		if ss == nil {
@@ -315,12 +323,15 @@ func (ls *legSubscriber) Sync(ctx context.Context, p peer.ID, c cid.Cid, ss ipld
 			ulOnce = &sync.Once{}
 			ls.syncmtx.Lock()
 			ss = ExploreRecursiveWithStopNode(selector.RecursionLimitNone(), ls.dss, ls.latestSync)
+			log.Debugf("Explicit sync will update latest sync %s on successuful resolution", ls.latestSync)
 		}
 	} else if ss == nil {
 		// Fall back onto the default selector sequence if one is not given.
 		// Note that if selector is specified it is used as is without any wrapping.
 		// Construct a selector consistent with the way background selector is constructed in legSubscriber.watch
-		ss = ExploreRecursiveWithStopNode(selector.RecursionLimitNone(), ls.dss, ls.getLatestSync())
+		latestSync := ls.getLatestSync()
+		ss = ExploreRecursiveWithStopNode(selector.RecursionLimitNone(), ls.dss, latestSync)
+		log.Debugf("Using default selector in explicit sync stopping at latest sync %s", latestSync)
 	}
 
 	done := make(chan cid.Cid)
@@ -338,7 +349,7 @@ func (ls *legSubscriber) Sync(ctx context.Context, p peer.ID, c cid.Cid, ss ipld
 	v := Voucher{&c}
 	_, err := ls.dt.OpenPullDataChannel(ctx, p, &v, c, ss)
 	if err != nil {
-		log.Errorf("Error in data channel for sync: %v", err)
+		log.Errorf("Failed to open pull data channel to %s for CID %s: %v", p, c, err)
 		cancel()
 		return nil, nil, err
 	}
@@ -347,8 +358,15 @@ func (ls *legSubscriber) Sync(ctx context.Context, p peer.ID, c cid.Cid, ss ipld
 
 func (ls *legSubscriber) onSyncEvent(c cid.Cid, out chan cid.Cid, ulOnce *sync.Once) func(dt.Event, dt.ChannelState) {
 	return func(event dt.Event, channelState dt.ChannelState) {
+		baseCID := channelState.BaseCID()
+		log.Debugf("DataTransfer event with base CID %s from %s to %s: %s %s",
+			baseCID,
+			channelState.Sender(),
+			channelState.Recipient(),
+			dt.Events[event.Code],
+			event.Message)
 		if event.Code == dt.FinishTransfer {
-			baseCID := channelState.BaseCID()
+			baseCID := baseCID
 			if c == baseCID {
 				out <- baseCID
 				log.Debugw("Explicit sync finished transfer for cid: %s", baseCID)

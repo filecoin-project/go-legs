@@ -28,19 +28,24 @@ func NewPublisher(ctx context.Context,
 	topic string) (LegPublisher, error) {
 	ss, err := newSimpleSetup(ctx, host, ds, lsys, topic)
 	if err != nil {
+		log.Errorf("Failed to instantiate simple setup")
 		return nil, err
 	}
 
 	headPublisher := head.NewPublisher()
+	startHeadPublisher(host, topic, headPublisher)
+	return &legPublisher{ss.t, ss.onClose, host, headPublisher}, nil
+}
+
+func startHeadPublisher(host host.Host, topic string, headPublisher *head.Publisher) {
 	go func() {
+		log.Infof("Starting head publisher on peer ID %s for topic %s", host.ID(), topic)
 		err := headPublisher.Serve(host, topic)
 		if err != http.ErrServerClosed {
-			// We got an error that isn't "the server was closed".
-			log.Warnf("Error in serving headPublisher", err)
+			log.Errorf("Error head publisher stopped serving on peer ID %s for topic %s: %s", host.ID(), topic, err)
 		}
+		log.Infof("Stopped head publisher on peer ID %s for topic %s", host.ID(), topic)
 	}()
-
-	return &legPublisher{ss.t, ss.onClose, host, headPublisher}, nil
 }
 
 // NewPublisherFromExisting instantiates go-legs publishing on an existing
@@ -59,13 +64,7 @@ func NewPublisherFromExisting(ctx context.Context,
 		return nil, err
 	}
 	headPublisher := head.NewPublisher()
-	go func() {
-		err := headPublisher.Serve(host, topic)
-		if err != http.ErrServerClosed {
-			// We got an error that isn't "the server was closed".
-			log.Warnf("Error in serving headPublisher", err)
-		}
-	}()
+	startHeadPublisher(host, topic, headPublisher)
 
 	return &legPublisher{t, t.Close, host, headPublisher}, nil
 }

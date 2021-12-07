@@ -14,12 +14,11 @@ import (
 	"github.com/ipfs/go-graphsync"
 	gsimpl "github.com/ipfs/go-graphsync/impl"
 	gsnet "github.com/ipfs/go-graphsync/network"
+	"github.com/ipld/go-ipld-prime"
 	"github.com/libp2p/go-libp2p-core/host"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	pubsubpb "github.com/libp2p/go-libp2p-pubsub/pb"
 	"github.com/minio/blake2b-simd"
-
-	"github.com/ipld/go-ipld-prime"
 )
 
 // configureDataTransferForLegs configures an existing data transfer instance to serve go-legs requests
@@ -30,12 +29,15 @@ func configureDataTransferForLegs(ctx context.Context, dt dt.Manager, lsys ipld.
 	val := &legsValidator{}
 	lsc := legStorageConfigration{lsys}
 	if err := dt.RegisterVoucherType(v, val); err != nil {
+		log.Errorf("Failed to register legs voucher validator type: %s", err)
 		return err
 	}
 	if err := dt.RegisterVoucherResultType(lvr); err != nil {
+		log.Errorf("Failed to register legs voucher result type: %s", err)
 		return err
 	}
 	if err := dt.RegisterTransportConfigurer(v, lsc.configureTransport); err != nil {
+		log.Errorf("Failed to register datatrasfer TransportConfigurer: %s", err)
 		return err
 	}
 	return nil
@@ -69,12 +71,21 @@ func makePubsub(ctx context.Context, h host.Host, topic string) (*pubsub.Topic, 
 		}),
 		pubsub.WithFloodPublish(true),
 		pubsub.WithDirectConnectTicks(directConnectTicks),
+		pubsub.WithRawTracer(&loggingTracer{log}),
 	)
 	if err != nil {
-		return nil, fmt.Errorf("constructing pubsub: %d", err)
+		log.Errorf("Failed instantiate pubsub for topic %s with peer ID %s: %s", topic, h.ID(), err)
+		return nil, fmt.Errorf("failed to instantiate pubsub: %w", err)
 	}
 
-	return p.Join(topic)
+	log.Infof("Instantiated pubsub with peer ID %s", h.ID())
+	t, err := p.Join(topic)
+	if err != nil {
+		log.Errorf("Failed to joing topic %s: %s", topic, err)
+		return nil, err
+	}
+	log.Infof("Joined pubsub topic %s", topic)
+	return t, nil
 }
 
 func makeDataTransfer(ctx context.Context, host host.Host, ds datastore.Batching, lsys ipld.LinkSystem) (dt.Manager, graphsync.GraphExchange, string, error) {
@@ -92,10 +103,13 @@ func makeDataTransfer(ctx context.Context, host host.Host, ds datastore.Batching
 	// this may be removed.
 	tmpDir, err := ioutil.TempDir("", "go-legs")
 	if err != nil {
+		log.Errorf("Failed to create temp dir for datatransfer: %s", err)
 		return nil, nil, "", err
 	}
+	log.Debugf("Created datatransfer temp dir at path: %s", tmpDir)
 	dt, err := datatransfer.NewDataTransfer(ds, tmpDir, dtNet, tp)
 	if err != nil {
+		log.Errorf("Failed to instantiate datatransfer: %s", err)
 		return nil, nil, "", err
 	}
 
@@ -103,12 +117,15 @@ func makeDataTransfer(ctx context.Context, host host.Host, ds datastore.Batching
 	lvr := &VoucherResult{}
 	val := &legsValidator{}
 	if err := dt.RegisterVoucherType(v, val); err != nil {
+		log.Errorf("Failed to register legs validator voucher type: %s", err)
 		return nil, nil, "", err
 	}
 	if err := dt.RegisterVoucherResultType(lvr); err != nil {
+		log.Errorf("Failed to register legs voucher result: %s", err)
 		return nil, nil, "", err
 	}
 	if err := dt.Start(ctx); err != nil {
+		log.Errorf("Failed to start datatransfer: %s", err)
 		return nil, nil, "", err
 	}
 
@@ -142,14 +159,20 @@ func newSimpleSetup(ctx context.Context,
 }
 
 func (ss *simpleSetup) onClose() error {
+	log.Debug("Closing legs simple setup")
 	err := ss.dt.Stop(ss.ctx)
 	err2 := os.RemoveAll(ss.tmpDir)
 	err3 := ss.t.Close()
 	if err != nil {
+		log.Errorf("Failed to stop datatransfer: %s", err)
 		return err
 	}
 	if err2 != nil {
+		log.Errorf("Failed to remove datatransfer temp dir: %s", err2)
 		return err2
+	}
+	if err3 != nil {
+		log.Errorf("Failed to close pubsub topic: %s", err3)
 	}
 	return err3
 }
