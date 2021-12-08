@@ -43,7 +43,7 @@ func (h *httpPublisher) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		defer h.rl.RUnlock()
 		out, err := json.Marshal(h.root.String())
 		if err != nil {
-			w.WriteHeader(500)
+			http.Error(w, err.Error(), http.StatusBadRequest)
 			log.Errorw("Failed to serve root", "err", err)
 		} else {
 			_, _ = w.Write(out)
@@ -53,19 +53,16 @@ func (h *httpPublisher) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// interpret `ask` as a CID to serve.
 	c, err := cid.Parse(ask)
 	if err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		w.Write([]byte("invalid request: not a cid"))
+		http.Error(w, "invalid request: not a cid", http.StatusBadRequest)
 		return
 	}
 	item, err := h.lsys.Load(ipld.LinkContext{}, cidlink.Link{Cid: c}, basicnode.Prototype.Any)
 	if err != nil {
 		if errors.Is(err, ipld.ErrNotExists{}) {
-			w.WriteHeader(http.StatusNotFound)
-			w.Write([]byte("cid not found"))
+			http.Error(w, "cid not found", http.StatusNotFound)
 			return
 		}
-		w.WriteHeader(http.StatusInternalServerError)
-		w.Write([]byte("unable to load data for cid"))
+		http.Error(w, "unable to load data for cid", http.StatusInternalServerError)
 		log.Errorw("Failed to load requested block", "err", err)
 		return
 	}

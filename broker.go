@@ -333,7 +333,6 @@ func (lb *LegBroker) Sync(ctx context.Context, peerID peer.ID, c cid.Cid, selSeq
 			Cid:    c,
 			PeerID: peerID,
 		}
-		return
 	}()
 
 	return out, nil

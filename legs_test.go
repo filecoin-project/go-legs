@@ -121,7 +121,10 @@ func TestRoundTripExistingDataTransfer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	dt.Start(context.Background())
+	err = dt.Start(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
 	lp, err := legs.NewPublisherFromExisting(context.Background(), dt, srcHost, "legs/testtopic", srcLnkS)
 	if err != nil {
 		t.Fatal(err)
@@ -197,11 +200,21 @@ func TestSetAndFilterPeerPolicy(t *testing.T) {
 	np := basicnode.Prototype__Any{}
 	nb := np.NewBuilder()
 	ma, _ := nb.BeginMap(2)
-	ma.AssembleKey().AssignString("hey")
-	ma.AssembleValue().AssignString("it works!")
-	ma.AssembleKey().AssignString("yes")
-	ma.AssembleValue().AssignBool(true)
-	ma.Finish()
+	if err = ma.AssembleKey().AssignString("hey"); err != nil {
+		t.Fatal(err)
+	}
+	if err = ma.AssembleValue().AssignString("it works!"); err != nil {
+		t.Fatal(err)
+	}
+	if err = ma.AssembleKey().AssignString("yes"); err != nil {
+		t.Fatal(err)
+	}
+	if err = ma.AssembleValue().AssignBool(true); err != nil {
+		t.Fatal(err)
+	}
+	if err = ma.Finish(); err != nil {
+		t.Fatal(err)
+	}
 	n := nb.Build()
 	lnk, err := test.Store(srcStore, n)
 	if err != nil {
