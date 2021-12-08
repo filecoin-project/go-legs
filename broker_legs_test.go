@@ -168,7 +168,7 @@ func TestBrokerRoundTripExistingDataTransfer(t *testing.T) {
 		t.Fatal("timed out waiting for sync to propogate")
 	case downstream := <-watcher:
 		if !downstream.Cid.Equals(lnk.(cidlink.Link).Cid) {
-			t.Fatalf("sync'd sid unexpected %s vs %s", downstream.Cid, lnk)
+			t.Fatalf("sync'd cid unexpected %s vs %s", downstream.Cid, lnk)
 		}
 		if _, err := dstStore.Get(datastore.NewKey(downstream.Cid.String())); err != nil {
 			t.Fatalf("data not in receiver store: %v", err)
@@ -232,7 +232,9 @@ func TestBrokerSetAndFilterPeerPolicy(t *testing.T) {
 
 	select {
 	case <-time.After(time.Second * 3):
-	case <-watcher:
-		t.Fatal("something was exchanged, and that is wrong")
+	case _, open := <-watcher:
+		if open {
+			t.Fatal("something was exchanged, and that is wrong")
+		}
 	}
 }

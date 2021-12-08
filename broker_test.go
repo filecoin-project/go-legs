@@ -123,7 +123,6 @@ func TestLegBrokerRoundTrip(t *testing.T) {
 			t.Log("Watcher 2 got sync:", downstream.Cid)
 		}
 	}
-
 }
 
 func TestCloseLegBroker(t *testing.T) {
