@@ -300,7 +300,7 @@ func TestBrokerLatestSyncFailure(t *testing.T) {
 
 	watcher, cncl := lb.OnChange()
 
-	t.Log("The other end does not have the data")
+	//t.Log("The other end does not have the data")
 	newBrokerUpdateTest(t, lp, lb, dstStore, watcher, srcHost.ID(), cidlink.Link{Cid: cid.Undef}, true, chainLnks[3].(cidlink.Link).Cid)
 	dstStore = dssync.MutexWrap(datastore.NewMapDatastore())
 
