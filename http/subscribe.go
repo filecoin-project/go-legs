@@ -209,7 +209,6 @@ func (h *httpSubscriber) background() {
 			nextCid, err = h.fetchHead(ctx)
 			if err != nil {
 				log.Warnf("failed to fetch new head: %s", err)
-				err = nil
 				continue
 			}
 		}
@@ -222,7 +221,7 @@ func (h *httpSubscriber) background() {
 			sel = legs.ExploreRecursiveWithStopNode(selector.RecursionLimitNone(), h.dss, cidlink.Link{Cid: currHead})
 		}
 
-		if err := h.fetchBlock(ctx, nextCid); err != nil {
+		if err = h.fetchBlock(ctx, nextCid); err != nil {
 			log.Errorw("Failed to fetch requested block", "err", err)
 			continue
 		}

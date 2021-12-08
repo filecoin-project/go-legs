@@ -29,7 +29,10 @@ func encodeMessage(m message) []byte {
 	var b bytes.Buffer
 	b.Grow(m.cid.ByteLen() + size)
 	// CID already contains encoded length, so no need to add length to data.
-	m.cid.WriteBytes(&b)
+	_, err := m.cid.WriteBytes(&b)
+	if err != nil {
+		panic(err)
+	}
 
 	for _, addr := range m.addrs {
 		addrBytes := addr.Bytes()
