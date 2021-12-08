@@ -282,15 +282,15 @@ func TestBrokerLatestSyncFailure(t *testing.T) {
 	dstHost := mkTestHost()
 	srcHost.Peerstore().AddAddrs(dstHost.ID(), dstHost.Addrs(), time.Hour)
 	dstHost.Peerstore().AddAddrs(srcHost.ID(), srcHost.Addrs(), time.Hour)
-	if err := srcHost.Connect(context.Background(), dstHost.Peerstore().PeerInfo(dstHost.ID())); err != nil {
-		t.Fatal(err)
-	}
 	dstLnkS := mkLinkSystem(dstStore)
 	t.Log("srcHost:", srcHost.ID())
 	t.Log("dstHost:", dstHost.ID())
 
 	lb, err := NewLegBroker(dstHost, dstStore, dstLnkS, testTopic, nil, 0, nil)
 	if err != nil {
+		t.Fatal(err)
+	}
+	if err := srcHost.Connect(context.Background(), dstHost.Peerstore().PeerInfo(dstHost.ID())); err != nil {
 		t.Fatal(err)
 	}
 	err = lb.SetLatestSync(srcHost.ID(), chainLnks[3].(cidlink.Link).Cid)
@@ -300,7 +300,7 @@ func TestBrokerLatestSyncFailure(t *testing.T) {
 
 	watcher, cncl := lb.OnChange()
 
-	// The other end doesn't have the data
+	t.Log("The other end does not have the data")
 	newBrokerUpdateTest(t, lp, lb, dstStore, watcher, srcHost.ID(), cidlink.Link{Cid: cid.Undef}, true, chainLnks[3].(cidlink.Link).Cid)
 	dstStore = dssync.MutexWrap(datastore.NewMapDatastore())
 
@@ -314,7 +314,7 @@ func TestBrokerLatestSyncFailure(t *testing.T) {
 		lb.Close()
 		cncl()
 	})
-	// We are not able to run the full exchange
+	t.Log("Not able to run the full exchange")
 	newBrokerUpdateTest(t, lp, lb, dstStore, watcher, srcHost.ID(), chainLnks[2], true, chainLnks[3].(cidlink.Link).Cid)
 }
 
@@ -328,14 +328,20 @@ func newBrokerUpdateTest(t *testing.T, lp LegPublisher, lb *LegBroker, dstStore 
 		select {
 		case <-time.After(time.Second * 5):
 			assertBrokerLatestSyncEquals(t, lb, peerID, expectedSync)
-		case <-watcher:
-			t.Fatal("no exchange should have been performed")
+		case changeEvent, open := <-watcher:
+			if !open {
+				return
+			}
+			t.Fatalf("no exchange should have been performed, but got change from peer %s for cid %s", changeEvent.PeerID, changeEvent.Cid)
 		}
 	} else {
 		select {
 		case <-time.After(time.Second * 5):
 			t.Fatal("timed out waiting for sync to propagate")
-		case downstream := <-watcher:
+		case downstream, open := <-watcher:
+			if !open {
+				return
+			}
 			if !downstream.Cid.Equals(lnk.(cidlink.Link).Cid) {
 				t.Fatalf("sync'd cid unexpected %s vs %s", downstream.Cid, lnk)
 			}
