@@ -314,7 +314,7 @@ func TestBrokerLatestSyncFailure(t *testing.T) {
 		lb.Close()
 		cncl()
 	})
-	t.Log("Not able to run the full exchange")
+	t.Log("Not able to run the full exchange, update to", chainLnks[2])
 	newBrokerUpdateTest(t, lp, lb, dstStore, watcher, srcHost.ID(), chainLnks[2], true, chainLnks[3].(cidlink.Link).Cid)
 }
 
