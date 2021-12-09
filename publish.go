@@ -71,16 +71,15 @@ func NewPublisherFromExisting(ctx context.Context,
 
 func (lp *legPublisher) UpdateRoot(ctx context.Context, c cid.Cid) error {
 	log.Debugf("Published CID and addresses in pubsub channel: %s", c)
+	err := lp.headPublisher.UpdateRoot(ctx, c)
+	if err != nil {
+		return err
+	}
 	msg := message{
 		cid:   c,
 		addrs: lp.host.Addrs(),
 	}
-	err1 := lp.topic.Publish(ctx, encodeMessage(msg))
-	err2 := lp.headPublisher.UpdateRoot(ctx, c)
-	if err1 != nil {
-		return err1
-	}
-	return err2
+	return lp.topic.Publish(ctx, encodeMessage(msg))
 }
 
 func (lp *legPublisher) Close() error {
