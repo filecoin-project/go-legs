@@ -83,7 +83,7 @@ func QueryRootCid(ctx context.Context, host host.Host, topic string, peer peer.I
 	if err != nil {
 		log.Errorf("Failed to decode CID %s: %s", cs, err)
 	} else {
-		log.Debugf("Sucessfully queried latest head %s", decode)
+		log.Debugf("Sucessfully queried the latest head %s", decode)
 	}
 	return decode, err
 }
@@ -91,7 +91,7 @@ func QueryRootCid(ctx context.Context, host host.Host, topic string, peer peer.I
 func (p *Publisher) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	base := path.Base(r.URL.Path)
 	if base != "head" {
-		log.Debug("Only head is supported; rejecting reqpuest with base path: %s", base)
+		log.Debugf("Only head is supported; rejecting reqpuest with base path: %s", base)
 		http.Error(w, "", http.StatusNotFound)
 		return
 	}
@@ -101,7 +101,7 @@ func (p *Publisher) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	var out []byte
 	if p.root != cid.Undef {
 		currentHead := p.root.String()
-		log.Debug("Found current head: %s", currentHead)
+		log.Debugf("Found current head: %s", currentHead)
 		out = []byte(currentHead)
 	} else {
 		log.Debug("No head is set; responding with empty")
@@ -118,6 +118,12 @@ func (p *Publisher) UpdateRoot(_ context.Context, c cid.Cid) error {
 	defer p.rl.Unlock()
 	p.root = c
 	return nil
+}
+
+func (p *Publisher) GetRoot() cid.Cid {
+	p.rl.RLock()
+	defer p.rl.RUnlock()
+	return p.root
 }
 
 func (p *Publisher) Close() error {

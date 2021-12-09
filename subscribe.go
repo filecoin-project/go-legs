@@ -160,7 +160,7 @@ func (ls *legSubscriber) onEvent(event dt.Event, channelState dt.ChannelState) {
 			// NOTE: This is not persisted anywhere. Is the top-level user's
 			// responsability to persist if needed to intialize a
 			// partiallySynced subscriber.
-			log.Debugw("Exchange finished, updating latest to  %s", baseCID)
+			log.Debugf("Exchange finished, updating latest to %s", baseCID)
 			ls.latestSync = cidlink.Link{Cid: baseCID}
 			// This Unlocks the syncMutex that was locked in watch(),
 			// refer to that function for the lock functionality.
