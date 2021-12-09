@@ -88,28 +88,33 @@ func makePubsub(ctx context.Context, h host.Host, topic string) (*pubsub.Topic, 
 	return t, nil
 }
 
-func makeDataTransfer(ctx context.Context, host host.Host, ds datastore.Batching, lsys ipld.LinkSystem) (dt.Manager, graphsync.GraphExchange, string, error) {
+func makeDataTransfer(ctx context.Context, host host.Host, ds datastore.Batching, lsys ipld.LinkSystem, dt dt.Manager) (dt.Manager, graphsync.GraphExchange, string, error) {
 	gsnet := gsnet.NewFromLibp2pHost(host)
-	dtNet := dtnetwork.NewFromLibp2pHost(host)
 	gs := gsimpl.New(context.Background(), gsnet, lsys)
-	tp := gstransport.NewTransport(host.ID(), gs, dtNet)
 
-	// DataTransfer channels use this file to track cidlist of exchanges
-	// NOTE: It needs to be initialized for the datatransfer not to fail, but
-	// it has no other use outside the cidlist, so I don't think it should be
-	// exposed publicly. It's only used for the life of a data transfer.
-	// In the future, once an empty directory is accepted as input, it
-	// this may be removed.
-	tmpDir, err := ioutil.TempDir("", "go-legs")
-	if err != nil {
-		log.Errorf("Failed to create temp dir for datatransfer: %s", err)
-		return nil, nil, "", err
-	}
-	log.Debugf("Created datatransfer temp dir at path: %s", tmpDir)
-	dt, err := datatransfer.NewDataTransfer(ds, tmpDir, dtNet, tp)
-	if err != nil {
-		log.Errorf("Failed to instantiate datatransfer: %s", err)
-		return nil, nil, "", err
+	var err error
+	var tmpDir string
+	if dt == nil {
+		dtNet := dtnetwork.NewFromLibp2pHost(host)
+		tp := gstransport.NewTransport(host.ID(), gs, dtNet)
+
+		// DataTransfer channels use this file to track cidlist of exchanges
+		// NOTE: It needs to be initialized for the datatransfer not to fail, but
+		// it has no other use outside the cidlist, so I don't think it should be
+		// exposed publicly. It's only used for the life of a data transfer.
+		// In the future, once an empty directory is accepted as input, it
+		// this may be removed.
+		tmpDir, err = ioutil.TempDir("", "go-legs")
+		if err != nil {
+			log.Errorf("Failed to create temp dir for datatransfer: %s", err)
+			return nil, nil, "", err
+		}
+		log.Debugf("Created datatransfer temp dir at path: %s", tmpDir)
+		dt, err = datatransfer.NewDataTransfer(ds, tmpDir, dtNet, tp)
+		if err != nil {
+			log.Errorf("Failed to instantiate datatransfer: %s", err)
+			return nil, nil, "", err
+		}
 	}
 
 	v := &Voucher{}
@@ -119,13 +124,16 @@ func makeDataTransfer(ctx context.Context, host host.Host, ds datastore.Batching
 		log.Errorf("Failed to register legs validator voucher type: %s", err)
 		return nil, nil, "", err
 	}
-	if err := dt.RegisterVoucherResultType(lvr); err != nil {
+	if err = dt.RegisterVoucherResultType(lvr); err != nil {
 		log.Errorf("Failed to register legs voucher result: %s", err)
 		return nil, nil, "", err
 	}
-	if err := dt.Start(ctx); err != nil {
-		log.Errorf("Failed to start datatransfer: %s", err)
-		return nil, nil, "", err
+
+	if tmpDir != "" {
+		if err = dt.Start(ctx); err != nil {
+			log.Errorf("Failed to start datatransfer: %s", err)
+			return nil, nil, "", err
+		}
 	}
 
 	// Wait for datatrnasfer to be ready.
@@ -157,7 +165,7 @@ func newSimpleSetup(ctx context.Context,
 	if err != nil {
 		return nil, err
 	}
-	dt, _, tmpDir, err := makeDataTransfer(ctx, host, ds, lsys)
+	dt, _, tmpDir, err := makeDataTransfer(ctx, host, ds, lsys, nil)
 	if err != nil {
 		return nil, err
 	}

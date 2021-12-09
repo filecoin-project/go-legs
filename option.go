@@ -3,12 +3,18 @@ package legs
 import (
 	"fmt"
 	"time"
+
+	dt "github.com/filecoin-project/go-data-transfer"
+	pubsub "github.com/libp2p/go-libp2p-pubsub"
 )
 
 // config contains all options for configuring LegBroker.
 type config struct {
 	addrTTL   time.Duration
 	allowPeer AllowPeerFunc
+
+	topic     *pubsub.Topic
+	dtManager dt.Manager
 }
 
 type Option func(*config) error
@@ -37,6 +43,22 @@ func AllowPeer(allowPeer AllowPeerFunc) Option {
 func AddrTTL(addrTTL time.Duration) Option {
 	return func(c *config) error {
 		c.addrTTL = addrTTL
+		return nil
+	}
+}
+
+// Topic provides an existing pubsub topic.
+func Topic(topic *pubsub.Topic) Option {
+	return func(c *config) error {
+		c.topic = topic
+		return nil
+	}
+}
+
+// DtManager provides an existing datatransfer manager.
+func DtManager(dt dt.Manager) Option {
+	return func(c *config) error {
+		c.dtManager = dt
 		return nil
 	}
 }
