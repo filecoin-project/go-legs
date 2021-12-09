@@ -4,6 +4,7 @@ go 1.16
 
 require (
 	github.com/filecoin-project/go-data-transfer v1.11.4
+	github.com/hashicorp/go-multierror v1.1.1
 	github.com/ipfs/go-cid v0.1.0
 	github.com/ipfs/go-datastore v0.4.6
 	github.com/ipfs/go-graphsync v0.10.0

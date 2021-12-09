@@ -28,7 +28,7 @@ func TestBrokerLatestSyncSuccess(t *testing.T) {
 	dstHost.Peerstore().AddAddrs(srcHost.ID(), srcHost.Addrs(), time.Hour)
 	dstLnkS := mkLinkSystem(dstStore)
 
-	lb, err := NewLegBroker(dstHost, dstStore, dstLnkS, testTopic, nil, 0, nil)
+	lb, err := NewLegBroker(dstHost, dstStore, dstLnkS, testTopic, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -38,7 +38,7 @@ func TestBrokerLatestSyncSuccess(t *testing.T) {
 	}
 
 	time.Sleep(1 * time.Second)
-	watcher, cncl := lb.OnChange()
+	watcher, cncl := lb.OnSyncFinished()
 
 	// Store the whole chain in source node
 	chainLnks := mkChain(srcLnkS, true)
@@ -69,7 +69,7 @@ func TestBrokerSyncFn(t *testing.T) {
 	dstHost.Peerstore().AddAddrs(srcHost.ID(), srcHost.Addrs(), time.Hour)
 	dstLnkS := mkLinkSystem(dstStore)
 
-	lb, err := NewLegBroker(dstHost, dstStore, dstLnkS, testTopic, nil, 0, nil)
+	lb, err := NewLegBroker(dstHost, dstStore, dstLnkS, testTopic, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -174,7 +174,7 @@ func TestBrokerPartialSync(t *testing.T) {
 	dstHost.Peerstore().AddAddrs(srcHost.ID(), srcHost.Addrs(), time.Hour)
 	dstLnkS := mkLinkSystem(dstStore)
 
-	lb, err := NewLegBroker(dstHost, dstStore, dstLnkS, testTopic, nil, 0, nil)
+	lb, err := NewLegBroker(dstHost, dstStore, dstLnkS, testTopic, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -192,7 +192,7 @@ func TestBrokerPartialSync(t *testing.T) {
 
 	time.Sleep(1 * time.Second)
 
-	watcher, cncl := lb.OnChange()
+	watcher, cncl := lb.OnSyncFinished()
 
 	t.Cleanup(func() {
 		lp.Close()
@@ -237,7 +237,7 @@ func TestBrokerStepByStepSync(t *testing.T) {
 	dstHost.Peerstore().AddAddrs(srcHost.ID(), srcHost.Addrs(), time.Hour)
 	dstLnkS := mkLinkSystem(dstStore)
 
-	lb, err := NewLegBroker(dstHost, dstStore, dstLnkS, testTopic, nil, 0, nil)
+	lb, err := NewLegBroker(dstHost, dstStore, dstLnkS, testTopic, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -248,7 +248,7 @@ func TestBrokerStepByStepSync(t *testing.T) {
 
 	time.Sleep(1 * time.Second)
 
-	watcher, cncl := lb.OnChange()
+	watcher, cncl := lb.OnSyncFinished()
 
 	// Store the whole chain in source node
 	chainLnks := mkChain(srcLnkS, true)
@@ -288,7 +288,7 @@ func TestBrokerLatestSyncFailure(t *testing.T) {
 	t.Log("source host:", srcHost.ID())
 	t.Log("targer host:", dstHost.ID())
 
-	lb, err := NewLegBroker(dstHost, dstStore, dstLnkS, testTopic, nil, 0, nil)
+	lb, err := NewLegBroker(dstHost, dstStore, dstLnkS, testTopic, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -300,7 +300,7 @@ func TestBrokerLatestSyncFailure(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	watcher, cncl := lb.OnChange()
+	watcher, cncl := lb.OnSyncFinished()
 
 	t.Log("Testing sync fail when the other end does not have the data")
 	newBrokerUpdateTest(t, lp, lb, dstStore, watcher, srcHost.ID(), cidlink.Link{Cid: cid.Undef}, true, chainLnks[3].(cidlink.Link).Cid)
@@ -308,7 +308,7 @@ func TestBrokerLatestSyncFailure(t *testing.T) {
 	lb.Close()
 
 	dstStore = dssync.MutexWrap(datastore.NewMapDatastore())
-	lb, err = NewLegBroker(dstHost, dstStore, dstLnkS, testTopic, nil, 0, nil)
+	lb, err = NewLegBroker(dstHost, dstStore, dstLnkS, testTopic, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -316,7 +316,7 @@ func TestBrokerLatestSyncFailure(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	watcher, cncl = lb.OnChange()
+	watcher, cncl = lb.OnSyncFinished()
 
 	t.Cleanup(func() {
 		lp.Close()
@@ -327,7 +327,7 @@ func TestBrokerLatestSyncFailure(t *testing.T) {
 	newBrokerUpdateTest(t, lp, lb, dstStore, watcher, srcHost.ID(), chainLnks[2], true, chainLnks[3].(cidlink.Link).Cid)
 }
 
-func newBrokerUpdateTest(t *testing.T, lp LegPublisher, lb *LegBroker, dstStore datastore.Batching, watcher <-chan ChangeEvent, peerID peer.ID, lnk ipld.Link, withFailure bool, expectedSync cid.Cid) {
+func newBrokerUpdateTest(t *testing.T, lp LegPublisher, lb *LegBroker, dstStore datastore.Batching, watcher <-chan SyncFinished, peerID peer.ID, lnk ipld.Link, withFailure bool, expectedSync cid.Cid) {
 	err := lp.UpdateRoot(context.Background(), lnk.(cidlink.Link).Cid)
 	if err != nil {
 		t.Fatal(err)

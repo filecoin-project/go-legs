@@ -6,16 +6,15 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ipfs/go-datastore"
-	dssync "github.com/ipfs/go-datastore/sync"
-	gsimpl "github.com/ipfs/go-graphsync/impl"
-	gsnet "github.com/ipfs/go-graphsync/network"
-
-	// dagjson codec registered for encoding
 	datatransfer "github.com/filecoin-project/go-data-transfer/impl"
 	dtnetwork "github.com/filecoin-project/go-data-transfer/network"
 	gstransport "github.com/filecoin-project/go-data-transfer/transport/graphsync"
 	"github.com/filecoin-project/go-legs/test"
+	"github.com/ipfs/go-cid"
+	"github.com/ipfs/go-datastore"
+	dssync "github.com/ipfs/go-datastore/sync"
+	gsimpl "github.com/ipfs/go-graphsync/impl"
+	gsnet "github.com/ipfs/go-graphsync/network"
 	_ "github.com/ipld/go-ipld-prime/codec/dagcbor"
 	_ "github.com/ipld/go-ipld-prime/codec/dagjson"
 	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
@@ -37,7 +36,7 @@ func brokerInitPubSub(t *testing.T, srcStore, dstStore datastore.Batching) (host
 	dstHost.Peerstore().AddAddrs(srcHost.ID(), srcHost.Addrs(), time.Hour)
 	dstLnkS := test.MkLinkSystem(dstStore)
 
-	lb, err := NewLegBroker(dstHost, dstStore, dstLnkS, testTopic, nil, 0, nil)
+	lb, err := NewLegBroker(dstHost, dstStore, dstLnkS, testTopic, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -55,7 +54,7 @@ func TestBrokerRoundTrip(t *testing.T) {
 	dstStore := dssync.MutexWrap(datastore.NewMapDatastore())
 	_, _, lp, lb := brokerInitPubSub(t, srcStore, dstStore)
 
-	watcher, cncl := lb.OnChange()
+	watcher, cncl := lb.OnSyncFinished()
 
 	// Update root with item
 	itm := basicnode.NewString("hello world")
@@ -132,7 +131,7 @@ func TestBrokerRoundTripExistingDataTransfer(t *testing.T) {
 	dstStore := dssync.MutexWrap(datastore.NewMapDatastore())
 	dstLnkS := test.MkLinkSystem(dstStore)
 
-	lb, err := NewLegBroker(dstHost, dstStore, dstLnkS, testTopic, nil, 0, nil)
+	lb, err := NewLegBroker(dstHost, dstStore, dstLnkS, testTopic, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -140,7 +139,7 @@ func TestBrokerRoundTripExistingDataTransfer(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	watcher, cncl := lb.OnChange()
+	watcher, cncl := lb.OnSyncFinished()
 
 	// Update root with item
 	itm := basicnode.NewString("hello world")
@@ -176,15 +175,15 @@ func TestBrokerRoundTripExistingDataTransfer(t *testing.T) {
 	}
 }
 
-func TestBrokerSetAndFilterPeerPolicy(t *testing.T) {
+func TestBrokerAllowPeerReject(t *testing.T) {
 	// Init legs publisher and subscriber
 	srcStore := dssync.MutexWrap(datastore.NewMapDatastore())
 	dstStore := dssync.MutexWrap(datastore.NewMapDatastore())
 	_, dstHost, lp, lb := brokerInitPubSub(t, srcStore, dstStore)
 
-	// Set policy reject anything except dstHost, which is not the one
+	// Set function to reject anything except dstHost, which is not the one
 	// generating the update.
-	lb.SetPolicyHandler(func(peerID peer.ID) (bool, error) {
+	lb.SetAllowPeer(func(peerID peer.ID) (bool, error) {
 		return peerID == dstHost.ID(), nil
 	})
 
@@ -192,8 +191,70 @@ func TestBrokerSetAndFilterPeerPolicy(t *testing.T) {
 	// we don't seem to have a way to manually trigger needed gossip-sub heartbeats for mesh establishment.
 	time.Sleep(time.Second)
 
-	watcher, cncl := lb.OnChange()
+	watcher, cncl := lb.OnSyncFinished()
 
+	c := mkLnk(t, srcStore)
+
+	t.Cleanup(func() {
+		cncl()
+		lp.Close()
+		lb.Close()
+	})
+
+	// Update root with item
+	err := lp.UpdateRoot(context.Background(), c)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	select {
+	case <-time.After(time.Second * 3):
+	case _, open := <-watcher:
+		if open {
+			t.Fatal("something was exchanged, and that is wrong")
+		}
+	}
+}
+
+func TestBrokerAllowPeerAllows(t *testing.T) {
+	// Init legs publisher and subscriber
+	srcStore := dssync.MutexWrap(datastore.NewMapDatastore())
+	dstStore := dssync.MutexWrap(datastore.NewMapDatastore())
+	_, _, lp, lb := brokerInitPubSub(t, srcStore, dstStore)
+
+	// Set function to allow any peer.
+	lb.SetAllowPeer(func(peerID peer.ID) (bool, error) {
+		return true, nil
+	})
+
+	// per https://github.com/libp2p/go-libp2p-pubsub/blob/e6ad80cf4782fca31f46e3a8ba8d1a450d562f49/gossipsub_test.go#L103
+	// we don't seem to have a way to manually trigger needed gossip-sub heartbeats for mesh establishment.
+	time.Sleep(time.Second)
+
+	watcher, cncl := lb.OnSyncFinished()
+
+	c := mkLnk(t, srcStore)
+
+	t.Cleanup(func() {
+		cncl()
+		lp.Close()
+		lb.Close()
+	})
+
+	// Update root with item
+	err := lp.UpdateRoot(context.Background(), c)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	select {
+	case <-time.After(time.Second * 3):
+		t.Fatal("timed out waiting for SyncFinished")
+	case <-watcher:
+	}
+}
+
+func mkLnk(t *testing.T, srcStore datastore.Batching) cid.Cid {
 	// Update root with item
 	np := basicnode.Prototype__Any{}
 	nb := np.NewBuilder()
@@ -220,21 +281,5 @@ func TestBrokerSetAndFilterPeerPolicy(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	t.Cleanup(func() {
-		cncl()
-		lp.Close()
-		lb.Close()
-	})
-
-	if err = lp.UpdateRoot(context.Background(), lnk.(cidlink.Link).Cid); err != nil {
-		t.Fatal(err)
-	}
-
-	select {
-	case <-time.After(time.Second * 3):
-	case _, open := <-watcher:
-		if open {
-			t.Fatal("something was exchanged, and that is wrong")
-		}
-	}
+	return lnk.(cidlink.Link).Cid
 }

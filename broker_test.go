@@ -42,7 +42,7 @@ func TestLegBrokerRoundTrip(t *testing.T) {
 	dstHost.Peerstore().AddAddrs(srcHost2.ID(), srcHost2.Addrs(), time.Hour)
 
 	dstLnkS := test.MkLinkSystem(dstStore)
-	ld, err := NewLegBroker(dstHost, dstStore, dstLnkS, testTopic, nil, 0, nil)
+	ld, err := NewLegBroker(dstHost, dstStore, dstLnkS, testTopic, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -59,8 +59,8 @@ func TestLegBrokerRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	watcher1, cncl1 := ld.OnChange()
-	watcher2, cncl2 := ld.OnChange()
+	watcher1, cncl1 := ld.OnSyncFinished()
+	watcher2, cncl2 := ld.OnSyncFinished()
 
 	// Update root on publisher one with item
 	itm1 := basicnode.NewString("hello world")
@@ -120,12 +120,12 @@ func TestCloseLegBroker(t *testing.T) {
 	sh := mkTestHost()
 	lsys := test.MkLinkSystem(st)
 
-	ld, err := NewLegBroker(sh, st, lsys, testTopic, nil, 0, nil)
+	ld, err := NewLegBroker(sh, st, lsys, testTopic, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	watcher, cncl := ld.OnChange()
+	watcher, cncl := ld.OnSyncFinished()
 
 	err = ld.Close()
 	if err != nil {
@@ -149,6 +149,6 @@ func TestCloseLegBroker(t *testing.T) {
 	select {
 	case <-done:
 	case <-time.After(time.Second):
-		t.Fatal("OnChange cancel func did not return after Close")
+		t.Fatal("OnSyncFinished cancel func did not return after Close")
 	}
 }
