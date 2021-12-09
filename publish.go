@@ -76,16 +76,15 @@ func (lp *legPublisher) UpdateRoot(ctx context.Context, c cid.Cid) error {
 
 func (lp *legPublisher) UpdateRootWithAddrs(ctx context.Context, c cid.Cid, addrs []ma.Multiaddr) error {
 	log.Debugf("Published CID and addresses in pubsub channel: %s", c)
+	err := lp.headPublisher.UpdateRoot(ctx, c)
+	if err != nil {
+		return err
+	}
 	msg := message{
 		cid:   c,
 		addrs: addrs,
 	}
-	err1 := lp.topic.Publish(ctx, encodeMessage(msg))
-	err2 := lp.headPublisher.UpdateRoot(ctx, c)
-	if err1 != nil {
-		return err1
-	}
-	return err2
+	return lp.topic.Publish(ctx, encodeMessage(msg))
 }
 
 func (lp *legPublisher) Close() error {
