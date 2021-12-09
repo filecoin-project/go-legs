@@ -4,11 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"sync"
 	"time"
 
 	dt "github.com/filecoin-project/go-data-transfer"
 	"github.com/filecoin-project/go-legs/p2p/protocol/head"
+	"github.com/hashicorp/go-multierror"
 	"github.com/ipfs/go-cid"
 	"github.com/ipfs/go-datastore"
 	"github.com/ipfs/go-graphsync"
@@ -25,82 +27,86 @@ import (
 // provider poll interval.
 const defaultAddrTTL = 48 * time.Hour
 
-var ErrSourceNotAllowed = errors.New("message source not allowed by policy")
+// errSourceNotAllowed is the error returned when a message source peer's
+// messages is not allowed to be processed.  This is only used internally, and
+// pre-allocated here as it may occur frequently.
+var errSourceNotAllowed = errors.New("message source not allowed")
 
-// PeerPolicyHandler is the function signature of a function given to LegBroker
+// AllowPeerFunc is the function signature of a function given to LegBroker
 // that the broker uses to determine whether to allow or reject messages
 // originating from peer passed into the function.  Returning true indicates
 // that messages from the peer are allowed, and false indicated they should be
 // rejected.  Returning an error indicates that there was a problem evaluating
 // the peer, and results in the messages being rejected.
-type PeerPolicyHandler func(peerID peer.ID) (bool, error)
+type AllowPeerFunc func(peerID peer.ID) (bool, error)
 
 // LegBroker is a message broker for pubsub messages.  LegBroker creates a
 // single pubsub subscriber that receives messages from a gossip pubsub topic,
 // and creates a stateful message handler for each message source peer.  An
-// optional external policy determines whether to allow or deny handling
-// messages from specific peers.
+// optional externally-defined AllowPeerFunc determines whether to allow or
+// deny handling messages from specific peers.
 //
-// Messages to separate peers are handled concurrently, and multiple messages
-// to the same peer are handled serially.  If a handler is busy handling a
-// message, and more messages arrive for the same peer, then the last message
+// Messages from separate peers are handled concurrently, and multiple messages
+// from the same peer are handled serially.  If a handler is busy handling a
+// message, and more messages arrive from the same peer, then the last message
 // replaces the previous unhandled message to avoid having to maintain queues
 // of messages.  Handlers do not have persistent goroutines, but start a new
 // goroutine to handle a single message.
 type LegBroker struct {
+	gsExchange graphsync.GraphExchange
+	// dss captures the default selector sequence passed to
+	// ExploreRecursiveWithStopNode
+	dss         ipld.Node
 	dtManager   dt.Manager
-	gsExchange  graphsync.GraphExchange
 	tmpDir      string
 	unsubEvents dt.Unsubscribe
 
+	addrTTL time.Duration
 	host    host.Host
 	psub    *pubsub.Subscription
 	topic   *pubsub.Topic
-	addrTTL time.Duration
 
-	// dss captures the default selector sequence passed to ExploreRecursiveWithStopNode
-	dss ipld.Node
-
+	allowPeer     AllowPeerFunc
 	handlers      map[peer.ID]*handler
 	handlersMutex sync.Mutex
-	peerPolicy    PeerPolicyHandler
 
 	// Map of CID of in-progress sync to sync done channel.
 	syncDoneChans map[cid.Cid]chan<- struct{}
 	syncDoneMutex sync.Mutex
 
-	// inEvents is used to send a ChangeEvent from a peer handler to the
+	// inEvents is used to send a SyncFinished from a peer handler to the
 	// distributeEvents goroutine.
-	inEvents chan ChangeEvent
+	inEvents chan SyncFinished
 
 	// outEventsChans is a slice of channels, where each channel delivers a
-	// copy of a ChangeEvent to an OnChange reader.
-	outEventsChans []chan ChangeEvent
+	// copy of a SyncFinished to an OnSyncFinished reader.
+	outEventsChans []chan SyncFinished
 	outEventsMutex sync.Mutex
 
-	// cancelBroker cancels broker goroutines
-	cancelBrkr context.CancelFunc
-	// cancelAll cancels pubsub and datatransfer and broker goroutines
-	cancelAll context.CancelFunc
+	// closing signals that the LegBroker is closing
+	closing chan struct{}
+	// cancel sub-services (pubsub, datatransfer)
+	cancelAll   context.CancelFunc
+	cancelWatch context.CancelFunc
 }
 
-// ChangeEvent notifies an OnChange reader that a specified peer completed a sync.
-type ChangeEvent struct {
-	Cid    cid.Cid
+// SyncFinished notifies an OnSyncFinished reader that a specified peer
+// completed a sync.  The channel receives events from providers that are
+// manually synced to the latest, as well as those auto-discovered.
+type SyncFinished struct {
+	// Cid is the CID identifying the link that finished and is now the latest
+	// sync for a specific peer.
+	Cid cid.Cid
+	// PeerID identifies the peer this SyncFinished event pertains to.
 	PeerID peer.ID
-}
-
-// Defined tells whether the ChangeEvent holds any data.
-func (ce ChangeEvent) Defined() bool {
-	return ce.Cid.Defined()
 }
 
 // handler holds state that is specific to a peer
 type handler struct {
 	dtManager dt.Manager
-	// distEvents is used to communicate a syncDone event back to the
-	// LegBroker for distribution to OnChange readers.
-	distEvents chan<- ChangeEvent
+	// distEvents is used to communicate a syncDone event back to the LegBroker
+	// for distribution to OnSyncFinished readers.
+	distEvents chan<- SyncFinished
 	latestSync ipld.Link
 	msgChan    chan cid.Cid
 	// peerID is the ID of the peer this handler is responsible for.
@@ -112,8 +118,16 @@ type handler struct {
 	syncMutex sync.Mutex
 }
 
-// NewLegBroker creates a new LegBroker, and will process messages that are allowed by given peerPolicy.
-func NewLegBroker(host host.Host, ds datastore.Batching, lsys ipld.LinkSystem, topic string, dss ipld.Node, addrTTL time.Duration, peerPolicy PeerPolicyHandler) (*LegBroker, error) {
+// NewLegBroker creates a new LegBroker that process pubsub messages.
+func NewLegBroker(host host.Host, ds datastore.Batching, lsys ipld.LinkSystem, topic string, dss ipld.Node, options ...Option) (*LegBroker, error) {
+	cfg := config{
+		addrTTL: defaultAddrTTL,
+	}
+	err := cfg.apply(options)
+	if err != nil {
+		panic(err.Error())
+	}
+
 	ctx, cancelAll := context.WithCancel(context.Background())
 
 	pubsubTopic, err := makePubsub(ctx, host, topic)
@@ -121,7 +135,6 @@ func NewLegBroker(host host.Host, ds datastore.Batching, lsys ipld.LinkSystem, t
 		cancelAll()
 		return nil, err
 	}
-
 	psub, err := pubsubTopic.Subscribe()
 	if err != nil {
 		cancelAll()
@@ -134,35 +147,30 @@ func NewLegBroker(host host.Host, ds datastore.Batching, lsys ipld.LinkSystem, t
 		return nil, err
 	}
 
-	if addrTTL == 0 {
-		addrTTL = defaultAddrTTL
-	}
-
-	ctx, cancelBrkr := context.WithCancel(ctx)
-
 	lb := &LegBroker{
 		dtManager:  dt,
+		dss:        dss,
 		host:       host,
 		gsExchange: gs,
 		tmpDir:     tmpDir,
 
-		addrTTL:    addrTTL,
-		psub:       psub,
-		topic:      pubsubTopic,
-		cancelBrkr: cancelBrkr,
-		cancelAll:  cancelAll,
+		addrTTL:   cfg.addrTTL,
+		psub:      psub,
+		topic:     pubsubTopic,
+		closing:   make(chan struct{}),
+		cancelAll: cancelAll,
 
-		peerPolicy: peerPolicy,
-		handlers:   make(map[peer.ID]*handler),
-		inEvents:   make(chan ChangeEvent, 1),
+		allowPeer: cfg.allowPeer,
+		handlers:  make(map[peer.ID]*handler),
+		inEvents:  make(chan SyncFinished, 1),
 	}
 
 	lb.unsubEvents = dt.SubscribeToEvents(lb.onEvent)
 
 	// Start watcher to read pubsub messages.
 	go lb.watch(ctx)
-	// Start distributor to send ChangeEvent messages to interested parties.
-	go lb.distributeEvents(ctx)
+	// Start distributor to send SyncFinished messages to interested parties.
+	go lb.distributeEvents()
 
 	return lb, nil
 }
@@ -184,7 +192,8 @@ func (lb *LegBroker) GetLatestSync(peerID peer.ID) ipld.Link {
 }
 
 // SetLatestSync sets the latest synced CID for a specified peer.  If there is
-// no handler for the peer one is created, regardless of policy.
+// no handler for the peer, then one is created without consulting any
+// AllowPeerFunc.
 func (lb *LegBroker) SetLatestSync(peerID peer.ID, latestSync cid.Cid) error {
 	hnd, err := lb.getOrCreateHandler(peerID, true)
 	if err != nil {
@@ -195,20 +204,35 @@ func (lb *LegBroker) SetLatestSync(peerID peer.ID, latestSync cid.Cid) error {
 	return nil
 }
 
-// SetPolicyHandler configures LegBroker with a function to evaluate whether to
-// allow or reject messages from the specified peer.  This replaces any
-// previously configured policy handler.
-func (lb *LegBroker) SetPolicyHandler(policy PeerPolicyHandler) {
+// SetAllowPeer configures LegBroker with a function to evaluate whether to
+// allow or reject messages from the specified peer.  Setting nil removes any
+// filtering and allows messages from all peers.  This replaces any previously
+// configured AllowPeerFunc.
+func (lb *LegBroker) SetAllowPeer(allowPeer AllowPeerFunc) {
 	lb.handlersMutex.Lock()
 	defer lb.handlersMutex.Unlock()
-	lb.peerPolicy = policy
+	lb.allowPeer = allowPeer
 }
 
 // Close shuts down the broker.
 func (lb *LegBroker) Close() error {
 	lb.unsubEvents()
 	lb.psub.Cancel()
-	lb.cancelBrkr()
+
+	var errs error
+	err := lb.dtManager.Stop(context.Background())
+	if err != nil {
+		log.Errorf("Failed to stop datatransfer manager: %s", err)
+		errs = multierror.Append(errs, err)
+	}
+	if err = os.RemoveAll(lb.tmpDir); err != nil {
+		log.Errorf("Failed to remove temp dir: %s", err)
+		errs = multierror.Append(errs, err)
+	}
+	if err = lb.topic.Close(); err != nil {
+		log.Errorf("Failed to close pubsub topic: %s", err)
+		errs = multierror.Append(errs, err)
+	}
 
 	// Dismiss any event readers.
 	lb.outEventsMutex.Lock()
@@ -229,22 +253,25 @@ func (lb *LegBroker) Close() error {
 	lb.syncDoneChans = nil
 	lb.syncDoneMutex.Unlock()
 
-	// Shutdown datatransfer.
+	// Shutdown sub-services.
 	lb.cancelAll()
-	return nil
+
+	// Stop the distribution goroutine.
+	close(lb.inEvents)
+	return errs
 }
 
-// OnChange creates a channel that receives change notifications, and adds that
-// channel to the list of notification channels.
+// OnSyncFinished creates a channel that receives change notifications, and
+// adds that channel to the list of notification channels.
 //
 // Calling the returned cancel function removed the notification channel from
 // those the receive change notifications, and closes the channel to allow any
 // waiting goroutines to stop waiting on the channel.  For this reason, channel
 // readers should check for channel closure.
-func (lb *LegBroker) OnChange() (<-chan ChangeEvent, context.CancelFunc) {
+func (lb *LegBroker) OnSyncFinished() (<-chan SyncFinished, context.CancelFunc) {
 	// Channel is buffered to prevent distribute() from blocking if a reader is
 	// not reading the channel immediately.
-	ch := make(chan ChangeEvent, 1)
+	ch := make(chan SyncFinished, 1)
 	lb.outEventsMutex.Lock()
 	defer lb.outEventsMutex.Unlock()
 
@@ -265,28 +292,31 @@ func (lb *LegBroker) OnChange() (<-chan ChangeEvent, context.CancelFunc) {
 	return ch, cncl
 }
 
-// Sync performs a one-off explicit sync with the given peer for a specific CID and updates the latest
-// synced link to it.
+// Sync performs a one-off explicit sync with the given peer for a specific CID
+// and updates the latest synced link to it.
 //
-// The Context passed in controls the lifetime of the background sync process
-// and not the call to sync, so make sure the context has an appropriate
-// deadline, if any.
+// The Context passed in controls the lifetime of the background sync process,
+// so make sure the context has an appropriate deadline, if any.
 //
-// A change event channel is returned to allow the caller to wait for this particular sync
-// to complete.  Any OnChange watchers will also get a ChangeEvent when the sync succeeds.
+// A SyncFinished channel is returned to allow the caller to wait for this
+// particular sync to complete.  Any OnSyncFinished readers will also get a
+// SyncFinished when the sync succeeds, but only if syncing to the latest using
+// the default selector.
 //
-// It is the responsibility of the caller to make sure the given CID appears after the latest sync
-// in order to avid re-syncing of content that may have previously been synced.
+// It is the responsibility of the caller to make sure the given CID appears
+// after the latest sync in order to avid re-syncing of content that may have
+// previously been synced.
 //
 // The selector sequence, selSec, can optionally be specified to customize the
 // selection sequence during traversal.  If unspecified, the subscriber's
 // default selector sequence is used.
 //
-// Note that the selector sequence is wrapped with a selector logic that will stop traversal when
-// the latest synced link is reached. Therefore, it must only specify the selection sequence itself.
+// Note that the selector sequence is wrapped with a selector logic that will
+// stop traversal when the latest synced link is reached. Therefore, it must
+// only specify the selection sequence itself.
 //
 // See: ExploreRecursiveWithStopNode.
-func (lb *LegBroker) Sync(ctx context.Context, peerID peer.ID, c cid.Cid, selSeq ipld.Node) (<-chan ChangeEvent, error) {
+func (lb *LegBroker) Sync(ctx context.Context, peerID peer.ID, c cid.Cid, selSeq ipld.Node) (<-chan SyncFinished, error) {
 	if peerID == "" {
 		return nil, errors.New("empty peer id")
 	}
@@ -298,7 +328,7 @@ func (lb *LegBroker) Sync(ctx context.Context, peerID peer.ID, c cid.Cid, selSeq
 	}
 
 	// Start goroutine to get latest root and handle
-	out := make(chan ChangeEvent, 1)
+	out := make(chan SyncFinished, 1)
 	go func() {
 		defer close(out)
 
@@ -323,16 +353,17 @@ func (lb *LegBroker) Sync(ctx context.Context, peerID peer.ID, c cid.Cid, selSeq
 			return
 		}
 
-		hnd.syncMutex.Lock()
-		defer hnd.syncMutex.Unlock()
-
 		var wrapSel bool
 		if selSeq == nil {
-			// Fall back onto the default selector sequence if one is not given.
-			// Note that if selector is specified it is used as is without any wrapping.
+			// Fall back onto the default selector sequence if one is not
+			// given.  Note that if selector is specified it is used as is
+			// without any wrapping.
 			selSeq = lb.dss
 			wrapSel = true
 		}
+
+		hnd.syncMutex.Lock()
+		defer hnd.syncMutex.Unlock()
 
 		err := hnd.handle(ctx, c, selSeq, wrapSel, updateLatest)
 		if err != nil {
@@ -340,7 +371,7 @@ func (lb *LegBroker) Sync(ctx context.Context, peerID peer.ID, c cid.Cid, selSeq
 			return
 		}
 
-		out <- ChangeEvent{
+		out <- SyncFinished{
 			Cid:    c,
 			PeerID: peerID,
 		}
@@ -349,25 +380,20 @@ func (lb *LegBroker) Sync(ctx context.Context, peerID peer.ID, c cid.Cid, selSeq
 	return out, nil
 }
 
-// distributeEvents reads a ChangeEvent, sent by a peer handler, and copies the
-// even to all channels in outEventsChans.  This delivers the ChangeEvent to
-// all OnChange channel readers.
-func (lb *LegBroker) distributeEvents(ctx context.Context) {
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case event := <-lb.inEvents:
-			if !event.Defined() {
-				continue
-			}
-			// Send update to all change notification channels.
-			lb.outEventsMutex.Lock()
-			for _, ch := range lb.outEventsChans {
-				ch <- event
-			}
-			lb.outEventsMutex.Unlock()
+// distributeEvents reads a SyncFinished, sent by a peer handler, and copies
+// the even to all channels in outEventsChans.  This delivers the SyncFinished
+// to all OnSyncFinished channel readers.
+func (lb *LegBroker) distributeEvents() {
+	for event := range lb.inEvents {
+		if !event.Cid.Defined() {
+			panic("SyncFinished event with undefined cid")
 		}
+		// Send update to all change notification channels.
+		lb.outEventsMutex.Lock()
+		for _, ch := range lb.outEventsChans {
+			ch <- event
+		}
+		lb.outEventsMutex.Unlock()
 	}
 }
 
@@ -382,18 +408,18 @@ func (lb *LegBroker) getOrCreateHandler(peerID peer.ID, force bool) (*handler, e
 		return hnd, nil
 	}
 
-	// If no handler, check policy to see if peer ID allowed.
-	if lb.peerPolicy != nil && !force {
-		allow, err := lb.peerPolicy(peerID)
+	// If no handler, check callback to see if peer ID allowed.
+	if lb.allowPeer != nil && !force {
+		allow, err := lb.allowPeer(peerID)
 		if err != nil {
-			return nil, fmt.Errorf("cannot evaluate policy: %w", err)
+			return nil, fmt.Errorf("error checking if peer allowed: %w", err)
 		}
 		if !allow {
-			return nil, ErrSourceNotAllowed
+			return nil, errSourceNotAllowed
 		}
 	}
 
-	log.Infow("Policy allows message sender, creating new handler", "peer", peerID)
+	log.Infow("Message sender allowed, creating new handler", "peer", peerID)
 	hnd = &handler{
 		dtManager:   lb.dtManager,
 		msgChan:     make(chan cid.Cid, 1),
@@ -406,10 +432,10 @@ func (lb *LegBroker) getOrCreateHandler(peerID peer.ID, force bool) (*handler, e
 	return hnd, nil
 }
 
-// watch reads messages from a pubsub topic subscription and passes the
-// message to the handler that is responsible for the peer that originally sent
-// the message.  If the handler does not yet exist, then the policy callback is
-// consulted to determine if the indexer is allowing the peer.  If allowed, a
+// watch reads messages from a pubsub topic subscription and passes the message
+// to the handler that is responsible for the peer that originally sent the
+// message.  If the handler does not yet exist, then the allowPeer callback is
+// consulted to determine if the peer's messages are allowed.  If allowed, a
 // new handler is created.  Otherwise, the message is ignored.
 func (lb *LegBroker) watch(ctx context.Context) {
 	for {
@@ -429,7 +455,7 @@ func (lb *LegBroker) watch(ctx context.Context) {
 
 		hnd, err := lb.getOrCreateHandler(srcPeer, false)
 		if err != nil {
-			if err == ErrSourceNotAllowed {
+			if err == errSourceNotAllowed {
 				log.Infow("Ignored message", "reason", err, "peer", srcPeer)
 			} else {
 				log.Errorw("Cannot process message", "err", err)
@@ -512,7 +538,8 @@ func (lb *LegBroker) onEvent(event dt.Event, channelState dt.ChannelState) {
 	close(syncDone)
 }
 
-// handleAsync starts a goroutine to process the latest message received over pubsub.
+// handleAsync starts a goroutine to process the latest message received over
+// pubsub.
 func (h *handler) handleAsync(ctx context.Context, c cid.Cid, ss ipld.Node) {
 	// Remove any previous message and replace it with the most recent.
 	select {
@@ -527,7 +554,7 @@ func (h *handler) handleAsync(ctx context.Context, c cid.Cid, ss ipld.Node) {
 	h.msgChan <- c
 
 	go func() {
-		// Wait for any previous messages to be handled.
+		// Wait for this handler to become available.
 		h.syncMutex.Lock()
 		defer h.syncMutex.Unlock()
 
@@ -542,8 +569,8 @@ func (h *handler) handleAsync(ctx context.Context, c cid.Cid, ss ipld.Node) {
 		default:
 			// A previous goroutine, that had its message replaced, read the
 			// message.  Or, the message was removed and will be replaced by
-			// another message and goroutine.  Either way, nothing to do in this
-			// routine.
+			// another message and goroutine.  Either way, nothing to do in
+			// this routine.
 		}
 	}()
 }
@@ -580,9 +607,9 @@ func (h *handler) handle(ctx context.Context, c cid.Cid, selSeq ipld.Node, wrapS
 	h.latestSync = cidlink.Link{Cid: c}
 	log.Debugw("Exchange finished, updating latest to %s", c)
 
-	// Tell the broker to distribute ChangeEvent to all notification
+	// Tell the broker to distribute SyncFinished to all notification
 	// destinations.
-	h.distEvents <- ChangeEvent{Cid: c, PeerID: h.peerID}
+	h.distEvents <- SyncFinished{Cid: c, PeerID: h.peerID}
 
 	return nil
 }
