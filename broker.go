@@ -55,7 +55,7 @@ type AllowPeerFunc func(peerID peer.ID) (bool, error)
 type Broker struct {
 	gsExchange graphsync.GraphExchange
 	// dss captures the default selector sequence passed to
-	// ExploreRecursiveWithStopNode
+	// ExploreRecursiveWithStopNode.
 	dss         ipld.Node
 	dtManager   dt.Manager
 	tmpDir      string
@@ -83,10 +83,12 @@ type Broker struct {
 	outEventsChans []chan SyncFinished
 	outEventsMutex sync.Mutex
 
-	// closing signals that the Broker is closing
+	// closing signals that the Broker is closing.
 	closing chan struct{}
-	// cancel sub-services (pubsub, datatransfer)
+	// cancel sub-services (pubsub, datatransfer).
 	cancelAll context.CancelFunc
+	// closeOnde ensures that the Close only happens once.
+	closeOnce sync.Once
 }
 
 // SyncFinished notifies an OnSyncFinished reader that a specified peer
@@ -129,10 +131,13 @@ func NewBroker(host host.Host, ds datastore.Batching, lsys ipld.LinkSystem, topi
 
 	ctx, cancelAll := context.WithCancel(context.Background())
 
-	pubsubTopic, err := makePubsub(ctx, host, topic)
-	if err != nil {
-		cancelAll()
-		return nil, err
+	pubsubTopic := cfg.topic
+	if pubsubTopic == nil {
+		pubsubTopic, err = makePubsub(ctx, host, topic)
+		if err != nil {
+			cancelAll()
+			return nil, err
+		}
 	}
 	psub, err := pubsubTopic.Subscribe()
 	if err != nil {
@@ -140,7 +145,7 @@ func NewBroker(host host.Host, ds datastore.Batching, lsys ipld.LinkSystem, topi
 		return nil, err
 	}
 
-	dt, gs, tmpDir, err := makeDataTransfer(ctx, host, ds, lsys)
+	dt, gs, tmpDir, err := makeDataTransfer(ctx, host, ds, lsys, cfg.dtManager)
 	if err != nil {
 		cancelAll()
 		return nil, err
@@ -215,6 +220,14 @@ func (lb *Broker) SetAllowPeer(allowPeer AllowPeerFunc) {
 
 // Close shuts down the broker.
 func (lb *Broker) Close() error {
+	var err error
+	lb.closeOnce.Do(func() {
+		err = lb.doClose()
+	})
+	return err
+}
+
+func (lb *Broker) doClose() error {
 	lb.unsubEvents()
 	lb.psub.Cancel()
 
@@ -224,9 +237,11 @@ func (lb *Broker) Close() error {
 		log.Errorf("Failed to stop datatransfer manager: %s", err)
 		errs = multierror.Append(errs, err)
 	}
-	if err = os.RemoveAll(lb.tmpDir); err != nil {
-		log.Errorf("Failed to remove temp dir: %s", err)
-		errs = multierror.Append(errs, err)
+	if lb.tmpDir != "" {
+		if err = os.RemoveAll(lb.tmpDir); err != nil {
+			log.Errorf("Failed to remove temp dir: %s", err)
+			errs = multierror.Append(errs, err)
+		}
 	}
 	if err = lb.topic.Close(); err != nil {
 		log.Errorf("Failed to close pubsub topic: %s", err)

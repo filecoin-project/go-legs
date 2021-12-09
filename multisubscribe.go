@@ -61,7 +61,7 @@ func NewMultiSubscriber(ctx context.Context, host host.Host, ds datastore.Batchi
 		return nil, err
 	}
 
-	dt, gs, tmpDir, err := makeDataTransfer(ctx, host, ds, lsys)
+	dt, gs, tmpDir, err := makeDataTransfer(ctx, host, ds, lsys, nil)
 	if err != nil {
 		return nil, err
 	}
