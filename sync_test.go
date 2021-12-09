@@ -379,15 +379,18 @@ func TestLatestSyncFailure(t *testing.T) {
 	}
 
 	watcher, cncl := ls.OnChange()
-	ls.Close()
-
 	// The other end doesn't have the data
 	newUpdateTest(t, lp, ls, dstStore, watcher, cidlink.Link{Cid: cid.Undef}, true, chainLnks[3].(cidlink.Link).Cid)
+	ls.Close()
+	cncl()
+
 	dstStore = dssync.MutexWrap(datastore.NewMapDatastore())
 	ls, err = NewSubscriberPartiallySynced(context.Background(), dstHost, dstStore, dstLnkS, "legs/testtopic", chainLnks[3].(cidlink.Link).Cid, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
+	watcher, cncl = ls.OnChange()
+
 	t.Cleanup(clean(lp, ls, cncl))
 	// We are not able to run the full exchange
 	newUpdateTest(t, lp, ls, dstStore, watcher, chainLnks[2], true, chainLnks[3].(cidlink.Link).Cid)
