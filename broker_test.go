@@ -91,7 +91,7 @@ func TestLegBrokerRoundTrip(t *testing.T) {
 	t.Log("Publish 2:", lnk2.(cidlink.Link).Cid)
 
 	// Check that watcher 1 gets both events.
-	for i := 0; i < 2; i++ {
+	for i := 0; i < 4; i++ {
 		select {
 		case <-time.After(time.Second * 5):
 			t.Fatal("timed out waiting for sync to propogate")
@@ -103,14 +103,6 @@ func TestLegBrokerRoundTrip(t *testing.T) {
 				t.Fatalf("data not in receiver store: %v", err)
 			}
 			t.Log("Watcher 1 got sync:", downstream.Cid)
-		}
-	}
-
-	// Check that watcher 2 gets both events.
-	for i := 0; i < 2; i++ {
-		select {
-		case <-time.After(time.Second * 5):
-			t.Fatal("timed out waiting for sync to propogate")
 		case downstream := <-watcher2:
 			if !downstream.Cid.Equals(lnk1.(cidlink.Link).Cid) && !downstream.Cid.Equals(lnk2.(cidlink.Link).Cid) {
 				t.Fatalf("sync'd cid unexpected %s vs %s", downstream, lnk1)

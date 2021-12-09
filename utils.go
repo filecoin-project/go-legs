@@ -89,7 +89,6 @@ func makePubsub(ctx context.Context, h host.Host, topic string) (*pubsub.Topic, 
 }
 
 func makeDataTransfer(ctx context.Context, host host.Host, ds datastore.Batching, lsys ipld.LinkSystem) (dt.Manager, graphsync.GraphExchange, string, error) {
-
 	gsnet := gsnet.NewFromLibp2pHost(host)
 	dtNet := dtnetwork.NewFromLibp2pHost(host)
 	gs := gsimpl.New(context.Background(), gsnet, lsys)
@@ -126,6 +125,16 @@ func makeDataTransfer(ctx context.Context, host host.Host, ds datastore.Batching
 	}
 	if err := dt.Start(ctx); err != nil {
 		log.Errorf("Failed to start datatransfer: %s", err)
+		return nil, nil, "", err
+	}
+
+	// Wait for datatrnasfer to be ready.
+	dtReady := make(chan error)
+	dt.OnReady(func(e error) {
+		dtReady <- e
+	})
+	err = <-dtReady
+	if err != nil {
 		return nil, nil, "", err
 	}
 

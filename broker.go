@@ -173,14 +173,14 @@ func NewLegBroker(host host.Host, ds datastore.Batching, lsys ipld.LinkSystem, t
 // about it.  Calling Sync() first may be necessary.
 func (lb *LegBroker) GetLatestSync(peerID peer.ID) ipld.Link {
 	lb.handlersMutex.Lock()
-	defer lb.handlersMutex.Unlock()
-
 	hnd, ok := lb.handlers[peerID]
 	if !ok {
+		lb.handlersMutex.Unlock()
 		return nil
 	}
+	lb.handlersMutex.Unlock()
 
-	return hnd.latestSync
+	return hnd.getLatestSync()
 }
 
 // SetLatestSync sets the latest synced CID for a specified peer.  If there is
@@ -218,12 +218,15 @@ func (lb *LegBroker) Close() error {
 	lb.outEventsChans = nil
 	lb.outEventsMutex.Unlock()
 
-	// Dismiss and handlers waiting completion of sync
+	// Dismiss any handlers waiting completion of sync.
 	lb.syncDoneMutex.Lock()
-	for c, ch := range lb.syncDoneChans {
-		close(ch)
-		delete(lb.syncDoneChans, c)
+	if len(lb.syncDoneChans) != 0 {
+		log.Warnf("Closing broker with %d syncs in progress", len(lb.syncDoneChans))
 	}
+	for _, ch := range lb.syncDoneChans {
+		close(ch)
+	}
+	lb.syncDoneChans = nil
 	lb.syncDoneMutex.Unlock()
 
 	// Shutdown datatransfer.
@@ -233,6 +236,11 @@ func (lb *LegBroker) Close() error {
 
 // OnChange creates a channel that receives change notifications, and adds that
 // channel to the list of notification channels.
+//
+// Calling the returned cancel function removed the notification channel from
+// those the receive change notifications, and closes the channel to allow any
+// waiting goroutines to stop waiting on the channel.  For this reason, channel
+// readers should check for channel closure.
 func (lb *LegBroker) OnChange() (<-chan ChangeEvent, context.CancelFunc) {
 	// Channel is buffered to prevent distribute() from blocking if a reader is
 	// not reading the channel immediately.
@@ -304,7 +312,10 @@ func (lb *LegBroker) Sync(ctx context.Context, peerID peer.ID, c cid.Cid, selSeq
 				return
 			}
 			log.Debugw("Sync queried root CID", "peer", peerID, "cid", c)
-			updateLatest = true
+			if selSeq == nil {
+				// Update the latestSync only if no CID and no selector given.
+				updateLatest = true
+			}
 		}
 
 		if ctx.Err() != nil {
@@ -429,7 +440,7 @@ func (lb *LegBroker) watch(ctx context.Context) {
 		// Decode CID and originator addresses from message.
 		m, err := decodeMessage(msg.Data)
 		if err != nil {
-			log.Warnf("Could not decode pubsub message: %s", err)
+			log.Errorf("Could not decode pubsub message: %s", err)
 			continue
 		}
 
@@ -455,11 +466,12 @@ func (lb *LegBroker) watch(ctx context.Context) {
 // done notification to.  This is how LegBroker waits on a pending sync.
 func (lb *LegBroker) putSyncDoneChan(c cid.Cid, syncDone chan<- struct{}) {
 	lb.syncDoneMutex.Lock()
+	defer lb.syncDoneMutex.Unlock()
+
 	if lb.syncDoneChans == nil {
 		lb.syncDoneChans = make(map[cid.Cid]chan<- struct{})
 	}
 	lb.syncDoneChans[c] = syncDone
-	lb.syncDoneMutex.Unlock()
 }
 
 // popSyncDone removes the channel when the pending sync has completed.
@@ -493,6 +505,10 @@ func (lb *LegBroker) onEvent(event dt.Event, channelState dt.ChannelState) {
 
 	// Send the FinishTransfer signal to the handler.  This will allow its
 	// handle goroutine to distribute the update and exit.
+	//
+	// It is not necessary to return the channelState CID, since we already
+	// know it is the correct on since it was used to look up this syncDone
+	// channel.
 	close(syncDone)
 }
 
@@ -506,7 +522,7 @@ func (h *handler) handleAsync(ctx context.Context, c cid.Cid, ss ipld.Node) {
 	}
 
 	// Put new message on channel.  This is necessary so that if multiple
-	// messages arrive while this handler is already syncing, that messages are
+	// messages arrive while this handler is already syncing, the messages are
 	// handled in order, regardless of goroutine scheduling.
 	h.msgChan <- c
 
@@ -536,16 +552,14 @@ func (h *handler) handleAsync(ctx context.Context, c cid.Cid, ss ipld.Node) {
 // The caller is responsible for ensuring that this is called while h.syncMutex
 // is locked.
 func (h *handler) handle(ctx context.Context, c cid.Cid, selSeq ipld.Node, wrapSel, updateLatest bool) error {
-	v := Voucher{&c}
-
-	log.Debugw("Starting data channel for message source", "cid", c, "latest_sync", h.latestSync, "source_peer", h.peerID)
-
 	syncDone := make(chan struct{})
 	h.putSyncDone(c, syncDone)
 
 	if wrapSel {
 		selSeq = ExploreRecursiveWithStopNode(selector.RecursionLimitNone(), selSeq, h.latestSync)
 	}
+	log.Debugw("Starting data channel for message source", "cid", c, "latest_sync", h.latestSync, "source_peer", h.peerID)
+	v := Voucher{&c}
 	_, err := h.dtManager.OpenPullDataChannel(ctx, h.peerID, &v, c, selSeq)
 	if err != nil {
 		return fmt.Errorf("cannot open data channel: %s", err)
@@ -581,4 +595,10 @@ func (h *handler) setLatestSync(latestSync cid.Cid) {
 	if latestSync != cid.Undef {
 		h.latestSync = cidlink.Link{Cid: latestSync}
 	}
+}
+
+func (h *handler) getLatestSync() ipld.Link {
+	h.syncMutex.Lock()
+	defer h.syncMutex.Unlock()
+	return h.latestSync
 }
