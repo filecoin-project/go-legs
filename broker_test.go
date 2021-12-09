@@ -14,7 +14,49 @@ import (
 
 const testTopic = "legs/testtopic"
 
-func TestLegBrokerRoundTrip(t *testing.T) {
+func TestBrokerRoundTripSimple(t *testing.T) {
+	// Init legs publisher and subscriber
+	srcStore := dssync.MutexWrap(datastore.NewMapDatastore())
+	dstStore := dssync.MutexWrap(datastore.NewMapDatastore())
+	_, _, lp, lb := brokerInitPubSub(t, srcStore, dstStore)
+
+	watcher, cncl := lb.OnSyncFinished()
+
+	// Update root with item
+	itm := basicnode.NewString("hello world")
+	lnk, err := test.Store(srcStore, itm)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Cleanup(func() {
+		cncl()
+		lp.Close()
+		lb.Close()
+	})
+
+	// per https://github.com/libp2p/go-libp2p-pubsub/blob/e6ad80cf4782fca31f46e3a8ba8d1a450d562f49/gossipsub_test.go#L103
+	// we don't seem to have a way to manually trigger needed gossip-sub heartbeats for mesh establishment.
+	time.Sleep(time.Second)
+
+	if err := lp.UpdateRoot(context.Background(), lnk.(cidlink.Link).Cid); err != nil {
+		t.Fatal(err)
+	}
+
+	select {
+	case <-time.After(time.Second * 5):
+		t.Fatal("timed out waiting for sync to propogate")
+	case downstream := <-watcher:
+		if !downstream.Cid.Equals(lnk.(cidlink.Link).Cid) {
+			t.Fatalf("sync'd cid unexpected %s vs %s", downstream.Cid, lnk)
+		}
+		if _, err := dstStore.Get(datastore.NewKey(downstream.Cid.String())); err != nil {
+			t.Fatalf("data not in receiver store: %v", err)
+		}
+	}
+}
+
+func TestBrokerRoundTrip(t *testing.T) {
 	// Init legs publisher and subscriber
 	srcStore1 := dssync.MutexWrap(datastore.NewMapDatastore())
 	srcHost1 := mkTestHost()
@@ -42,12 +84,12 @@ func TestLegBrokerRoundTrip(t *testing.T) {
 	dstHost.Peerstore().AddAddrs(srcHost2.ID(), srcHost2.Addrs(), time.Hour)
 
 	dstLnkS := test.MkLinkSystem(dstStore)
-	ld, err := NewLegBroker(dstHost, dstStore, dstLnkS, testTopic, nil)
+	ld, err := NewBroker(dstHost, dstStore, dstLnkS, testTopic, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	// Connections must be made after LegBroker is created, because the
+	// Connections must be made after Broker is created, because the
 	// gossip pubsub must be created before connections are made.  Otherwise,
 	// the connecting hosts will not see the destination host has pubsub and
 	// messages will not get published.
@@ -115,12 +157,12 @@ func TestLegBrokerRoundTrip(t *testing.T) {
 	}
 }
 
-func TestCloseLegBroker(t *testing.T) {
+func TestCloseBroker(t *testing.T) {
 	st := dssync.MutexWrap(datastore.NewMapDatastore())
 	sh := mkTestHost()
 	lsys := test.MkLinkSystem(st)
 
-	ld, err := NewLegBroker(sh, st, lsys, testTopic, nil)
+	ld, err := NewBroker(sh, st, lsys, testTopic, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

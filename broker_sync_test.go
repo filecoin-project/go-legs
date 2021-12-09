@@ -28,7 +28,7 @@ func TestBrokerLatestSyncSuccess(t *testing.T) {
 	dstHost.Peerstore().AddAddrs(srcHost.ID(), srcHost.Addrs(), time.Hour)
 	dstLnkS := mkLinkSystem(dstStore)
 
-	lb, err := NewLegBroker(dstHost, dstStore, dstLnkS, testTopic, nil)
+	lb, err := NewBroker(dstHost, dstStore, dstLnkS, testTopic, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -69,7 +69,7 @@ func TestBrokerSyncFn(t *testing.T) {
 	dstHost.Peerstore().AddAddrs(srcHost.ID(), srcHost.Addrs(), time.Hour)
 	dstLnkS := mkLinkSystem(dstStore)
 
-	lb, err := NewLegBroker(dstHost, dstStore, dstLnkS, testTopic, nil)
+	lb, err := NewBroker(dstHost, dstStore, dstLnkS, testTopic, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -174,7 +174,7 @@ func TestBrokerPartialSync(t *testing.T) {
 	dstHost.Peerstore().AddAddrs(srcHost.ID(), srcHost.Addrs(), time.Hour)
 	dstLnkS := mkLinkSystem(dstStore)
 
-	lb, err := NewLegBroker(dstHost, dstStore, dstLnkS, testTopic, nil)
+	lb, err := NewBroker(dstHost, dstStore, dstLnkS, testTopic, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -237,7 +237,7 @@ func TestBrokerStepByStepSync(t *testing.T) {
 	dstHost.Peerstore().AddAddrs(srcHost.ID(), srcHost.Addrs(), time.Hour)
 	dstLnkS := mkLinkSystem(dstStore)
 
-	lb, err := NewLegBroker(dstHost, dstStore, dstLnkS, testTopic, nil)
+	lb, err := NewBroker(dstHost, dstStore, dstLnkS, testTopic, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -288,7 +288,7 @@ func TestBrokerLatestSyncFailure(t *testing.T) {
 	t.Log("source host:", srcHost.ID())
 	t.Log("targer host:", dstHost.ID())
 
-	lb, err := NewLegBroker(dstHost, dstStore, dstLnkS, testTopic, nil)
+	lb, err := NewBroker(dstHost, dstStore, dstLnkS, testTopic, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -308,7 +308,7 @@ func TestBrokerLatestSyncFailure(t *testing.T) {
 	lb.Close()
 
 	dstStore = dssync.MutexWrap(datastore.NewMapDatastore())
-	lb, err = NewLegBroker(dstHost, dstStore, dstLnkS, testTopic, nil)
+	lb, err = NewBroker(dstHost, dstStore, dstLnkS, testTopic, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -327,7 +327,7 @@ func TestBrokerLatestSyncFailure(t *testing.T) {
 	newBrokerUpdateTest(t, lp, lb, dstStore, watcher, srcHost.ID(), chainLnks[2], true, chainLnks[3].(cidlink.Link).Cid)
 }
 
-func newBrokerUpdateTest(t *testing.T, lp LegPublisher, lb *LegBroker, dstStore datastore.Batching, watcher <-chan SyncFinished, peerID peer.ID, lnk ipld.Link, withFailure bool, expectedSync cid.Cid) {
+func newBrokerUpdateTest(t *testing.T, lp LegPublisher, lb *Broker, dstStore datastore.Batching, watcher <-chan SyncFinished, peerID peer.ID, lnk ipld.Link, withFailure bool, expectedSync cid.Cid) {
 	err := lp.UpdateRoot(context.Background(), lnk.(cidlink.Link).Cid)
 	if err != nil {
 		t.Fatal(err)
@@ -363,7 +363,7 @@ func newBrokerUpdateTest(t *testing.T, lp LegPublisher, lb *LegBroker, dstStore 
 	}
 }
 
-func assertBrokerLatestSyncEquals(t *testing.T, lb *LegBroker, peerID peer.ID, want cid.Cid) {
+func assertBrokerLatestSyncEquals(t *testing.T, lb *Broker, peerID peer.ID, want cid.Cid) {
 	latest := lb.GetLatestSync(peerID)
 	if latest == nil {
 		t.Fatal("latest sync is nil")
