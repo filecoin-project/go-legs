@@ -23,7 +23,7 @@ import (
 	"github.com/libp2p/go-libp2p-core/peer"
 )
 
-func brokerInitPubSub(t *testing.T, srcStore, dstStore datastore.Batching) (host.Host, host.Host, LegPublisher, *LegBroker) {
+func brokerInitPubSub(t *testing.T, srcStore, dstStore datastore.Batching) (host.Host, host.Host, LegPublisher, *Broker) {
 	srcHost := mkTestHost()
 	srcLnkS := test.MkLinkSystem(srcStore)
 	lp, err := NewPublisher(context.Background(), srcHost, srcStore, srcLnkS, "legs/testtopic")
@@ -36,7 +36,7 @@ func brokerInitPubSub(t *testing.T, srcStore, dstStore datastore.Batching) (host
 	dstHost.Peerstore().AddAddrs(srcHost.ID(), srcHost.Addrs(), time.Hour)
 	dstLnkS := test.MkLinkSystem(dstStore)
 
-	lb, err := NewLegBroker(dstHost, dstStore, dstLnkS, testTopic, nil)
+	lb, err := NewBroker(dstHost, dstStore, dstLnkS, testTopic, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -46,48 +46,6 @@ func brokerInitPubSub(t *testing.T, srcStore, dstStore datastore.Batching) (host
 	}
 
 	return srcHost, dstHost, lp, lb
-}
-
-func TestBrokerRoundTrip(t *testing.T) {
-	// Init legs publisher and subscriber
-	srcStore := dssync.MutexWrap(datastore.NewMapDatastore())
-	dstStore := dssync.MutexWrap(datastore.NewMapDatastore())
-	_, _, lp, lb := brokerInitPubSub(t, srcStore, dstStore)
-
-	watcher, cncl := lb.OnSyncFinished()
-
-	// Update root with item
-	itm := basicnode.NewString("hello world")
-	lnk, err := test.Store(srcStore, itm)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	t.Cleanup(func() {
-		cncl()
-		lp.Close()
-		lb.Close()
-	})
-
-	// per https://github.com/libp2p/go-libp2p-pubsub/blob/e6ad80cf4782fca31f46e3a8ba8d1a450d562f49/gossipsub_test.go#L103
-	// we don't seem to have a way to manually trigger needed gossip-sub heartbeats for mesh establishment.
-	time.Sleep(time.Second)
-
-	if err := lp.UpdateRoot(context.Background(), lnk.(cidlink.Link).Cid); err != nil {
-		t.Fatal(err)
-	}
-
-	select {
-	case <-time.After(time.Second * 5):
-		t.Fatal("timed out waiting for sync to propogate")
-	case downstream := <-watcher:
-		if !downstream.Cid.Equals(lnk.(cidlink.Link).Cid) {
-			t.Fatalf("sync'd cid unexpected %s vs %s", downstream.Cid, lnk)
-		}
-		if _, err := dstStore.Get(datastore.NewKey(downstream.Cid.String())); err != nil {
-			t.Fatalf("data not in receiver store: %v", err)
-		}
-	}
 }
 
 func TestBrokerRoundTripExistingDataTransfer(t *testing.T) {
@@ -131,7 +89,7 @@ func TestBrokerRoundTripExistingDataTransfer(t *testing.T) {
 	dstStore := dssync.MutexWrap(datastore.NewMapDatastore())
 	dstLnkS := test.MkLinkSystem(dstStore)
 
-	lb, err := NewLegBroker(dstHost, dstStore, dstLnkS, testTopic, nil)
+	lb, err := NewBroker(dstHost, dstStore, dstLnkS, testTopic, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
