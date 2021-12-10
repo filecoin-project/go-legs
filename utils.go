@@ -130,20 +130,23 @@ func makeDataTransfer(ctx context.Context, host host.Host, ds datastore.Batching
 	}
 
 	if tmpDir != "" {
+		// Tell datatransfer to notify when ready.
+		dtReady := make(chan error)
+		dt.OnReady(func(e error) {
+			dtReady <- e
+		})
+
+		// Start datatransfer.
 		if err = dt.Start(ctx); err != nil {
 			log.Errorf("Failed to start datatransfer: %s", err)
 			return nil, nil, "", err
 		}
-	}
 
-	// Wait for datatrnasfer to be ready.
-	dtReady := make(chan error)
-	dt.OnReady(func(e error) {
-		dtReady <- e
-	})
-	err = <-dtReady
-	if err != nil {
-		return nil, nil, "", err
+		// Wait for datatrnasfer to be ready.
+		err = <-dtReady
+		if err != nil {
+			return nil, nil, "", err
+		}
 	}
 
 	return dt, gs, tmpDir, nil
