@@ -6,6 +6,7 @@ import (
 
 	dt "github.com/filecoin-project/go-data-transfer"
 	"github.com/filecoin-project/go-legs/p2p/protocol/head"
+	"github.com/hashicorp/go-multierror"
 	"github.com/ipfs/go-cid"
 	"github.com/ipfs/go-datastore"
 	"github.com/ipld/go-ipld-prime"
@@ -70,16 +71,21 @@ func NewPublisherFromExisting(ctx context.Context,
 }
 
 func (lp *legPublisher) UpdateRoot(ctx context.Context, c cid.Cid) error {
-	log.Debugf("Published CID and addresses in pubsub channel: %s", c)
+	log.Debugf("Publishing CID and addresses in pubsub channel: %s", c)
+	var errs error
 	err := lp.headPublisher.UpdateRoot(ctx, c)
 	if err != nil {
-		return err
+		errs = multierror.Append(errs, err)
 	}
 	msg := message{
 		cid:   c,
 		addrs: lp.host.Addrs(),
 	}
-	return lp.topic.Publish(ctx, encodeMessage(msg))
+	err = lp.topic.Publish(ctx, encodeMessage(msg))
+	if err != nil {
+		errs = multierror.Append(errs, err)
+	}
+	return errs
 }
 
 func (lp *legPublisher) Close() error {

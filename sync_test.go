@@ -149,7 +149,7 @@ func TestLatestSyncSuccess(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	time.Sleep(1 * time.Second)
+	time.Sleep(2 * time.Second)
 	watcher, cncl := ls.OnChange()
 
 	// Store the whole chain in source node
@@ -187,7 +187,7 @@ func TestSyncFn(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	time.Sleep(1 * time.Second)
+	time.Sleep(2 * time.Second)
 
 	t.Cleanup(func() {
 		lp.Close()
