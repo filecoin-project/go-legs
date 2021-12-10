@@ -2,13 +2,14 @@ package head
 
 import (
 	"context"
-	logging "github.com/ipfs/go-log/v2"
 	"io/ioutil"
 	"net"
 	"net/http"
 	"path"
 	"sync"
 	"time"
+
+	logging "github.com/ipfs/go-log/v2"
 
 	"github.com/ipfs/go-cid"
 	"github.com/libp2p/go-libp2p-core/host"
@@ -43,10 +44,10 @@ func (p *Publisher) Serve(host host.Host, topic string) error {
 	pid := deriveProtocolID(topic)
 	l, err := gostream.Listen(host, pid)
 	if err != nil {
-		log.Errorf("Failed to listen to gostream on host %s with prpotocol ID %s", host.ID(), pid)
+		log.Errorf("Failed to listen to gostream on host %s with protocol ID %s", host.ID(), pid)
 		return err
 	}
-	log.Infof("Serving gostream on host %s with prpotocol ID %s", host.ID(), pid)
+	log.Infof("Serving gostream on host %s with protocol ID %s", host.ID(), pid)
 	return p.server.Serve(l)
 }
 
