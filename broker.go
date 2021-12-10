@@ -61,10 +61,11 @@ type Broker struct {
 	tmpDir      string
 	unsubEvents dt.Unsubscribe
 
-	addrTTL time.Duration
-	host    host.Host
-	psub    *pubsub.Subscription
-	topic   *pubsub.Topic
+	addrTTL   time.Duration
+	host      host.Host
+	psub      *pubsub.Subscription
+	topic     *pubsub.Topic
+	topicName string
 
 	allowPeer     AllowPeerFunc
 	handlers      map[peer.ID]*handler
@@ -126,20 +127,21 @@ func NewBroker(host host.Host, ds datastore.Batching, lsys ipld.LinkSystem, topi
 	}
 	err := cfg.apply(options)
 	if err != nil {
-		panic(err.Error())
+		return nil, err
 	}
 
 	ctx, cancelAll := context.WithCancel(context.Background())
 
-	pubsubTopic := cfg.topic
-	if pubsubTopic == nil {
+	var pubsubTopic *pubsub.Topic
+	if cfg.topic == nil {
 		pubsubTopic, err = makePubsub(ctx, host, topic)
 		if err != nil {
 			cancelAll()
 			return nil, err
 		}
+		cfg.topic = pubsubTopic
 	}
-	psub, err := pubsubTopic.Subscribe()
+	psub, err := cfg.topic.Subscribe()
 	if err != nil {
 		cancelAll()
 		return nil, err
@@ -161,6 +163,7 @@ func NewBroker(host host.Host, ds datastore.Batching, lsys ipld.LinkSystem, topi
 		addrTTL:   cfg.addrTTL,
 		psub:      psub,
 		topic:     pubsubTopic,
+		topicName: pubsubTopic.String(),
 		closing:   make(chan struct{}),
 		cancelAll: cancelAll,
 
@@ -199,6 +202,9 @@ func (lb *Broker) GetLatestSync(peerID peer.ID) ipld.Link {
 // no handler for the peer, then one is created without consulting any
 // AllowPeerFunc.
 func (lb *Broker) SetLatestSync(peerID peer.ID, latestSync cid.Cid) error {
+	if latestSync == cid.Undef {
+		return errors.New("cannot set latest sync to undefined value")
+	}
 	hnd, err := lb.getOrCreateHandler(peerID, true)
 	if err != nil {
 		return err
@@ -231,21 +237,26 @@ func (lb *Broker) doClose() error {
 	lb.unsubEvents()
 	lb.psub.Cancel()
 
-	var errs error
-	err := lb.dtManager.Stop(context.Background())
-	if err != nil {
-		log.Errorf("Failed to stop datatransfer manager: %s", err)
-		errs = multierror.Append(errs, err)
-	}
+	var err, errs error
+	// If tmpDir is non-empty, that means the Broker started the dtManager and
+	// it is ok to stop is and clean up the tmpDir.
 	if lb.tmpDir != "" {
+		err = lb.dtManager.Stop(context.Background())
+		if err != nil {
+			log.Errorf("Failed to stop datatransfer manager: %s", err)
+			errs = multierror.Append(errs, err)
+		}
 		if err = os.RemoveAll(lb.tmpDir); err != nil {
 			log.Errorf("Failed to remove temp dir: %s", err)
 			errs = multierror.Append(errs, err)
 		}
 	}
-	if err = lb.topic.Close(); err != nil {
-		log.Errorf("Failed to close pubsub topic: %s", err)
-		errs = multierror.Append(errs, err)
+	// If Broker owns the pubsub topic, then close it.
+	if lb.topic != nil {
+		if err = lb.topic.Close(); err != nil {
+			log.Errorf("Failed to close pubsub topic: %s", err)
+			errs = multierror.Append(errs, err)
+		}
 	}
 
 	// Dismiss any event readers.
@@ -350,7 +361,7 @@ func (lb *Broker) Sync(ctx context.Context, peerID peer.ID, c cid.Cid, selSeq ip
 		if c == cid.Undef {
 			// Query the peer for the latest CID
 			var err error
-			c, err = head.QueryRootCid(ctx, lb.host, lb.topic.String(), peerID)
+			c, err = head.QueryRootCid(ctx, lb.host, lb.topicName, peerID)
 			if err != nil {
 				log.Errorw("Cannot get root for sync", "err", err, "peer", peerID)
 				return
