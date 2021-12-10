@@ -130,12 +130,12 @@ func TestCloseTransport(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ls1.Close()
+	ls2.Close()
 	err = ms.Close(context.Background())
 	if err == nil {
 		t.Fatal("There are still active subscribers, it should have thrown an error")
 	}
-	ls2.Close()
+	ls1.Close()
 	err = ms.Close(context.Background())
 	if err != nil {
 		t.Fatal("If no subscribers, then transport should've been closed successfully")

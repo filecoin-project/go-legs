@@ -155,11 +155,13 @@ func TestLatestSyncSuccess(t *testing.T) {
 	// Store the whole chain in source node
 	chainLnks := mkChain(srcLnkS, true)
 
-	t.Cleanup(clean(lp, ls, cncl))
-
 	newUpdateTest(t, lp, ls, dstStore, watcher, chainLnks[2], false, chainLnks[2].(cidlink.Link).Cid)
 	newUpdateTest(t, lp, ls, dstStore, watcher, chainLnks[1], false, chainLnks[1].(cidlink.Link).Cid)
 	newUpdateTest(t, lp, ls, dstStore, watcher, chainLnks[0], false, chainLnks[0].(cidlink.Link).Cid)
+
+	cncl()
+	lp.Close()
+	ls.Close()
 }
 
 func TestSyncFn(t *testing.T) {

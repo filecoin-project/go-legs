@@ -454,11 +454,14 @@ func (lb *Broker) getOrCreateHandler(peerID peer.ID, force bool) (*handler, erro
 func (lb *Broker) watch(ctx context.Context) {
 	for {
 		msg, err := lb.psub.Next(ctx)
-		if ctx.Err() != nil {
-			return
-		}
 		if err != nil {
-			// TODO: restart subscription.
+			if ctx.Err() != nil || err == pubsub.ErrSubscriptionCancelled {
+				// This is a normal result of shutting down the broker.
+				log.Debug("Canceled watching pubsub subscription")
+			} else {
+				log.Errorf("Error reading from pubsub: %s", err)
+				// TODO: restart subscription.
+			}
 			return
 		}
 
