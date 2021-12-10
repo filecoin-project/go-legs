@@ -110,12 +110,13 @@ func (ls *legSubscriber) subscribe(ctx context.Context) error {
 		log.Errorf("Faield to subscribe to topic %s: %s", ls.topic, err)
 		return err
 	}
-	cctx, cancel := context.WithCancel(ctx)
 	unsub := ls.dt.SubscribeToEvents(ls.onEvent)
+
+	cctx, cancel := context.WithCancel(ctx)
 	ls.cancel = func() {
 		unsub()
-		psub.Cancel()
 		cancel()
+		psub.Cancel()
 	}
 
 	go ls.watch(cctx, psub)
@@ -172,11 +173,13 @@ func (ls *legSubscriber) onEvent(event dt.Event, channelState dt.ChannelState) {
 func (ls *legSubscriber) watch(ctx context.Context, sub *pubsub.Subscription) {
 	for {
 		msg, err := sub.Next(ctx)
-		if ctx.Err() != nil {
-			return
-		}
 		if err != nil {
-			// TODO: restart subscription.
+			if ctx.Err() != nil || err == pubsub.ErrSubscriptionCancelled {
+				log.Debug("Pubsub watch canceled")
+			} else {
+				log.Errorf("Error reading from pubsub: %s", err)
+				// TODO: restart subscription.
+			}
 			return
 		}
 
@@ -279,9 +282,8 @@ func (ls *legSubscriber) OnChange() (chan cid.Cid, context.CancelFunc) {
 }
 
 func (ls *legSubscriber) Close() error {
-	err := ls.onClose()
 	ls.cancel()
-	return err
+	return ls.onClose()
 }
 
 func (ls *legSubscriber) unlockOnce(ulOnce *sync.Once) {
