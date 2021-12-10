@@ -2,6 +2,7 @@ package legs
 
 import (
 	"context"
+	"errors"
 	"net/http"
 
 	dt "github.com/filecoin-project/go-data-transfer"
@@ -71,8 +72,11 @@ func NewPublisherFromExisting(ctx context.Context,
 }
 
 func (lp *legPublisher) UpdateRoot(ctx context.Context, c cid.Cid) error {
-	log.Debugf("Publishing CID and addresses in pubsub channel: %s", c)
-	var errs error
+	if c == cid.Undef {
+		return errors.New("cannot update to an undefined cid")
+	}
+
+	log.Debugf("Published CID and addresses in pubsub channel: %s", c)
 	err := lp.headPublisher.UpdateRoot(ctx, c)
 	if err != nil {
 		errs = multierror.Append(errs, err)
