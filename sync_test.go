@@ -286,7 +286,7 @@ func TestPartialSync(t *testing.T) {
 
 	mkChain(srcLnkS, true)
 
-	time.Sleep(1 * time.Second)
+	time.Sleep(2 * time.Second)
 
 	watcher, cncl := ls.OnChange()
 
@@ -337,7 +337,7 @@ func TestStepByStepSync(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	time.Sleep(1 * time.Second)
+	time.Sleep(2 * time.Second)
 
 	watcher, cncl := ls.OnChange()
 

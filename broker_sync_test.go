@@ -37,7 +37,7 @@ func TestBrokerLatestSyncSuccess(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	time.Sleep(1 * time.Second)
+	time.Sleep(2 * time.Second)
 	watcher, cncl := lb.OnSyncFinished()
 
 	// Store the whole chain in source node
@@ -78,7 +78,7 @@ func TestBrokerSyncFn(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	time.Sleep(1 * time.Second)
+	time.Sleep(2 * time.Second)
 
 	t.Cleanup(func() {
 		lp.Close()
@@ -190,7 +190,7 @@ func TestBrokerPartialSync(t *testing.T) {
 
 	mkChain(srcLnkS, true)
 
-	time.Sleep(1 * time.Second)
+	time.Sleep(2 * time.Second)
 
 	watcher, cncl := lb.OnSyncFinished()
 
@@ -246,7 +246,7 @@ func TestBrokerStepByStepSync(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	time.Sleep(1 * time.Second)
+	time.Sleep(2 * time.Second)
 
 	watcher, cncl := lb.OnSyncFinished()
 
