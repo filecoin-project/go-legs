@@ -72,6 +72,7 @@ func NewPublisherFromExisting(ctx context.Context,
 }
 
 func (lp *legPublisher) UpdateRoot(ctx context.Context, c cid.Cid) error {
+	var errs error
 	if c == cid.Undef {
 		return errors.New("cannot update to an undefined cid")
 	}
