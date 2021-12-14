@@ -29,7 +29,7 @@ import (
 func initPubSub(t *testing.T, srcStore, dstStore datastore.Batching) (host.Host, host.Host, legs.LegPublisher, legs.LegSubscriber) {
 	srcHost := test.MkTestHost()
 	srcLnkS := test.MkLinkSystem(srcStore)
-	lp, err := dtsync.NewPublisher(context.Background(), srcHost, srcStore, srcLnkS, "legs/testtopic")
+	lp, err := dtsync.NewPublisher(context.Background(), srcHost, srcStore, srcLnkS, testTopic)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -38,7 +38,7 @@ func initPubSub(t *testing.T, srcStore, dstStore datastore.Batching) (host.Host,
 	srcHost.Peerstore().AddAddrs(dstHost.ID(), dstHost.Addrs(), time.Hour)
 	dstHost.Peerstore().AddAddrs(srcHost.ID(), srcHost.Addrs(), time.Hour)
 	dstLnkS := test.MkLinkSystem(dstStore)
-	ls, err := dtsync.NewSubscriber(context.Background(), dstHost, dstStore, dstLnkS, "legs/testtopic", nil)
+	ls, err := dtsync.NewSubscriber(context.Background(), dstHost, dstStore, dstLnkS, testTopic, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -121,7 +121,7 @@ func TestRoundTripExistingDataTransfer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	lp, err := dtsync.NewPublisherFromExisting(context.Background(), dt, srcHost, "legs/testtopic", srcLnkS)
+	lp, err := dtsync.NewPublisherFromExisting(context.Background(), dt, srcHost, testTopic, srcLnkS)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -131,7 +131,7 @@ func TestRoundTripExistingDataTransfer(t *testing.T) {
 	dstHost.Peerstore().AddAddrs(srcHost.ID(), srcHost.Addrs(), time.Hour)
 	dstStore := dssync.MutexWrap(datastore.NewMapDatastore())
 	dstLnkS := test.MkLinkSystem(dstStore)
-	ls, err := dtsync.NewSubscriber(context.Background(), dstHost, dstStore, dstLnkS, "legs/testtopic", nil)
+	ls, err := dtsync.NewSubscriber(context.Background(), dstHost, dstStore, dstLnkS, testTopic, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

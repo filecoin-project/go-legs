@@ -18,8 +18,6 @@ import (
 	"github.com/multiformats/go-multicodec"
 )
 
-const testTopic = "/legs/testtopic"
-
 // encode hardcodes some encoding choices for ease of use in fixture generation;
 // just gimme a link and stuff the bytes in a map.
 // (also return the node again for convenient assignment.)

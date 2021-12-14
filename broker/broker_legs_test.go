@@ -82,7 +82,7 @@ func TestBrokerRoundTripExistingDataTransfer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	lp, err := dtsync.NewPublisherFromExisting(context.Background(), dt, srcHost, "legs/testtopic", srcLnkS)
+	lp, err := dtsync.NewPublisherFromExisting(context.Background(), dt, srcHost, testTopic, srcLnkS)
 	if err != nil {
 		t.Fatal(err)
 	}

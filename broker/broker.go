@@ -113,9 +113,6 @@ type handler struct {
 	msgChan    chan cid.Cid
 	// peerID is the ID of the peer this handler is responsible for.
 	peerID peer.ID
-	// notifyOnSyncDone is a function supplied by the Broker for the handler to get a
-	// channel to receive sync done notification.
-	notifyOnSyncDone func(cid.Cid) <-chan struct{}
 	// syncMutex serializes the handling of individual syncs
 	syncMutex sync.Mutex
 }

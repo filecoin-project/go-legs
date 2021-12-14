@@ -15,12 +15,14 @@ import (
 	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
 )
 
+const testTopic = "/legs/testtopic"
+
 func TestLatestSyncSuccess(t *testing.T) {
 	srcStore := dssync.MutexWrap(datastore.NewMapDatastore())
 	dstStore := dssync.MutexWrap(datastore.NewMapDatastore())
 	srcHost := test.MkTestHost()
 	srcLnkS := test.MkLinkSystem(srcStore)
-	lp, err := dtsync.NewPublisher(context.Background(), srcHost, srcStore, srcLnkS, "legs/testtopic")
+	lp, err := dtsync.NewPublisher(context.Background(), srcHost, srcStore, srcLnkS, testTopic)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -29,7 +31,7 @@ func TestLatestSyncSuccess(t *testing.T) {
 	srcHost.Peerstore().AddAddrs(dstHost.ID(), dstHost.Addrs(), time.Hour)
 	dstHost.Peerstore().AddAddrs(srcHost.ID(), srcHost.Addrs(), time.Hour)
 	dstLnkS := test.MkLinkSystem(dstStore)
-	ls, err := dtsync.NewSubscriber(context.Background(), dstHost, dstStore, dstLnkS, "legs/testtopic", nil)
+	ls, err := dtsync.NewSubscriber(context.Background(), dstHost, dstStore, dstLnkS, testTopic, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -57,7 +59,7 @@ func TestSyncFn(t *testing.T) {
 	dstStore := dssync.MutexWrap(datastore.NewMapDatastore())
 	srcHost := test.MkTestHost()
 	srcLnkS := test.MkLinkSystem(srcStore)
-	lp, err := dtsync.NewPublisher(context.Background(), srcHost, srcStore, srcLnkS, "legs/testtopic")
+	lp, err := dtsync.NewPublisher(context.Background(), srcHost, srcStore, srcLnkS, testTopic)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -67,7 +69,7 @@ func TestSyncFn(t *testing.T) {
 	dstHost.Peerstore().AddAddrs(srcHost.ID(), srcHost.Addrs(), time.Hour)
 	dstLnkS := test.MkLinkSystem(dstStore)
 
-	ls, err := dtsync.NewSubscriber(context.Background(), dstHost, dstStore, dstLnkS, "legs/testtopic", nil)
+	ls, err := dtsync.NewSubscriber(context.Background(), dstHost, dstStore, dstLnkS, testTopic, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -152,7 +154,7 @@ func TestPartialSync(t *testing.T) {
 	srcHost := test.MkTestHost()
 	srcLnkS := test.MkLinkSystem(srcStore)
 	testLnkS := test.MkLinkSystem(testStore)
-	lp, err := dtsync.NewPublisher(context.Background(), srcHost, srcStore, srcLnkS, "legs/testtopic")
+	lp, err := dtsync.NewPublisher(context.Background(), srcHost, srcStore, srcLnkS, testTopic)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -163,7 +165,7 @@ func TestPartialSync(t *testing.T) {
 	srcHost.Peerstore().AddAddrs(dstHost.ID(), dstHost.Addrs(), time.Hour)
 	dstHost.Peerstore().AddAddrs(srcHost.ID(), srcHost.Addrs(), time.Hour)
 	dstLnkS := test.MkLinkSystem(dstStore)
-	ls, err := dtsync.NewSubscriberPartiallySynced(context.Background(), dstHost, dstStore, dstLnkS, "legs/testtopic", chainLnks[3].(cidlink.Link).Cid, nil)
+	ls, err := dtsync.NewSubscriberPartiallySynced(context.Background(), dstHost, dstStore, dstLnkS, testTopic, chainLnks[3].(cidlink.Link).Cid, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -206,7 +208,7 @@ func TestStepByStepSync(t *testing.T) {
 	dstStore := dssync.MutexWrap(datastore.NewMapDatastore())
 	srcHost := test.MkTestHost()
 	srcLnkS := test.MkLinkSystem(srcStore)
-	lp, err := dtsync.NewPublisher(context.Background(), srcHost, srcStore, srcLnkS, "legs/testtopic")
+	lp, err := dtsync.NewPublisher(context.Background(), srcHost, srcStore, srcLnkS, testTopic)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -215,7 +217,7 @@ func TestStepByStepSync(t *testing.T) {
 	srcHost.Peerstore().AddAddrs(dstHost.ID(), dstHost.Addrs(), time.Hour)
 	dstHost.Peerstore().AddAddrs(srcHost.ID(), srcHost.Addrs(), time.Hour)
 	dstLnkS := test.MkLinkSystem(dstStore)
-	ls, err := dtsync.NewSubscriber(context.Background(), dstHost, dstStore, dstLnkS, "legs/testtopic", nil)
+	ls, err := dtsync.NewSubscriber(context.Background(), dstHost, dstStore, dstLnkS, testTopic, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -247,7 +249,7 @@ func TestLatestSyncFailure(t *testing.T) {
 	dstStore := dssync.MutexWrap(datastore.NewMapDatastore())
 	srcHost := test.MkTestHost()
 	srcLnkS := test.MkLinkSystem(srcStore)
-	lp, err := dtsync.NewPublisher(context.Background(), srcHost, srcStore, srcLnkS, "legs/testtopic")
+	lp, err := dtsync.NewPublisher(context.Background(), srcHost, srcStore, srcLnkS, testTopic)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -261,7 +263,7 @@ func TestLatestSyncFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 	dstLnkS := test.MkLinkSystem(dstStore)
-	ls, err := dtsync.NewSubscriberPartiallySynced(context.Background(), dstHost, dstStore, dstLnkS, "legs/testtopic", chainLnks[3].(cidlink.Link).Cid, nil)
+	ls, err := dtsync.NewSubscriberPartiallySynced(context.Background(), dstHost, dstStore, dstLnkS, testTopic, chainLnks[3].(cidlink.Link).Cid, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -273,7 +275,7 @@ func TestLatestSyncFailure(t *testing.T) {
 	cncl()
 
 	dstStore = dssync.MutexWrap(datastore.NewMapDatastore())
-	ls, err = dtsync.NewSubscriberPartiallySynced(context.Background(), dstHost, dstStore, dstLnkS, "legs/testtopic", chainLnks[3].(cidlink.Link).Cid, nil)
+	ls, err = dtsync.NewSubscriberPartiallySynced(context.Background(), dstHost, dstStore, dstLnkS, testTopic, chainLnks[3].(cidlink.Link).Cid, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

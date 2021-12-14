@@ -20,7 +20,7 @@ func TestMultiSubscribeRoundTrip(t *testing.T) {
 	srcHost1 := test.MkTestHost()
 	srcLnkS1 := test.MkLinkSystem(srcStore1)
 
-	lp1, err := dtsync.NewPublisher(context.Background(), srcHost1, srcStore1, srcLnkS1, "legs/testtopic")
+	lp1, err := dtsync.NewPublisher(context.Background(), srcHost1, srcStore1, srcLnkS1, testTopic)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -28,7 +28,7 @@ func TestMultiSubscribeRoundTrip(t *testing.T) {
 	srcStore2 := dssync.MutexWrap(datastore.NewMapDatastore())
 	srcHost2 := test.MkTestHost()
 	srcLnkS2 := test.MkLinkSystem(srcStore2)
-	lp2, err := dtsync.NewPublisher(context.Background(), srcHost2, srcStore2, srcLnkS2, "legs/testtopic")
+	lp2, err := dtsync.NewPublisher(context.Background(), srcHost2, srcStore2, srcLnkS2, testTopic)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -40,7 +40,7 @@ func TestMultiSubscribeRoundTrip(t *testing.T) {
 	srcHost2.Peerstore().AddAddrs(dstHost.ID(), dstHost.Addrs(), time.Hour)
 	dstHost.Peerstore().AddAddrs(srcHost2.ID(), srcHost2.Addrs(), time.Hour)
 	dstLnkS := test.MkLinkSystem(dstStore)
-	ms, err := dtsync.NewMultiSubscriber(context.Background(), dstHost, dstStore, dstLnkS, "legs/testtopic", nil)
+	ms, err := dtsync.NewMultiSubscriber(context.Background(), dstHost, dstStore, dstLnkS, testTopic, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -119,7 +119,7 @@ func TestCloseTransport(t *testing.T) {
 	st := dssync.MutexWrap(datastore.NewMapDatastore())
 	sh := test.MkTestHost()
 	lsys := test.MkLinkSystem(st)
-	ms, err := dtsync.NewMultiSubscriber(context.Background(), sh, st, lsys, "legs/testtopic", nil)
+	ms, err := dtsync.NewMultiSubscriber(context.Background(), sh, st, lsys, testTopic, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
