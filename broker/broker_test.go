@@ -107,9 +107,9 @@ func TestBrokerRoundTrip(t *testing.T) {
 	}
 
 	watcher1, cncl1 := lb.OnSyncFinished()
-	defer cancl1()
+	defer cncl1()
 	watcher2, cncl2 := lb.OnSyncFinished()
-	defer cancl2()
+	defer cncl2()
 
 	// Update root on publisher one with item
 	itm1 := basicnode.NewString("hello world")

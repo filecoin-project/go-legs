@@ -175,7 +175,7 @@ func TestPartialSync(t *testing.T) {
 
 	test.MkChain(srcLnkS, true)
 
-	time.Sleep(2 * time.Second)
+	time.Sleep(5 * time.Second)
 
 	watcher, cncl := ls.OnChange()
 	defer cncl()
@@ -226,7 +226,7 @@ func TestStepByStepSync(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	time.Sleep(3 * time.Second)
+	time.Sleep(5 * time.Second)
 
 	watcher, cncl := ls.OnChange()
 	defer cncl()
@@ -241,7 +241,6 @@ func TestStepByStepSync(t *testing.T) {
 	// Sync the rest of the chain
 	newUpdateTest(t, lp, ls, dstStore, watcher, chainLnks[1], false, chainLnks[1].(cidlink.Link).Cid)
 	newUpdateTest(t, lp, ls, dstStore, watcher, chainLnks[0], false, chainLnks[0].(cidlink.Link).Cid)
-
 }
 
 func TestLatestSyncFailure(t *testing.T) {

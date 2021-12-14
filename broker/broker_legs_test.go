@@ -185,7 +185,7 @@ func TestBrokerAllowPeerAllows(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer lp.CLose()
+	defer lp.Close()
 	defer lb.Close()
 
 	// Set function to allow any peer.
