@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"sync"
 
 	dt "github.com/filecoin-project/go-data-transfer"
 	"github.com/filecoin-project/go-legs"
@@ -23,6 +24,7 @@ type legPublisher struct {
 	onClose       func() error
 	host          host.Host
 	headPublisher *head.Publisher
+	closeOnce     sync.Once
 }
 
 // NewPublisher creates a new legs publisher
@@ -35,7 +37,12 @@ func NewPublisher(ctx context.Context, host host.Host, ds datastore.Batching, ls
 
 	headPublisher := head.NewPublisher()
 	startHeadPublisher(host, topic, headPublisher)
-	return &legPublisher{ss.t, ss.onClose, host, headPublisher}, nil
+	return &legPublisher{
+		topic:         ss.t,
+		onClose:       ss.onClose,
+		host:          host,
+		headPublisher: headPublisher,
+	}, nil
 }
 
 func startHeadPublisher(host host.Host, topic string, headPublisher *head.Publisher) {
@@ -67,7 +74,12 @@ func NewPublisherFromExisting(ctx context.Context,
 	headPublisher := head.NewPublisher()
 	startHeadPublisher(host, topic, headPublisher)
 
-	return &legPublisher{t, t.Close, host, headPublisher}, nil
+	return &legPublisher{
+		topic:         t,
+		onClose:       t.Close,
+		host:          host,
+		headPublisher: headPublisher,
+	}, nil
 }
 
 func (lp *legPublisher) UpdateRoot(ctx context.Context, c cid.Cid) error {
@@ -98,13 +110,15 @@ func (lp *legPublisher) UpdateRootWithAddrs(ctx context.Context, c cid.Cid, addr
 
 func (lp *legPublisher) Close() error {
 	var errs error
-	err := lp.headPublisher.Close()
-	if err != nil {
-		errs = multierror.Append(errs, err)
-	}
-	err = lp.onClose()
-	if err != nil {
-		errs = multierror.Append(errs, err)
-	}
+	lp.closeOnce.Do(func() {
+		err := lp.headPublisher.Close()
+		if err != nil {
+			errs = multierror.Append(errs, err)
+		}
+		err = lp.onClose()
+		if err != nil {
+			errs = multierror.Append(errs, err)
+		}
+	})
 	return errs
 }

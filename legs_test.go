@@ -54,8 +54,11 @@ func TestRoundTrip(t *testing.T) {
 	srcStore := dssync.MutexWrap(datastore.NewMapDatastore())
 	dstStore := dssync.MutexWrap(datastore.NewMapDatastore())
 	_, _, lp, ls := initPubSub(t, srcStore, dstStore)
+	defer lp.Close()
+	defer ls.Close()
 
 	watcher, cncl := ls.OnChange()
+	defer cncl()
 
 	// Update root with item
 	itm := basicnode.NewString("hello world")
@@ -64,17 +67,11 @@ func TestRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	t.Cleanup(func() {
-		cncl()
-		lp.Close()
-		ls.Close()
-	})
-
 	// per https://github.com/libp2p/go-libp2p-pubsub/blob/e6ad80cf4782fca31f46e3a8ba8d1a450d562f49/gossipsub_test.go#L103
 	// we don't seem to have a way to manually trigger needed gossip-sub heartbeats for mesh establishment.
 	time.Sleep(5 * time.Second)
 
-	if err := lp.UpdateRoot(context.Background(), lnk.(cidlink.Link).Cid); err != nil {
+	if err = lp.UpdateRoot(context.Background(), lnk.(cidlink.Link).Cid); err != nil {
 		t.Fatal(err)
 	}
 
@@ -85,7 +82,7 @@ func TestRoundTrip(t *testing.T) {
 		if !downstream.Equals(lnk.(cidlink.Link).Cid) {
 			t.Fatalf("sync'd sid unexpected %s vs %s", downstream, lnk)
 		}
-		if _, err := dstStore.Get(datastore.NewKey(downstream.String())); err != nil {
+		if _, err = dstStore.Get(datastore.NewKey(downstream.String())); err != nil {
 			t.Fatalf("data not in receiver store: %v", err)
 		}
 	}
@@ -113,6 +110,7 @@ func TestRoundTripExistingDataTransfer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer os.RemoveAll(tmpDir)
 	dt, err := datatransfer.NewDataTransfer(srcStore, tmpDir, dtNet, tp)
 	if err != nil {
 		t.Fatal(err)
@@ -125,6 +123,7 @@ func TestRoundTripExistingDataTransfer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer lp.Close()
 
 	dstHost := test.MkTestHost()
 	srcHost.Peerstore().AddAddrs(dstHost.ID(), dstHost.Addrs(), time.Hour)
@@ -135,11 +134,14 @@ func TestRoundTripExistingDataTransfer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := srcHost.Connect(context.Background(), dstHost.Peerstore().PeerInfo(dstHost.ID())); err != nil {
+	defer ls.Close()
+
+	if err = srcHost.Connect(context.Background(), dstHost.Peerstore().PeerInfo(dstHost.ID())); err != nil {
 		t.Fatal(err)
 	}
 
 	watcher, cncl := ls.OnChange()
+	defer cncl()
 
 	// Update root with item
 	itm := basicnode.NewString("hello world")
@@ -148,18 +150,11 @@ func TestRoundTripExistingDataTransfer(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	t.Cleanup(func() {
-		cncl()
-		lp.Close()
-		ls.Close()
-		os.RemoveAll(tmpDir)
-	})
-
 	// per https://github.com/libp2p/go-libp2p-pubsub/blob/e6ad80cf4782fca31f46e3a8ba8d1a450d562f49/gossipsub_test.go#L103
 	// we don't seem to have a way to manually trigger needed gossip-sub heartbeats for mesh establishment.
-	time.Sleep(2 * time.Second)
+	time.Sleep(3 * time.Second)
 
-	if err := lp.UpdateRoot(context.Background(), lnk.(cidlink.Link).Cid); err != nil {
+	if err = lp.UpdateRoot(context.Background(), lnk.(cidlink.Link).Cid); err != nil {
 		t.Fatal(err)
 	}
 
@@ -181,6 +176,8 @@ func TestSetAndFilterPeerPolicy(t *testing.T) {
 	srcStore := dssync.MutexWrap(datastore.NewMapDatastore())
 	dstStore := dssync.MutexWrap(datastore.NewMapDatastore())
 	_, dstHost, lp, ls := initPubSub(t, srcStore, dstStore)
+	defer lp.Close()
+	defer ls.Close()
 
 	// Set policy to filter dstHost, which is not the one generating the update.
 	err := ls.SetPolicyHandler(legs.FilterPeerPolicy(dstHost.ID()))
@@ -189,10 +186,10 @@ func TestSetAndFilterPeerPolicy(t *testing.T) {
 	}
 	// per https://github.com/libp2p/go-libp2p-pubsub/blob/e6ad80cf4782fca31f46e3a8ba8d1a450d562f49/gossipsub_test.go#L103
 	// we don't seem to have a way to manually trigger needed gossip-sub heartbeats for mesh establishment.
-	time.Sleep(2 * time.Second)
+	time.Sleep(3 * time.Second)
 
 	watcher, cncl := ls.OnChange()
-
+	defer cncl()
 	// Update root with item
 	np := basicnode.Prototype__Any{}
 	nb := np.NewBuilder()
@@ -217,12 +214,6 @@ func TestSetAndFilterPeerPolicy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-
-	t.Cleanup(func() {
-		cncl()
-		lp.Close()
-		ls.Close()
-	})
 
 	if err = lp.UpdateRoot(context.Background(), lnk.(cidlink.Link).Cid); err != nil {
 		t.Fatal(err)

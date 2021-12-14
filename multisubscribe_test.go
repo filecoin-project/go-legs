@@ -24,6 +24,7 @@ func TestMultiSubscribeRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer lp1.Close()
 
 	srcStore2 := dssync.MutexWrap(datastore.NewMapDatastore())
 	srcHost2 := test.MkTestHost()
@@ -32,6 +33,7 @@ func TestMultiSubscribeRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer lp2.Close()
 
 	dstStore := dssync.MutexWrap(datastore.NewMapDatastore())
 	dstHost := test.MkTestHost()
@@ -44,6 +46,7 @@ func TestMultiSubscribeRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer ms.Close(context.Background())
 	if err := srcHost1.Connect(context.Background(), dstHost.Peerstore().PeerInfo(dstHost.ID())); err != nil {
 		t.Fatal(err)
 	}
@@ -54,13 +57,19 @@ func TestMultiSubscribeRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer ls1.Close()
+
 	watcher1, cncl1 := ls1.OnChange()
+	defer cncl1()
 
 	ls2, err := ms.NewSubscriber(legs.FilterPeerPolicy(srcHost2.ID()))
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer ls2.Close()
+
 	watcher2, cncl2 := ls2.OnChange()
+	defer cncl2()
 
 	// Update root on publisher one with item
 	itm1 := basicnode.NewString("hello world")
@@ -74,15 +83,6 @@ func TestMultiSubscribeRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() {
-		cncl1()
-		cncl2()
-		lp1.Close()
-		ls1.Close()
-		lp2.Close()
-		ls2.Close()
-		ms.Close(context.Background())
-	})
 
 	// per https://github.com/libp2p/go-libp2p-pubsub/blob/e6ad80cf4782fca31f46e3a8ba8d1a450d562f49/gossipsub_test.go#L103
 	// we don't seem to have a way to manually trigger needed gossip-sub heartbeats for mesh establishment.
@@ -123,14 +123,18 @@ func TestCloseTransport(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer ms.Close(context.Background())
 	ls1, err := ms.NewSubscriber(nil)
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer ls1.Close()
 	ls2, err := ms.NewSubscriber(nil)
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer ls2.Close()
+
 	ls2.Close()
 	err = ms.Close(context.Background())
 	if err == nil {

@@ -26,6 +26,7 @@ func TestLatestSyncSuccess(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer lp.Close()
 
 	dstHost := test.MkTestHost()
 	srcHost.Peerstore().AddAddrs(dstHost.ID(), dstHost.Addrs(), time.Hour)
@@ -35,12 +36,15 @@ func TestLatestSyncSuccess(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer ls.Close()
+
 	if err := srcHost.Connect(context.Background(), dstHost.Peerstore().PeerInfo(dstHost.ID())); err != nil {
 		t.Fatal(err)
 	}
 
-	time.Sleep(2 * time.Second)
+	time.Sleep(5 * time.Second)
 	watcher, cncl := ls.OnChange()
+	defer cncl()
 
 	// Store the whole chain in source node
 	chainLnks := test.MkChain(srcLnkS, true)
@@ -48,10 +52,6 @@ func TestLatestSyncSuccess(t *testing.T) {
 	newUpdateTest(t, lp, ls, dstStore, watcher, chainLnks[2], false, chainLnks[2].(cidlink.Link).Cid)
 	newUpdateTest(t, lp, ls, dstStore, watcher, chainLnks[1], false, chainLnks[1].(cidlink.Link).Cid)
 	newUpdateTest(t, lp, ls, dstStore, watcher, chainLnks[0], false, chainLnks[0].(cidlink.Link).Cid)
-
-	cncl()
-	lp.Close()
-	ls.Close()
 }
 
 func TestSyncFn(t *testing.T) {
@@ -63,6 +63,7 @@ func TestSyncFn(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer lp.Close()
 
 	dstHost := test.MkTestHost()
 	srcHost.Peerstore().AddAddrs(dstHost.ID(), dstHost.Addrs(), time.Hour)
@@ -73,16 +74,13 @@ func TestSyncFn(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer ls.Close()
+
 	if err := srcHost.Connect(context.Background(), dstHost.Peerstore().PeerInfo(dstHost.ID())); err != nil {
 		t.Fatal(err)
 	}
 
-	time.Sleep(2 * time.Second)
-
-	t.Cleanup(func() {
-		lp.Close()
-		ls.Close()
-	})
+	time.Sleep(3 * time.Second)
 
 	// Store the whole chain in source node
 	chainLnks := test.MkChain(srcLnkS, true)
@@ -158,6 +156,7 @@ func TestPartialSync(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer lp.Close()
 
 	chainLnks := test.MkChain(testLnkS, true)
 
@@ -169,6 +168,7 @@ func TestPartialSync(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer ls.Close()
 	if err := srcHost.Connect(context.Background(), dstHost.Peerstore().PeerInfo(dstHost.ID())); err != nil {
 		t.Fatal(err)
 	}
@@ -178,8 +178,7 @@ func TestPartialSync(t *testing.T) {
 	time.Sleep(2 * time.Second)
 
 	watcher, cncl := ls.OnChange()
-
-	t.Cleanup(clean(lp, ls, cncl))
+	defer cncl()
 
 	// Fetching first few nodes.
 	newUpdateTest(t, lp, ls, dstStore, watcher, chainLnks[2], false, chainLnks[2].(cidlink.Link).Cid)
@@ -212,6 +211,7 @@ func TestStepByStepSync(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer lp.Close()
 
 	dstHost := test.MkTestHost()
 	srcHost.Peerstore().AddAddrs(dstHost.ID(), dstHost.Addrs(), time.Hour)
@@ -221,13 +221,15 @@ func TestStepByStepSync(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer ls.Close()
 	if err := srcHost.Connect(context.Background(), dstHost.Peerstore().PeerInfo(dstHost.ID())); err != nil {
 		t.Fatal(err)
 	}
 
-	time.Sleep(2 * time.Second)
+	time.Sleep(3 * time.Second)
 
 	watcher, cncl := ls.OnChange()
+	defer cncl()
 
 	// Store the whole chain in source node
 	chainLnks := test.MkChain(srcLnkS, true)
@@ -235,8 +237,6 @@ func TestStepByStepSync(t *testing.T) {
 	// Store half of the chain already in destination
 	// to simulate the partial sync.
 	test.MkChain(dstLnkS, true)
-
-	t.Cleanup(clean(lp, ls, cncl))
 
 	// Sync the rest of the chain
 	newUpdateTest(t, lp, ls, dstStore, watcher, chainLnks[1], false, chainLnks[1].(cidlink.Link).Cid)
@@ -253,6 +253,7 @@ func TestLatestSyncFailure(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer lp.Close()
 
 	chainLnks := test.MkChain(srcLnkS, true)
 
@@ -267,6 +268,7 @@ func TestLatestSyncFailure(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer ls.Close()
 
 	watcher, cncl := ls.OnChange()
 	// The other end doesn't have the data
@@ -279,9 +281,10 @@ func TestLatestSyncFailure(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer ls.Close()
 	watcher, cncl = ls.OnChange()
+	defer cncl()
 
-	t.Cleanup(clean(lp, ls, cncl))
 	// We are not able to run the full exchange
 	newUpdateTest(t, lp, ls, dstStore, watcher, chainLnks[2], true, chainLnks[3].(cidlink.Link).Cid)
 }
@@ -324,13 +327,5 @@ func assertLatestSyncEquals(t *testing.T, sub legs.LegSubscriber, want cid.Cid) 
 	got := sub.LatestSync().(cidlink.Link)
 	if got.Cid != want {
 		t.Fatal("latestSync not updated correctly", got)
-	}
-}
-
-func clean(lp legs.LegPublisher, ls legs.LegSubscriber, cncl context.CancelFunc) func() {
-	return func() {
-		cncl()
-		lp.Close()
-		ls.Close()
 	}
 }

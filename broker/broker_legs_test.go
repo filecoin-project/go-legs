@@ -74,6 +74,8 @@ func TestBrokerRoundTripExistingDataTransfer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer os.RemoveAll(tmpDir)
+
 	dt, err := dt.NewDataTransfer(srcStore, tmpDir, dtNet, tp)
 	if err != nil {
 		t.Fatal(err)
@@ -86,6 +88,7 @@ func TestBrokerRoundTripExistingDataTransfer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer lp.Close()
 
 	dstHost := test.MkTestHost()
 	srcHost.Peerstore().AddAddrs(dstHost.ID(), dstHost.Addrs(), time.Hour)
@@ -97,11 +100,13 @@ func TestBrokerRoundTripExistingDataTransfer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer lb.Close()
 	if err := srcHost.Connect(context.Background(), dstHost.Peerstore().PeerInfo(dstHost.ID())); err != nil {
 		t.Fatal(err)
 	}
 
 	watcher, cncl := lb.OnSyncFinished()
+	defer cncl()
 
 	// Update root with item
 	itm := basicnode.NewString("hello world")
@@ -109,13 +114,6 @@ func TestBrokerRoundTripExistingDataTransfer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-
-	t.Cleanup(func() {
-		cncl()
-		lp.Close()
-		lb.Close()
-		os.RemoveAll(tmpDir)
-	})
 
 	// per https://github.com/libp2p/go-libp2p-pubsub/blob/e6ad80cf4782fca31f46e3a8ba8d1a450d562f49/gossipsub_test.go#L103
 	// we don't seem to have a way to manually trigger needed gossip-sub heartbeats for mesh establishment.
@@ -146,6 +144,8 @@ func TestBrokerAllowPeerReject(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer lp.Close()
+	defer lb.Close()
 
 	// Set function to reject anything except dstHost, which is not the one
 	// generating the update.
@@ -158,14 +158,9 @@ func TestBrokerAllowPeerReject(t *testing.T) {
 	time.Sleep(2 * time.Second)
 
 	watcher, cncl := lb.OnSyncFinished()
+	defer cncl()
 
 	c := mkLnk(t, srcStore)
-
-	t.Cleanup(func() {
-		cncl()
-		lp.Close()
-		lb.Close()
-	})
 
 	// Update root with item
 	err = lp.UpdateRoot(context.Background(), c)
@@ -190,6 +185,8 @@ func TestBrokerAllowPeerAllows(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer lp.CLose()
+	defer lb.Close()
 
 	// Set function to allow any peer.
 	lb.SetAllowPeer(func(peerID peer.ID) (bool, error) {
@@ -201,14 +198,9 @@ func TestBrokerAllowPeerAllows(t *testing.T) {
 	time.Sleep(2 * time.Second)
 
 	watcher, cncl := lb.OnSyncFinished()
+	defer cncl()
 
 	c := mkLnk(t, srcStore)
-
-	t.Cleanup(func() {
-		cncl()
-		lp.Close()
-		lb.Close()
-	})
 
 	// Update root with item
 	err = lp.UpdateRoot(context.Background(), c)
@@ -217,7 +209,7 @@ func TestBrokerAllowPeerAllows(t *testing.T) {
 	}
 
 	select {
-	case <-time.After(time.Second * 3):
+	case <-time.After(time.Second * 7):
 		t.Fatal("timed out waiting for SyncFinished")
 	case <-watcher:
 	}

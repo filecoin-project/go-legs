@@ -26,6 +26,7 @@ func TestBrokerLatestSyncSuccess(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer lp.Close()
 
 	dstHost := test.MkTestHost()
 	srcHost.Peerstore().AddAddrs(dstHost.ID(), dstHost.Addrs(), time.Hour)
@@ -36,6 +37,7 @@ func TestBrokerLatestSyncSuccess(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer lb.Close()
 
 	if err := srcHost.Connect(context.Background(), dstHost.Peerstore().PeerInfo(dstHost.ID())); err != nil {
 		t.Fatal(err)
@@ -43,15 +45,10 @@ func TestBrokerLatestSyncSuccess(t *testing.T) {
 
 	time.Sleep(5 * time.Second)
 	watcher, cncl := lb.OnSyncFinished()
+	defer cncl()
 
 	// Store the whole chain in source node
 	chainLnks := test.MkChain(srcLnkS, true)
-
-	t.Cleanup(func() {
-		cncl()
-		lp.Close()
-		lb.Close()
-	})
 
 	newBrokerUpdateTest(t, lp, lb, dstStore, watcher, srcHost.ID(), chainLnks[2], false, chainLnks[2].(cidlink.Link).Cid)
 	newBrokerUpdateTest(t, lp, lb, dstStore, watcher, srcHost.ID(), chainLnks[1], false, chainLnks[1].(cidlink.Link).Cid)
@@ -67,6 +64,7 @@ func TestBrokerSyncFn(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer lp.Close()
 
 	dstHost := test.MkTestHost()
 	srcHost.Peerstore().AddAddrs(dstHost.ID(), dstHost.Addrs(), time.Hour)
@@ -77,17 +75,13 @@ func TestBrokerSyncFn(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer lb.Close()
 
 	if err := srcHost.Connect(context.Background(), dstHost.Peerstore().PeerInfo(dstHost.ID())); err != nil {
 		t.Fatal(err)
 	}
 
 	time.Sleep(5 * time.Second)
-
-	t.Cleanup(func() {
-		lp.Close()
-		lb.Close()
-	})
 
 	// Store the whole chain in source node
 	chainLnks := test.MkChain(srcLnkS, true)
@@ -199,6 +193,7 @@ func TestBrokerPartialSync(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer lp.Close()
 
 	chainLnks := test.MkChain(testLnkS, true)
 
@@ -216,6 +211,7 @@ func TestBrokerPartialSync(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer lb.Close()
 
 	if err := srcHost.Connect(context.Background(), dstHost.Peerstore().PeerInfo(dstHost.ID())); err != nil {
 		t.Fatal(err)
@@ -226,12 +222,7 @@ func TestBrokerPartialSync(t *testing.T) {
 	time.Sleep(2 * time.Second)
 
 	watcher, cncl := lb.OnSyncFinished()
-
-	t.Cleanup(func() {
-		lp.Close()
-		lb.Close()
-		cncl()
-	})
+	defer cncl()
 
 	// Fetching first few nodes.
 	newBrokerUpdateTest(t, lp, lb, dstStore, watcher, srcHost.ID(), chainLnks[2], false, chainLnks[2].(cidlink.Link).Cid)
@@ -264,6 +255,7 @@ func TestBrokerStepByStepSync(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer lp.Close()
 
 	dstHost := test.MkTestHost()
 	srcHost.Peerstore().AddAddrs(dstHost.ID(), dstHost.Addrs(), time.Hour)
@@ -274,6 +266,7 @@ func TestBrokerStepByStepSync(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer lp.Close()
 
 	if err := srcHost.Connect(context.Background(), dstHost.Peerstore().PeerInfo(dstHost.ID())); err != nil {
 		t.Fatal(err)
@@ -282,6 +275,7 @@ func TestBrokerStepByStepSync(t *testing.T) {
 	time.Sleep(2 * time.Second)
 
 	watcher, cncl := lb.OnSyncFinished()
+	defer cncl()
 
 	// Store the whole chain in source node
 	chainLnks := test.MkChain(srcLnkS, true)
@@ -289,12 +283,6 @@ func TestBrokerStepByStepSync(t *testing.T) {
 	// Store half of the chain already in destination
 	// to simulate the partial sync.
 	test.MkChain(dstLnkS, true)
-
-	t.Cleanup(func() {
-		lp.Close()
-		lb.Close()
-		cncl()
-	})
 
 	// Sync the rest of the chain
 	newBrokerUpdateTest(t, lp, lb, dstStore, watcher, srcHost.ID(), chainLnks[1], false, chainLnks[1].(cidlink.Link).Cid)
@@ -310,6 +298,7 @@ func TestBrokerLatestSyncFailure(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer lp.Close()
 
 	chainLnks := test.MkChain(srcLnkS, true)
 
@@ -325,6 +314,8 @@ func TestBrokerLatestSyncFailure(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer lp.Close()
+
 	if err := srcHost.Connect(context.Background(), dstHost.Peerstore().PeerInfo(dstHost.ID())); err != nil {
 		t.Fatal(err)
 	}
@@ -350,12 +341,8 @@ func TestBrokerLatestSyncFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 	watcher, cncl = lb.OnSyncFinished()
+	defer cncl()
 
-	t.Cleanup(func() {
-		lp.Close()
-		lb.Close()
-		cncl()
-	})
 	t.Log("Testing sync fail when not able to run the full exchange")
 	newBrokerUpdateTest(t, lp, lb, dstStore, watcher, srcHost.ID(), chainLnks[2], true, chainLnks[3].(cidlink.Link).Cid)
 }

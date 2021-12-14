@@ -24,8 +24,11 @@ func TestBrokerRoundTripSimple(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer lp.Close()
+	defer lb.Close()
 
 	watcher, cncl := lb.OnSyncFinished()
+	defer cncl()
 
 	// Update root with item
 	itm := basicnode.NewString("hello world")
@@ -34,22 +37,16 @@ func TestBrokerRoundTripSimple(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	t.Cleanup(func() {
-		cncl()
-		lp.Close()
-		lb.Close()
-	})
-
 	// per https://github.com/libp2p/go-libp2p-pubsub/blob/e6ad80cf4782fca31f46e3a8ba8d1a450d562f49/gossipsub_test.go#L103
 	// we don't seem to have a way to manually trigger needed gossip-sub heartbeats for mesh establishment.
-	time.Sleep(2 * time.Second)
+	time.Sleep(5 * time.Second)
 
 	if err := lp.UpdateRoot(context.Background(), lnk.(cidlink.Link).Cid); err != nil {
 		t.Fatal(err)
 	}
 
 	select {
-	case <-time.After(time.Second * 5):
+	case <-time.After(time.Second * 7):
 		t.Fatal("timed out waiting for sync to propogate")
 	case downstream := <-watcher:
 		if !downstream.Cid.Equals(lnk.(cidlink.Link).Cid) {
@@ -71,6 +68,7 @@ func TestBrokerRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer lp1.Close()
 
 	srcStore2 := dssync.MutexWrap(datastore.NewMapDatastore())
 	srcHost2 := test.MkTestHost()
@@ -79,6 +77,7 @@ func TestBrokerRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer lp2.Close()
 
 	dstStore := dssync.MutexWrap(datastore.NewMapDatastore())
 	dstHost := test.MkTestHost()
@@ -93,6 +92,7 @@ func TestBrokerRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer lb.Close()
 
 	// Connections must be made after Broker is created, because the
 	// gossip pubsub must be created before connections are made.  Otherwise,
@@ -107,7 +107,9 @@ func TestBrokerRoundTrip(t *testing.T) {
 	}
 
 	watcher1, cncl1 := lb.OnSyncFinished()
+	defer cancl1()
 	watcher2, cncl2 := lb.OnSyncFinished()
+	defer cancl2()
 
 	// Update root on publisher one with item
 	itm1 := basicnode.NewString("hello world")
@@ -121,11 +123,6 @@ func TestBrokerRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() {
-		cncl1()
-		cncl2()
-		lb.Close()
-	})
 
 	if err := lp1.UpdateRoot(context.Background(), lnk1.(cidlink.Link).Cid); err != nil {
 		t.Fatal(err)
@@ -173,6 +170,7 @@ func TestCloseBroker(t *testing.T) {
 	}
 
 	watcher, cncl := lb.OnSyncFinished()
+	defer cncl()
 
 	err = lb.Close()
 	if err != nil {
@@ -186,6 +184,11 @@ func TestCloseBroker(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for watcher to close")
+	}
+
+	err = lb.Close()
+	if err != nil {
+		t.Fatal(err)
 	}
 
 	done := make(chan struct{})

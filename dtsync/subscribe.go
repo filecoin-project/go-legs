@@ -37,6 +37,8 @@ type legSubscriber struct {
 	syncmtx    sync.Mutex
 	latestSync ipld.Link
 	syncing    cid.Cid
+
+	closeOnce sync.Once
 }
 
 // NewSubscriber creates a new leg subscriber listening to a specific pubsub topic
@@ -280,8 +282,12 @@ func (ls *legSubscriber) OnChange() (chan cid.Cid, context.CancelFunc) {
 }
 
 func (ls *legSubscriber) Close() error {
-	ls.cancel()
-	return ls.onClose()
+	var err error
+	ls.closeOnce.Do(func() {
+		ls.cancel()
+		err = ls.onClose()
+	})
+	return err
 }
 
 func (ls *legSubscriber) unlockOnce(ulOnce *sync.Once) {
