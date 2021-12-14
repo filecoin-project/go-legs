@@ -383,7 +383,7 @@ func newBrokerUpdateTest(t *testing.T, lp legs.LegPublisher, lb *broker.Broker, 
 		}
 	} else {
 		select {
-		case <-time.After(time.Second * 5):
+		case <-time.After(time.Second * 7):
 			t.Fatal("timed out waiting for sync to propagate")
 		case downstream, open := <-watcher:
 			if !open {
