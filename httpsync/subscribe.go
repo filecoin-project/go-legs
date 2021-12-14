@@ -1,33 +1,21 @@
-package http
+package httpsync
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
-	"io"
 	"net/http"
-	"net/url"
-	"path"
 	"sync"
 	"time"
 
 	"github.com/filecoin-project/go-legs"
-	maurl "github.com/filecoin-project/go-legs/http/multiaddr"
 	"github.com/ipfs/go-cid"
-	logging "github.com/ipfs/go-log/v2"
 	"github.com/ipld/go-ipld-prime"
-	"github.com/ipld/go-ipld-prime/datamodel"
 	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
-	basicnode "github.com/ipld/go-ipld-prime/node/basic"
-	"github.com/ipld/go-ipld-prime/traversal"
 	"github.com/ipld/go-ipld-prime/traversal/selector"
 	peer "github.com/libp2p/go-libp2p-core/peer"
 	"github.com/multiformats/go-multiaddr"
 )
 
 var defaultPollTime = time.Hour
-
-var log = logging.Logger("go-legs-http")
 
 // NewHTTPSubscriber creates a legs subscriber that provides subscriptions
 // from publishers identified by
@@ -41,32 +29,26 @@ var log = logging.Logger("go-legs-http")
 // sequence itself.
 //
 // See: legs.ExploreRecursiveWithStopNode.
-func NewHTTPSubscriber(ctx context.Context, host *http.Client, publisher multiaddr.Multiaddr, lsys *ipld.LinkSystem, topic string, dss ipld.Node) (legs.LegSubscriber, error) {
-	url, err := maurl.ToURL(publisher)
+func NewHTTPSubscriber(ctx context.Context, host *http.Client, publisher multiaddr.Multiaddr, lsys ipld.LinkSystem, topic string, dss ipld.Node) (legs.LegSubscriber, error) {
+	s := NewSync(lsys, host)
+	syncer, err := s.NewSyncer(publisher)
 	if err != nil {
 		return nil, err
 	}
-	hs := httpSubscriber{
-		Client: host,
-		head:   cid.Undef,
-		root:   *url,
 
-		lsys: lsys,
-		dss:  dss,
-		mtx:  sync.Mutex{},
-		reqs: make(chan req, 1),
-		subs: make([]chan cid.Cid, 1),
+	hs := httpSubscriber{
+		dss:    dss,
+		reqs:   make(chan req, 1),
+		subs:   make([]chan cid.Cid, 1),
+		sync:   s,
+		syncer: syncer,
 	}
 	go hs.background()
 	return &hs, nil
 }
 
 type httpSubscriber struct {
-	*http.Client
-	root url.URL
-
-	lsys *ipld.LinkSystem
-	dss  ipld.Node
+	dss ipld.Node
 	// reqs is inbound requests for syncs from `Sync` calls
 	reqs chan req
 
@@ -74,6 +56,9 @@ type httpSubscriber struct {
 	mtx  sync.Mutex
 	head cid.Cid
 	subs []chan cid.Cid
+
+	sync   *Sync
+	syncer legs.Syncer
 }
 
 var _ legs.LegSubscriber = (*httpSubscriber)(nil)
@@ -152,7 +137,7 @@ func (h *httpSubscriber) Sync(ctx context.Context, p peer.ID, c cid.Cid, selecto
 
 func (h *httpSubscriber) Close() error {
 	// cancel out subscribers.
-	h.Client.CloseIdleConnections()
+	h.sync.Close()
 	h.mtx.Lock()
 	defer h.mtx.Unlock()
 	for _, ca := range h.subs {
@@ -160,6 +145,13 @@ func (h *httpSubscriber) Close() error {
 	}
 	h.subs = make([]chan cid.Cid, 0)
 	return nil
+}
+
+// LatestSync gets the latest synced link.
+func (h *httpSubscriber) LatestSync() ipld.Link {
+	h.mtx.Lock()
+	defer h.mtx.Unlock()
+	return cidlink.Link{Cid: h.head}
 }
 
 // background event loop for scheduling:
@@ -170,7 +162,6 @@ func (h *httpSubscriber) background() {
 	var workResp chan cid.Cid
 	var ctx context.Context
 	var sel ipld.Node
-	var xsel selector.Selector
 	var err error
 	var updateHead bool
 	defaultRate := time.NewTimer(defaultPollTime)
@@ -206,7 +197,7 @@ func (h *httpSubscriber) background() {
 
 		// If no CID is given, use the latest head fetched from remote head publisher.
 		if nextCid == cid.Undef {
-			nextCid, err = h.fetchHead(ctx)
+			nextCid, err = h.syncer.GetHead(ctx)
 			if err != nil {
 				log.Warnf("failed to fetch new head: %s", err)
 				continue
@@ -221,20 +212,8 @@ func (h *httpSubscriber) background() {
 			sel = legs.ExploreRecursiveWithStopNode(selector.RecursionLimitNone(), h.dss, cidlink.Link{Cid: currHead})
 		}
 
-		if err = h.fetchBlock(ctx, nextCid); err != nil {
-			log.Errorw("Failed to fetch requested block", "err", err)
-			continue
-		}
-
-		xsel, err = selector.CompileSelector(sel)
-		if err != nil {
-			log.Errorw("Failed to compile selector", "err", err, "selector", sel)
-			continue
-		}
-
-		err = h.walkFetch(ctx, nextCid, xsel)
-		if err != nil {
-			log.Errorw("Failed to traverse requested dag", "err", err, "root", nextCid)
+		if err = h.syncer.Sync(ctx, nextCid, sel); err != nil {
+			log.Errorw("Failed to sync", "err", err)
 			continue
 		}
 
@@ -245,101 +224,4 @@ func (h *httpSubscriber) background() {
 			h.mtx.Unlock()
 		}
 	}
-}
-
-func (h *httpSubscriber) walkFetch(ctx context.Context, root cid.Cid, sel selector.Selector) error {
-	getMissingLs := cidlink.DefaultLinkSystem()
-	// trusted because it'll be hashed/verified on the way into the link system when fetched.
-	getMissingLs.TrustedStorage = true
-	getMissingLs.StorageReadOpener = func(lc ipld.LinkContext, l ipld.Link) (io.Reader, error) {
-		r, err := h.lsys.StorageReadOpener(lc, l)
-		if err == nil {
-			log.Errorw("Failed to get block read opener", "err", err, "link", l)
-			return r, nil
-		}
-		// get.
-		c := l.(cidlink.Link).Cid
-		if err := h.fetchBlock(ctx, c); err != nil {
-			log.Errorw("Failed to fetch block", "err", err, "cid", c)
-			return nil, err
-		}
-		return h.lsys.StorageReadOpener(lc, l)
-	}
-
-	progress := traversal.Progress{
-		Cfg: &traversal.Config{
-			Ctx:                            ctx,
-			LinkSystem:                     getMissingLs,
-			LinkTargetNodePrototypeChooser: basicnode.Chooser,
-		},
-		Path: datamodel.NewPath([]datamodel.PathSegment{}),
-	}
-	// get the direct node.
-	rootNode, err := getMissingLs.Load(ipld.LinkContext{}, cidlink.Link{Cid: root}, basicnode.Prototype.Any)
-	if err != nil {
-		log.Errorw("Failed to load node", "root", root)
-		return err
-	}
-	return progress.WalkMatching(rootNode, sel, func(p traversal.Progress, n datamodel.Node) error {
-		return nil
-	})
-}
-
-func (h *httpSubscriber) fetch(ctx context.Context, rsrc string, cb func(io.Reader) error) error {
-	localURL := h.root
-	localURL.Path = path.Join(h.root.Path, rsrc)
-
-	req, err := http.NewRequestWithContext(ctx, "GET", localURL.String(), nil)
-	if err != nil {
-		return err
-	}
-	resp, err := h.Client.Do(req)
-	if err != nil {
-		log.Errorw("Failed to execute fetch request", "err", err)
-		return err
-	}
-	if resp.StatusCode != http.StatusOK {
-		err := fmt.Errorf("non success http code at %s: %d", localURL.String(), resp.StatusCode)
-		log.Errorw("Fetch was not successful", "err", err)
-		return err
-	}
-
-	defer resp.Body.Close()
-	return cb(resp.Body)
-}
-
-func (h *httpSubscriber) fetchHead(ctx context.Context) (cid.Cid, error) {
-	var cidStr string
-	if err := h.fetch(ctx, "head", func(msg io.Reader) error {
-		return json.NewDecoder(msg).Decode(&cidStr)
-	}); err != nil {
-		return cid.Undef, err
-	}
-
-	return cid.Decode(cidStr)
-}
-
-// fetch an item into the datastore at c if not locally avilable.
-func (h *httpSubscriber) fetchBlock(ctx context.Context, c cid.Cid) error {
-	n, err := h.lsys.Load(ipld.LinkContext{}, cidlink.Link{Cid: c}, basicnode.Prototype.Any)
-	// node is already present.
-	if n != nil && err == nil {
-		return nil
-	}
-
-	return h.fetch(ctx, c.String(), func(data io.Reader) error {
-		writer, committer, err := h.lsys.StorageWriteOpener(ipld.LinkContext{})
-		if err != nil {
-			log.Errorw("Failed to get write opener", "err", err)
-			return err
-		}
-		if _, err := io.Copy(writer, data); err != nil {
-			return err
-		}
-		err = committer(cidlink.Link{Cid: c})
-		if err != nil {
-			log.Errorw("Failed to commit ")
-		}
-		return err
-	})
 }

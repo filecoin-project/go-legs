@@ -1,10 +1,12 @@
-package legs
+package broker_test
 
 import (
 	"context"
 	"testing"
 	"time"
 
+	"github.com/filecoin-project/go-legs/broker"
+	"github.com/filecoin-project/go-legs/dtsync"
 	"github.com/filecoin-project/go-legs/test"
 	"github.com/ipfs/go-datastore"
 	dssync "github.com/ipfs/go-datastore/sync"
@@ -18,7 +20,10 @@ func TestBrokerRoundTripSimple(t *testing.T) {
 	// Init legs publisher and subscriber
 	srcStore := dssync.MutexWrap(datastore.NewMapDatastore())
 	dstStore := dssync.MutexWrap(datastore.NewMapDatastore())
-	_, _, lp, lb := brokerInitPubSub(t, srcStore, dstStore)
+	_, _, lp, lb, err := initPubSub(srcStore, dstStore)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	watcher, cncl := lb.OnSyncFinished()
 
@@ -59,24 +64,24 @@ func TestBrokerRoundTripSimple(t *testing.T) {
 func TestBrokerRoundTrip(t *testing.T) {
 	// Init legs publisher and subscriber
 	srcStore1 := dssync.MutexWrap(datastore.NewMapDatastore())
-	srcHost1 := mkTestHost()
+	srcHost1 := test.MkTestHost()
 	srcLnkS1 := test.MkLinkSystem(srcStore1)
 
-	lp1, err := NewPublisher(context.Background(), srcHost1, srcStore1, srcLnkS1, testTopic)
+	lp1, err := dtsync.NewPublisher(context.Background(), srcHost1, srcStore1, srcLnkS1, testTopic)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	srcStore2 := dssync.MutexWrap(datastore.NewMapDatastore())
-	srcHost2 := mkTestHost()
+	srcHost2 := test.MkTestHost()
 	srcLnkS2 := test.MkLinkSystem(srcStore2)
-	lp2, err := NewPublisher(context.Background(), srcHost2, srcStore2, srcLnkS2, testTopic)
+	lp2, err := dtsync.NewPublisher(context.Background(), srcHost2, srcStore2, srcLnkS2, testTopic)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	dstStore := dssync.MutexWrap(datastore.NewMapDatastore())
-	dstHost := mkTestHost()
+	dstHost := test.MkTestHost()
 
 	srcHost1.Peerstore().AddAddrs(dstHost.ID(), dstHost.Addrs(), time.Hour)
 	dstHost.Peerstore().AddAddrs(srcHost1.ID(), srcHost1.Addrs(), time.Hour)
@@ -84,7 +89,7 @@ func TestBrokerRoundTrip(t *testing.T) {
 	dstHost.Peerstore().AddAddrs(srcHost2.ID(), srcHost2.Addrs(), time.Hour)
 
 	dstLnkS := test.MkLinkSystem(dstStore)
-	ld, err := NewBroker(dstHost, dstStore, dstLnkS, testTopic, nil)
+	lb, err := broker.NewBroker(dstHost, dstStore, dstLnkS, testTopic, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -101,8 +106,8 @@ func TestBrokerRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	watcher1, cncl1 := ld.OnSyncFinished()
-	watcher2, cncl2 := ld.OnSyncFinished()
+	watcher1, cncl1 := lb.OnSyncFinished()
+	watcher2, cncl2 := lb.OnSyncFinished()
 
 	// Update root on publisher one with item
 	itm1 := basicnode.NewString("hello world")
@@ -119,7 +124,7 @@ func TestBrokerRoundTrip(t *testing.T) {
 	t.Cleanup(func() {
 		cncl1()
 		cncl2()
-		ld.Close()
+		lb.Close()
 	})
 
 	if err := lp1.UpdateRoot(context.Background(), lnk1.(cidlink.Link).Cid); err != nil {
@@ -159,17 +164,17 @@ func TestBrokerRoundTrip(t *testing.T) {
 
 func TestCloseBroker(t *testing.T) {
 	st := dssync.MutexWrap(datastore.NewMapDatastore())
-	sh := mkTestHost()
+	sh := test.MkTestHost()
 	lsys := test.MkLinkSystem(st)
 
-	ld, err := NewBroker(sh, st, lsys, testTopic, nil)
+	lb, err := broker.NewBroker(sh, st, lsys, testTopic, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	watcher, cncl := ld.OnSyncFinished()
+	watcher, cncl := lb.OnSyncFinished()
 
-	err = ld.Close()
+	err = lb.Close()
 	if err != nil {
 		t.Fatal(err)
 	}

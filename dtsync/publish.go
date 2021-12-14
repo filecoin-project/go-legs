@@ -1,10 +1,12 @@
-package legs
+package dtsync
 
 import (
 	"context"
 	"net/http"
 
 	dt "github.com/filecoin-project/go-data-transfer"
+	"github.com/filecoin-project/go-legs"
+	"github.com/filecoin-project/go-legs/gpubsub"
 	"github.com/filecoin-project/go-legs/p2p/protocol/head"
 	"github.com/hashicorp/go-multierror"
 	"github.com/ipfs/go-cid"
@@ -23,11 +25,7 @@ type legPublisher struct {
 }
 
 // NewPublisher creates a new legs publisher
-func NewPublisher(ctx context.Context,
-	host host.Host,
-	ds datastore.Batching,
-	lsys ipld.LinkSystem,
-	topic string) (LegPublisher, error) {
+func NewPublisher(ctx context.Context, host host.Host, ds datastore.Batching, lsys ipld.LinkSystem, topic string) (legs.LegPublisher, error) {
 	ss, err := newSimpleSetup(ctx, host, ds, lsys, topic)
 	if err != nil {
 		log.Errorf("Failed to instantiate simple setup")
@@ -56,8 +54,8 @@ func NewPublisherFromExisting(ctx context.Context,
 	dt dt.Manager,
 	host host.Host,
 	topic string,
-	lsys ipld.LinkSystem) (LegPublisher, error) {
-	t, err := makePubsub(ctx, host, topic)
+	lsys ipld.LinkSystem) (legs.LegPublisher, error) {
+	t, err := gpubsub.MakePubsub(ctx, host, topic)
 	if err != nil {
 		return nil, err
 	}
@@ -86,7 +84,7 @@ func (lp *legPublisher) UpdateRootWithAddrs(ctx context.Context, c cid.Cid, addr
 		cid:   c,
 		addrs: addrs,
 	}
-	err = lp.topic.Publish(ctx, encodeMessage(msg))
+	err = lp.topic.Publish(ctx, EncodeMessage(msg))
 	if err != nil {
 		errs = multierror.Append(errs, err)
 	}
@@ -94,11 +92,14 @@ func (lp *legPublisher) UpdateRootWithAddrs(ctx context.Context, c cid.Cid, addr
 }
 
 func (lp *legPublisher) Close() error {
-	err1 := lp.headPublisher.Close()
-	err2 := lp.onClose()
-
-	if err1 != nil {
-		return err1
+	var errs error
+	err := lp.headPublisher.Close()
+	if err != nil {
+		errs = multierror.Append(errs, err)
 	}
-	return err2
+	err = lp.onClose()
+	if err != nil {
+		errs = multierror.Append(errs, err)
+	}
+	return errs
 }

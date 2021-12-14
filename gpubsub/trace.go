@@ -1,4 +1,4 @@
-package legs
+package gpubsub
 
 import (
 	log2 "github.com/ipfs/go-log/v2"

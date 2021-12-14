@@ -1,7 +1,8 @@
-package legs
+package broker
 
 import (
 	"fmt"
+	"net/http"
 	"time"
 
 	dt "github.com/filecoin-project/go-data-transfer"
@@ -13,8 +14,9 @@ type config struct {
 	addrTTL   time.Duration
 	allowPeer AllowPeerFunc
 
-	topic     *pubsub.Topic
-	dtManager dt.Manager
+	topic      *pubsub.Topic
+	dtManager  dt.Manager
+	httpClient *http.Client
 }
 
 type Option func(*config) error
@@ -59,6 +61,13 @@ func Topic(topic *pubsub.Topic) Option {
 func DtManager(dt dt.Manager) Option {
 	return func(c *config) error {
 		c.dtManager = dt
+		return nil
+	}
+}
+
+func HttpClient(client *http.Client) Option {
+	return func(c *config) error {
+		c.httpClient = client
 		return nil
 	}
 }

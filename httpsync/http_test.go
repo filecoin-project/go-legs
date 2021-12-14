@@ -1,13 +1,13 @@
-package http_test
+package httpsync_test
 
 import (
 	"context"
 	"net"
-	nhttp "net/http"
+	"net/http"
 	"testing"
 	"time"
 
-	"github.com/filecoin-project/go-legs/http"
+	"github.com/filecoin-project/go-legs/httpsync"
 	"github.com/filecoin-project/go-legs/test"
 	"github.com/ipfs/go-cid"
 	"github.com/ipfs/go-datastore"
@@ -22,7 +22,7 @@ import (
 func TestManualSync(t *testing.T) {
 	srcStore := dssync.MutexWrap(datastore.NewMapDatastore())
 	srcSys := test.MkLinkSystem(srcStore)
-	p, err := http.NewPublisher(context.Background(), srcStore, srcSys)
+	p, err := httpsync.NewPublisher(context.Background(), srcStore, srcSys)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -31,7 +31,7 @@ func TestManualSync(t *testing.T) {
 		t.Fatal(err)
 	}
 	go func() {
-		_ = nhttp.Serve(nl, p.(nhttp.Handler))
+		_ = http.Serve(nl, p.(http.Handler))
 	}()
 	nlm, err := manet.FromNetAddr(nl.Addr())
 	if err != nil {
@@ -42,7 +42,7 @@ func TestManualSync(t *testing.T) {
 
 	dstStore := dssync.MutexWrap(datastore.NewMapDatastore())
 	dstSys := test.MkLinkSystem(dstStore)
-	s, err := http.NewHTTPSubscriber(context.Background(), nhttp.DefaultClient, nlm, &dstSys, "", nil)
+	s, err := httpsync.NewHTTPSubscriber(context.Background(), nil, nlm, dstSys, "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}

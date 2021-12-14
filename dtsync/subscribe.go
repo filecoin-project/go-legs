@@ -1,14 +1,14 @@
-package legs
+package dtsync
 
 import (
 	"context"
 	"sync"
 
 	dt "github.com/filecoin-project/go-data-transfer"
+	"github.com/filecoin-project/go-legs"
 	"github.com/filecoin-project/go-legs/p2p/protocol/head"
 	"github.com/ipfs/go-cid"
 	"github.com/ipfs/go-datastore"
-	logging "github.com/ipfs/go-log/v2"
 	"github.com/ipld/go-ipld-prime"
 	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
 	"github.com/ipld/go-ipld-prime/traversal/selector"
@@ -17,8 +17,6 @@ import (
 	"github.com/libp2p/go-libp2p-core/peerstore"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 )
-
-var log = logging.Logger("go-legs")
 
 type legSubscriber struct {
 	updates chan cid.Cid
@@ -32,7 +30,7 @@ type legSubscriber struct {
 	cancel context.CancelFunc
 
 	hndmtx sync.RWMutex
-	policy PolicyHandler
+	policy legs.PolicyHandler
 	dss    ipld.Node
 
 	// syncmtx synchronizes read/write for latestSync and syncing
@@ -48,7 +46,7 @@ func NewSubscriber(ctx context.Context,
 	ds datastore.Batching,
 	lsys ipld.LinkSystem,
 	topic string,
-	selector ipld.Node) (LegSubscriber, error) {
+	selector ipld.Node) (legs.LegSubscriber, error) {
 	ss, err := newSimpleSetup(ctx, host, ds, lsys, topic)
 	if err != nil {
 		return nil, err
@@ -66,7 +64,7 @@ func NewSubscriberPartiallySynced(
 	lsys ipld.LinkSystem,
 	topic string,
 	latestSync cid.Cid,
-	selector ipld.Node) (LegSubscriber, error) {
+	selector ipld.Node) (legs.LegSubscriber, error) {
 	ss, err := newSimpleSetup(ctx, host, ds, lsys, topic)
 	if err != nil {
 		return nil, err
@@ -83,7 +81,7 @@ func NewSubscriberPartiallySynced(
 	return l, nil
 }
 
-func newSubscriber(ctx context.Context, dt dt.Manager, topic *pubsub.Topic, onClose func() error, host host.Host, policy PolicyHandler, dss ipld.Node) (*legSubscriber, error) {
+func newSubscriber(ctx context.Context, dt dt.Manager, topic *pubsub.Topic, onClose func() error, host host.Host, policy legs.PolicyHandler, dss ipld.Node) (*legSubscriber, error) {
 	ls := &legSubscriber{
 		dt:      dt,
 		topic:   topic,
@@ -126,7 +124,7 @@ func (ls *legSubscriber) subscribe(ctx context.Context) error {
 }
 
 // SetPolicyHandler sets a new policyHandler to leg subscription.
-func (ls *legSubscriber) SetPolicyHandler(policy PolicyHandler) error {
+func (ls *legSubscriber) SetPolicyHandler(policy legs.PolicyHandler) error {
 	ls.hndmtx.Lock()
 	defer ls.hndmtx.Unlock()
 	ls.policy = policy
@@ -205,12 +203,12 @@ func (ls *legSubscriber) watch(ctx context.Context, sub *pubsub.Subscription) {
 		src := msg.GetFrom()
 
 		// Decode cid and originator addresses from message.
-		m, err := decodeMessage(msg.GetData())
+		m, err := DecodeMessage(msg.GetData())
 		if err != nil {
 			log.Errorf("Failed to decode pubsub message: %s", err)
 			continue
 		}
-		c := m.cid
+		c := m.Cid
 		v := Voucher{&c}
 
 		// Add the message originator's address to the peerstore.  This
@@ -218,8 +216,8 @@ func (ls *legSubscriber) watch(ctx context.Context, sub *pubsub.Subscription) {
 		// message, to retrieve advertisements.
 		peerStore := ls.host.Peerstore()
 		if peerStore != nil {
-			peerStore.AddAddrs(src, m.addrs, peerstore.ProviderAddrTTL)
-			log.Debugf("Added multiaddr %v for peer ID %s", m.addrs, src)
+			peerStore.AddAddrs(src, m.Addrs, peerstore.ProviderAddrTTL)
+			log.Debugf("Added multiaddr %v for peer ID %s", m.Addrs, src)
 		}
 
 		// Locking latestSync to avoid data races by several updates
@@ -229,7 +227,7 @@ func (ls *legSubscriber) watch(ctx context.Context, sub *pubsub.Subscription) {
 		log.Debugf("Starting data channel to %s for cid %s with latest synced %s", src, c, ls.latestSync)
 		ls.syncing = c
 		_, err = ls.dt.OpenPullDataChannel(ctx, src, &v, c,
-			ExploreRecursiveWithStopNode(
+			legs.ExploreRecursiveWithStopNode(
 				selector.RecursionLimitNone(),
 				ls.dss,
 				ls.latestSync))
@@ -324,15 +322,15 @@ func (ls *legSubscriber) Sync(ctx context.Context, p peer.ID, c cid.Cid, ss ipld
 			// Instantiate sync.Once to assure legSubscriber.syncmtx is unlocked exactly once.
 			ulOnce = &sync.Once{}
 			ls.syncmtx.Lock()
-			ss = ExploreRecursiveWithStopNode(selector.RecursionLimitNone(), ls.dss, ls.latestSync)
+			ss = legs.ExploreRecursiveWithStopNode(selector.RecursionLimitNone(), ls.dss, ls.latestSync)
 			log.Debugf("Explicit sync will update latest sync %s on successuful resolution", ls.latestSync)
 		}
 	} else if ss == nil {
 		// Fall back onto the default selector sequence if one is not given.
 		// Note that if selector is specified it is used as is without any wrapping.
 		// Construct a selector consistent with the way background selector is constructed in legSubscriber.watch
-		latestSync := ls.getLatestSync()
-		ss = ExploreRecursiveWithStopNode(selector.RecursionLimitNone(), ls.dss, latestSync)
+		latestSync := ls.LatestSync()
+		ss = legs.ExploreRecursiveWithStopNode(selector.RecursionLimitNone(), ls.dss, latestSync)
 		log.Debugf("Using default selector in explicit sync stopping at latest sync %s", latestSync)
 	}
 
@@ -387,9 +385,9 @@ func (ls *legSubscriber) onSyncEvent(c cid.Cid, out chan cid.Cid, ulOnce *sync.O
 	}
 }
 
-// getLatestSync gets the latest synced link.
+// LatestSync gets the latest synced link.
 // This function is safe to call from multiple goroutines and exposed for testing purposes only.
-func (ls *legSubscriber) getLatestSync() ipld.Link {
+func (ls *legSubscriber) LatestSync() ipld.Link {
 	ls.syncmtx.Lock()
 	defer ls.syncmtx.Unlock()
 	return ls.latestSync

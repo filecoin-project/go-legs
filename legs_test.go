@@ -3,6 +3,7 @@ package legs_test
 import (
 	"context"
 	"io/ioutil"
+	"os"
 	"testing"
 	"time"
 
@@ -15,34 +16,29 @@ import (
 	datatransfer "github.com/filecoin-project/go-data-transfer/impl"
 	dtnetwork "github.com/filecoin-project/go-data-transfer/network"
 	gstransport "github.com/filecoin-project/go-data-transfer/transport/graphsync"
-	legs "github.com/filecoin-project/go-legs"
+	"github.com/filecoin-project/go-legs"
+	"github.com/filecoin-project/go-legs/dtsync"
 	"github.com/filecoin-project/go-legs/test"
 	_ "github.com/ipld/go-ipld-prime/codec/dagcbor"
 	_ "github.com/ipld/go-ipld-prime/codec/dagjson"
 	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
 	basicnode "github.com/ipld/go-ipld-prime/node/basic"
-	"github.com/libp2p/go-libp2p"
 	"github.com/libp2p/go-libp2p-core/host"
 )
 
-func mkTestHost() host.Host {
-	h, _ := libp2p.New(context.Background())
-	return h
-}
-
 func initPubSub(t *testing.T, srcStore, dstStore datastore.Batching) (host.Host, host.Host, legs.LegPublisher, legs.LegSubscriber) {
-	srcHost := mkTestHost()
+	srcHost := test.MkTestHost()
 	srcLnkS := test.MkLinkSystem(srcStore)
-	lp, err := legs.NewPublisher(context.Background(), srcHost, srcStore, srcLnkS, "legs/testtopic")
+	lp, err := dtsync.NewPublisher(context.Background(), srcHost, srcStore, srcLnkS, "legs/testtopic")
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	dstHost := mkTestHost()
+	dstHost := test.MkTestHost()
 	srcHost.Peerstore().AddAddrs(dstHost.ID(), dstHost.Addrs(), time.Hour)
 	dstHost.Peerstore().AddAddrs(srcHost.ID(), srcHost.Addrs(), time.Hour)
 	dstLnkS := test.MkLinkSystem(dstStore)
-	ls, err := legs.NewSubscriber(context.Background(), dstHost, dstStore, dstLnkS, "legs/testtopic", nil)
+	ls, err := dtsync.NewSubscriber(context.Background(), dstHost, dstStore, dstLnkS, "legs/testtopic", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -76,7 +72,7 @@ func TestRoundTrip(t *testing.T) {
 
 	// per https://github.com/libp2p/go-libp2p-pubsub/blob/e6ad80cf4782fca31f46e3a8ba8d1a450d562f49/gossipsub_test.go#L103
 	// we don't seem to have a way to manually trigger needed gossip-sub heartbeats for mesh establishment.
-	time.Sleep(2 * time.Second)
+	time.Sleep(5 * time.Second)
 
 	if err := lp.UpdateRoot(context.Background(), lnk.(cidlink.Link).Cid); err != nil {
 		t.Fatal(err)
@@ -97,7 +93,7 @@ func TestRoundTrip(t *testing.T) {
 
 func TestRoundTripExistingDataTransfer(t *testing.T) {
 	// Init legs publisher and subscriber
-	srcHost := mkTestHost()
+	srcHost := test.MkTestHost()
 	srcStore := dssync.MutexWrap(datastore.NewMapDatastore())
 	fakeLsys := cidlink.DefaultLinkSystem()
 	srcLnkS := test.MkLinkSystem(srcStore)
@@ -125,17 +121,17 @@ func TestRoundTripExistingDataTransfer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	lp, err := legs.NewPublisherFromExisting(context.Background(), dt, srcHost, "legs/testtopic", srcLnkS)
+	lp, err := dtsync.NewPublisherFromExisting(context.Background(), dt, srcHost, "legs/testtopic", srcLnkS)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	dstHost := mkTestHost()
+	dstHost := test.MkTestHost()
 	srcHost.Peerstore().AddAddrs(dstHost.ID(), dstHost.Addrs(), time.Hour)
 	dstHost.Peerstore().AddAddrs(srcHost.ID(), srcHost.Addrs(), time.Hour)
 	dstStore := dssync.MutexWrap(datastore.NewMapDatastore())
 	dstLnkS := test.MkLinkSystem(dstStore)
-	ls, err := legs.NewSubscriber(context.Background(), dstHost, dstStore, dstLnkS, "legs/testtopic", nil)
+	ls, err := dtsync.NewSubscriber(context.Background(), dstHost, dstStore, dstLnkS, "legs/testtopic", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -156,6 +152,7 @@ func TestRoundTripExistingDataTransfer(t *testing.T) {
 		cncl()
 		lp.Close()
 		ls.Close()
+		os.RemoveAll(tmpDir)
 	})
 
 	// per https://github.com/libp2p/go-libp2p-pubsub/blob/e6ad80cf4782fca31f46e3a8ba8d1a450d562f49/gossipsub_test.go#L103

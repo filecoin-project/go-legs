@@ -1,26 +1,30 @@
-package legs
+package broker
 
 import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"sync"
 	"time"
 
-	dt "github.com/filecoin-project/go-data-transfer"
-	"github.com/filecoin-project/go-legs/p2p/protocol/head"
+	"github.com/filecoin-project/go-legs"
+	"github.com/filecoin-project/go-legs/dtsync"
+	"github.com/filecoin-project/go-legs/gpubsub"
+	"github.com/filecoin-project/go-legs/httpsync"
 	"github.com/hashicorp/go-multierror"
 	"github.com/ipfs/go-cid"
 	"github.com/ipfs/go-datastore"
-	"github.com/ipfs/go-graphsync"
+	logging "github.com/ipfs/go-log/v2"
 	"github.com/ipld/go-ipld-prime"
 	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
 	"github.com/ipld/go-ipld-prime/traversal/selector"
 	"github.com/libp2p/go-libp2p-core/host"
 	"github.com/libp2p/go-libp2p-core/peer"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
+	"github.com/multiformats/go-multiaddr"
 )
+
+var log = logging.Logger("go-legs-broker")
 
 // defaultAddrTTL is the default amount of time that addresses discovered from
 // pubsub messages will remain in the peerstore.  This is twice the default
@@ -53,16 +57,13 @@ type AllowPeerFunc func(peerID peer.ID) (bool, error)
 // of messages.  Handlers do not have persistent goroutines, but start a new
 // goroutine to handle a single message.
 type Broker struct {
-	gsExchange graphsync.GraphExchange
 	// dss captures the default selector sequence passed to
 	// ExploreRecursiveWithStopNode.
-	dss         ipld.Node
-	dtManager   dt.Manager
-	tmpDir      string
-	unsubEvents dt.Unsubscribe
+	dss  ipld.Node
+	host host.Host
+	lsys ipld.LinkSystem
 
 	addrTTL   time.Duration
-	host      host.Host
 	psub      *pubsub.Subscription
 	topic     *pubsub.Topic
 	topicName string
@@ -70,10 +71,6 @@ type Broker struct {
 	allowPeer     AllowPeerFunc
 	handlers      map[peer.ID]*handler
 	handlersMutex sync.Mutex
-
-	// Map of CID of in-progress sync to sync done channel.
-	syncDoneChans map[cid.Cid]chan<- struct{}
-	syncDoneMutex sync.Mutex
 
 	// inEvents is used to send a SyncFinished from a peer handler to the
 	// distributeEvents goroutine.
@@ -86,10 +83,13 @@ type Broker struct {
 
 	// closing signals that the Broker is closing.
 	closing chan struct{}
-	// cancel sub-services (pubsub, datatransfer).
-	cancelAll context.CancelFunc
+	// cancelps cancels pubsub.
+	cancelps context.CancelFunc
 	// closeOnde ensures that the Close only happens once.
 	closeOnce sync.Once
+
+	dtSync   *dtsync.Sync
+	httpSync *httpsync.Sync
 }
 
 // SyncFinished notifies an OnSyncFinished reader that a specified peer
@@ -105,7 +105,7 @@ type SyncFinished struct {
 
 // handler holds state that is specific to a peer
 type handler struct {
-	dtManager dt.Manager
+	broker *Broker
 	// distEvents is used to communicate a syncDone event back to the Broker
 	// for distribution to OnSyncFinished readers.
 	distEvents chan<- SyncFinished
@@ -113,9 +113,9 @@ type handler struct {
 	msgChan    chan cid.Cid
 	// peerID is the ID of the peer this handler is responsible for.
 	peerID peer.ID
-	// putSyncDone is a function supplied by the Broker for the handler to give
-	// Broker the channel to send sync done notification to.
-	putSyncDone func(cid.Cid, chan<- struct{})
+	// notifyOnSyncDone is a function supplied by the Broker for the handler to get a
+	// channel to receive sync done notification.
+	notifyOnSyncDone func(cid.Cid) <-chan struct{}
 	// syncMutex serializes the handling of individual syncs
 	syncMutex sync.Mutex
 }
@@ -130,49 +130,48 @@ func NewBroker(host host.Host, ds datastore.Batching, lsys ipld.LinkSystem, topi
 		return nil, err
 	}
 
-	ctx, cancelAll := context.WithCancel(context.Background())
+	ctx, cancelPubsub := context.WithCancel(context.Background())
 
 	var pubsubTopic *pubsub.Topic
 	if cfg.topic == nil {
-		pubsubTopic, err = makePubsub(ctx, host, topic)
+		pubsubTopic, err = gpubsub.MakePubsub(ctx, host, topic)
 		if err != nil {
-			cancelAll()
+			cancelPubsub()
 			return nil, err
 		}
 		cfg.topic = pubsubTopic
 	}
 	psub, err := cfg.topic.Subscribe()
 	if err != nil {
-		cancelAll()
+		cancelPubsub()
 		return nil, err
 	}
 
-	dt, gs, tmpDir, err := makeDataTransfer(ctx, host, ds, lsys, cfg.dtManager)
+	dtSync, err := dtsync.NewSync(host, ds, lsys, cfg.dtManager)
 	if err != nil {
-		cancelAll()
+		cancelPubsub()
 		return nil, err
 	}
 
 	lb := &Broker{
-		dtManager:  dt,
-		dss:        dss,
-		host:       host,
-		gsExchange: gs,
-		tmpDir:     tmpDir,
+		dss:  dss,
+		host: host,
+		lsys: lsys,
 
 		addrTTL:   cfg.addrTTL,
 		psub:      psub,
 		topic:     pubsubTopic,
 		topicName: pubsubTopic.String(),
 		closing:   make(chan struct{}),
-		cancelAll: cancelAll,
+		cancelps:  cancelPubsub,
 
 		allowPeer: cfg.allowPeer,
 		handlers:  make(map[peer.ID]*handler),
 		inEvents:  make(chan SyncFinished, 1),
-	}
 
-	lb.unsubEvents = dt.SubscribeToEvents(lb.onEvent)
+		dtSync:   dtSync,
+		httpSync: httpsync.NewSync(lsys, cfg.httpClient),
+	}
 
 	// Start watcher to read pubsub messages.
 	go lb.watch(ctx)
@@ -234,23 +233,13 @@ func (lb *Broker) Close() error {
 }
 
 func (lb *Broker) doClose() error {
-	lb.unsubEvents()
 	lb.psub.Cancel()
 
 	var err, errs error
-	// If tmpDir is non-empty, that means the Broker started the dtManager and
-	// it is ok to stop is and clean up the tmpDir.
-	if lb.tmpDir != "" {
-		err = lb.dtManager.Stop(context.Background())
-		if err != nil {
-			log.Errorf("Failed to stop datatransfer manager: %s", err)
-			errs = multierror.Append(errs, err)
-		}
-		if err = os.RemoveAll(lb.tmpDir); err != nil {
-			log.Errorf("Failed to remove temp dir: %s", err)
-			errs = multierror.Append(errs, err)
-		}
+	if err = lb.dtSync.Close(); err != nil {
+		errs = multierror.Append(errs, err)
 	}
+
 	// If Broker owns the pubsub topic, then close it.
 	if lb.topic != nil {
 		if err = lb.topic.Close(); err != nil {
@@ -267,19 +256,8 @@ func (lb *Broker) doClose() error {
 	lb.outEventsChans = nil
 	lb.outEventsMutex.Unlock()
 
-	// Dismiss any handlers waiting completion of sync.
-	lb.syncDoneMutex.Lock()
-	if len(lb.syncDoneChans) != 0 {
-		log.Warnf("Closing broker with %d syncs in progress", len(lb.syncDoneChans))
-	}
-	for _, ch := range lb.syncDoneChans {
-		close(ch)
-	}
-	lb.syncDoneChans = nil
-	lb.syncDoneMutex.Unlock()
-
-	// Shutdown sub-services.
-	lb.cancelAll()
+	// Shutdown pubsub services.
+	lb.cancelps()
 
 	// Stop the distribution goroutine.
 	close(lb.inEvents)
@@ -341,15 +319,38 @@ func (lb *Broker) OnSyncFinished() (<-chan SyncFinished, context.CancelFunc) {
 // only specify the selection sequence itself.
 //
 // See: ExploreRecursiveWithStopNode.
-func (lb *Broker) Sync(ctx context.Context, peerID peer.ID, c cid.Cid, selSeq ipld.Node) (<-chan SyncFinished, error) {
+func (lb *Broker) Sync(ctx context.Context, peerID peer.ID, c cid.Cid, sel ipld.Node, publisher multiaddr.Multiaddr) (<-chan SyncFinished, error) {
 	if peerID == "" {
 		return nil, errors.New("empty peer id")
 	}
 
-	// Check for existing handler.  If none, create on if allowed.
-	hnd, err := lb.getOrCreateHandler(peerID, true)
-	if err != nil {
-		return nil, fmt.Errorf("cannot sync to peer: %s", err)
+	var err error
+	var syncer legs.Syncer
+
+	// If publisher specified, then get URL for http sync, or add multiaddr to peerstore.
+	if publisher != nil {
+		for _, p := range publisher.Protocols() {
+			if p.Code == multiaddr.P_HTTP || p.Code == multiaddr.P_HTTPS {
+				syncer, err = lb.httpSync.NewSyncer(publisher)
+				if err != nil {
+					return nil, err
+				}
+				break
+			}
+		}
+
+		// Not http, so add multiaddr to peerstore.
+		if syncer == nil {
+			peerStore := lb.host.Peerstore()
+			if peerStore != nil {
+				peerStore.AddAddr(peerID, publisher, lb.addrTTL)
+			}
+		}
+	}
+
+	// No syncer yet, so create datatransfer syncer.
+	if syncer == nil {
+		syncer = lb.dtSync.NewSyncer(peerID, lb.topicName)
 	}
 
 	// Start goroutine to get latest root and handle
@@ -360,14 +361,14 @@ func (lb *Broker) Sync(ctx context.Context, peerID peer.ID, c cid.Cid, selSeq ip
 		var updateLatest bool
 		if c == cid.Undef {
 			// Query the peer for the latest CID
-			var err error
-			c, err = head.QueryRootCid(ctx, lb.host, lb.topicName, peerID)
+			c, err = syncer.GetHead(ctx)
 			if err != nil {
-				log.Errorw("Cannot get root for sync", "err", err, "peer", peerID)
+				log.Errorw("Cannot get head for sync", "err", err, "peer", peerID)
 				return
 			}
-			log.Debugw("Sync queried root CID", "peer", peerID, "cid", c)
-			if selSeq == nil {
+
+			log.Debugw("Sync queried head CID", "peer", peerID, "cid", c)
+			if sel == nil {
 				// Update the latestSync only if no CID and no selector given.
 				updateLatest = true
 			}
@@ -379,18 +380,25 @@ func (lb *Broker) Sync(ctx context.Context, peerID peer.ID, c cid.Cid, selSeq ip
 		}
 
 		var wrapSel bool
-		if selSeq == nil {
+		if sel == nil {
 			// Fall back onto the default selector sequence if one is not
 			// given.  Note that if selector is specified it is used as is
 			// without any wrapping.
-			selSeq = lb.dss
+			sel = lb.dss
 			wrapSel = true
+		}
+
+		// Check for existing handler.  If none, create on if allowed.
+		hnd, err := lb.getOrCreateHandler(peerID, true)
+		if err != nil {
+			log.Errorw("Cannot sync", "err", err, "peer", peerID)
+			return
 		}
 
 		hnd.syncMutex.Lock()
 		defer hnd.syncMutex.Unlock()
 
-		err := hnd.handle(ctx, c, selSeq, wrapSel, updateLatest)
+		err = hnd.handle(ctx, c, sel, wrapSel, updateLatest, syncer)
 		if err != nil {
 			log.Errorw("Cannot sync", "err", err, "peer", peerID)
 			return
@@ -446,11 +454,10 @@ func (lb *Broker) getOrCreateHandler(peerID peer.ID, force bool) (*handler, erro
 
 	log.Infow("Message sender allowed, creating new handler", "peer", peerID)
 	hnd = &handler{
-		dtManager:   lb.dtManager,
-		msgChan:     make(chan cid.Cid, 1),
-		peerID:      peerID,
-		putSyncDone: lb.putSyncDoneChan,
-		distEvents:  lb.inEvents,
+		broker:     lb,
+		msgChan:    make(chan cid.Cid, 1),
+		peerID:     peerID,
+		distEvents: lb.inEvents,
 	}
 	lb.handlers[peerID] = hnd
 
@@ -492,7 +499,7 @@ func (lb *Broker) watch(ctx context.Context) {
 		}
 
 		// Decode CID and originator addresses from message.
-		m, err := decodeMessage(msg.Data)
+		m, err := dtsync.DecodeMessage(msg.Data)
 		if err != nil {
 			log.Errorf("Could not decode pubsub message: %s", err)
 			continue
@@ -501,10 +508,10 @@ func (lb *Broker) watch(ctx context.Context) {
 		// Add the message originator's address to the peerstore.  This allows
 		// a connection, back to that provider that sent the message, to
 		// retrieve advertisements.
-		if len(m.addrs) != 0 {
+		if len(m.Addrs) != 0 {
 			peerStore := lb.host.Peerstore()
 			if peerStore != nil {
-				peerStore.AddAddrs(srcPeer, m.addrs, lb.addrTTL)
+				peerStore.AddAddrs(srcPeer, m.Addrs, lb.addrTTL)
 			}
 		}
 
@@ -512,58 +519,8 @@ func (lb *Broker) watch(ctx context.Context) {
 
 		// Start new goroutine to handle this message instead of having
 		// persistent goroutine for each peer.
-		hnd.handleAsync(ctx, m.cid, lb.dss)
+		hnd.handleAsync(ctx, m.Cid, lb.dss)
 	}
-}
-
-// putSyncDoneChan lets a handler give Broker the channel to send sync done
-// notification to.  This is how Broker waits on a pending sync.
-func (lb *Broker) putSyncDoneChan(c cid.Cid, syncDone chan<- struct{}) {
-	lb.syncDoneMutex.Lock()
-	defer lb.syncDoneMutex.Unlock()
-
-	if lb.syncDoneChans == nil {
-		lb.syncDoneChans = make(map[cid.Cid]chan<- struct{})
-	}
-	lb.syncDoneChans[c] = syncDone
-}
-
-// popSyncDone removes the channel when the pending sync has completed.
-func (lb *Broker) popSyncDoneChan(c cid.Cid) (chan<- struct{}, bool) {
-	lb.syncDoneMutex.Lock()
-	defer lb.syncDoneMutex.Unlock()
-
-	syncDone, ok := lb.syncDoneChans[c]
-	if !ok {
-		return nil, false
-	}
-	if len(lb.syncDoneChans) == 1 {
-		lb.syncDoneChans = nil
-	} else {
-		delete(lb.syncDoneChans, c)
-	}
-	return syncDone, true
-}
-
-// onEvent is called by the datatransfer manager to send events.
-func (lb *Broker) onEvent(event dt.Event, channelState dt.ChannelState) {
-	if event.Code != dt.FinishTransfer {
-		return
-	}
-	// Find the channel to notify the handler that the transfer is finished.
-	syncDone, ok := lb.popSyncDoneChan(channelState.BaseCID())
-	if !ok {
-		log.Errorw("could not find channel for completed transfer notice", "cid", channelState.BaseCID())
-		return
-	}
-
-	// Send the FinishTransfer signal to the handler.  This will allow its
-	// handle goroutine to distribute the update and exit.
-	//
-	// It is not necessary to return the channelState CID, since we already
-	// know it is the correct on since it was used to look up this syncDone
-	// channel.
-	close(syncDone)
 }
 
 // handleAsync starts a goroutine to process the latest message received over
@@ -589,7 +546,7 @@ func (h *handler) handleAsync(ctx context.Context, c cid.Cid, ss ipld.Node) {
 		select {
 		case <-ctx.Done():
 		case c := <-h.msgChan:
-			err := h.handle(ctx, c, ss, true, true)
+			err := h.handle(ctx, c, ss, true, true, h.broker.dtSync.NewSyncer(h.peerID, h.broker.topicName))
 			if err != nil {
 				// Log error for now.
 				log.Errorw("Cannot process message", "err", err, "peer", h.peerID)
@@ -603,26 +560,20 @@ func (h *handler) handleAsync(ctx context.Context, c cid.Cid, ss ipld.Node) {
 	}()
 }
 
-// handle processes a message from the peer that the handler is responsible.
+// handle processes a message from the peer that the handler is responsible for.
 // The caller is responsible for ensuring that this is called while h.syncMutex
 // is locked.
-func (h *handler) handle(ctx context.Context, c cid.Cid, selSeq ipld.Node, wrapSel, updateLatest bool) error {
-	syncDone := make(chan struct{})
-	h.putSyncDone(c, syncDone)
-
+func (h *handler) handle(ctx context.Context, c cid.Cid, sel ipld.Node, wrapSel, updateLatest bool, syncer legs.Syncer) error {
 	if wrapSel {
-		selSeq = ExploreRecursiveWithStopNode(selector.RecursionLimitNone(), selSeq, h.latestSync)
-	}
-	log.Debugw("Starting data channel for message source", "cid", c, "latest_sync", h.latestSync, "source_peer", h.peerID)
-	v := Voucher{&c}
-	_, err := h.dtManager.OpenPullDataChannel(ctx, h.peerID, &v, c, selSeq)
-	if err != nil {
-		return fmt.Errorf("cannot open data channel: %s", err)
-		// TODO: Should we retry if there's an error in the exchange?
+		sel = legs.ExploreRecursiveWithStopNode(selector.RecursionLimitNone(), sel, h.latestSync)
 	}
 
-	// Wait for transfer finished signal.
-	<-syncDone
+	log.Debugw("Starting data channel for message source", "cid", c, "latest_sync", h.latestSync, "source_peer", h.peerID)
+
+	err := syncer.Sync(ctx, c, sel)
+	if err != nil {
+		return err
+	}
 
 	if !updateLatest {
 		return nil
@@ -633,7 +584,7 @@ func (h *handler) handle(ctx context.Context, c cid.Cid, selSeq ipld.Node, wrapS
 	// responsibility to persist if needed to initialize a
 	// partiallySynced subscriber.
 	h.latestSync = cidlink.Link{Cid: c}
-	log.Debugw("Exchange finished, updating latest to %s", c)
+	log.Infow("Updating latest sync", "sync_cid", c, "peer", h.peerID)
 
 	// Tell the broker to distribute SyncFinished to all notification
 	// destinations.

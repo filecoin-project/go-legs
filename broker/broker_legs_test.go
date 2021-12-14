@@ -1,14 +1,18 @@
-package legs
+package broker_test
 
 import (
 	"context"
 	"io/ioutil"
+	"os"
 	"testing"
 	"time"
 
-	datatransfer "github.com/filecoin-project/go-data-transfer/impl"
+	dt "github.com/filecoin-project/go-data-transfer/impl"
 	dtnetwork "github.com/filecoin-project/go-data-transfer/network"
 	gstransport "github.com/filecoin-project/go-data-transfer/transport/graphsync"
+	"github.com/filecoin-project/go-legs"
+	"github.com/filecoin-project/go-legs/broker"
+	"github.com/filecoin-project/go-legs/dtsync"
 	"github.com/filecoin-project/go-legs/test"
 	"github.com/ipfs/go-cid"
 	"github.com/ipfs/go-datastore"
@@ -23,34 +27,34 @@ import (
 	"github.com/libp2p/go-libp2p-core/peer"
 )
 
-func brokerInitPubSub(t *testing.T, srcStore, dstStore datastore.Batching) (host.Host, host.Host, LegPublisher, *Broker) {
-	srcHost := mkTestHost()
+func initPubSub(srcStore, dstStore datastore.Batching) (host.Host, host.Host, legs.LegPublisher, *broker.Broker, error) {
+	srcHost := test.MkTestHost()
 	srcLnkS := test.MkLinkSystem(srcStore)
-	lp, err := NewPublisher(context.Background(), srcHost, srcStore, srcLnkS, "legs/testtopic")
+	lp, err := dtsync.NewPublisher(context.Background(), srcHost, srcStore, srcLnkS, testTopic)
 	if err != nil {
-		t.Fatal(err)
+		return nil, nil, nil, nil, err
 	}
 
-	dstHost := mkTestHost()
+	dstHost := test.MkTestHost()
 	srcHost.Peerstore().AddAddrs(dstHost.ID(), dstHost.Addrs(), time.Hour)
 	dstHost.Peerstore().AddAddrs(srcHost.ID(), srcHost.Addrs(), time.Hour)
 	dstLnkS := test.MkLinkSystem(dstStore)
 
-	lb, err := NewBroker(dstHost, dstStore, dstLnkS, testTopic, nil)
+	lb, err := broker.NewBroker(dstHost, dstStore, dstLnkS, testTopic, nil)
 	if err != nil {
-		t.Fatal(err)
+		return nil, nil, nil, nil, err
 	}
 
 	if err := srcHost.Connect(context.Background(), dstHost.Peerstore().PeerInfo(dstHost.ID())); err != nil {
-		t.Fatal(err)
+		return nil, nil, nil, nil, err
 	}
 
-	return srcHost, dstHost, lp, lb
+	return srcHost, dstHost, lp, lb, nil
 }
 
 func TestBrokerRoundTripExistingDataTransfer(t *testing.T) {
 	// Init legs publisher and subscriber
-	srcHost := mkTestHost()
+	srcHost := test.MkTestHost()
 	srcStore := dssync.MutexWrap(datastore.NewMapDatastore())
 	fakeLsys := cidlink.DefaultLinkSystem()
 	srcLnkS := test.MkLinkSystem(srcStore)
@@ -70,7 +74,7 @@ func TestBrokerRoundTripExistingDataTransfer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	dt, err := datatransfer.NewDataTransfer(srcStore, tmpDir, dtNet, tp)
+	dt, err := dt.NewDataTransfer(srcStore, tmpDir, dtNet, tp)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -78,18 +82,18 @@ func TestBrokerRoundTripExistingDataTransfer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	lp, err := NewPublisherFromExisting(context.Background(), dt, srcHost, "legs/testtopic", srcLnkS)
+	lp, err := dtsync.NewPublisherFromExisting(context.Background(), dt, srcHost, "legs/testtopic", srcLnkS)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	dstHost := mkTestHost()
+	dstHost := test.MkTestHost()
 	srcHost.Peerstore().AddAddrs(dstHost.ID(), dstHost.Addrs(), time.Hour)
 	dstHost.Peerstore().AddAddrs(srcHost.ID(), srcHost.Addrs(), time.Hour)
 	dstStore := dssync.MutexWrap(datastore.NewMapDatastore())
 	dstLnkS := test.MkLinkSystem(dstStore)
 
-	lb, err := NewBroker(dstHost, dstStore, dstLnkS, testTopic, nil)
+	lb, err := broker.NewBroker(dstHost, dstStore, dstLnkS, testTopic, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -110,6 +114,7 @@ func TestBrokerRoundTripExistingDataTransfer(t *testing.T) {
 		cncl()
 		lp.Close()
 		lb.Close()
+		os.RemoveAll(tmpDir)
 	})
 
 	// per https://github.com/libp2p/go-libp2p-pubsub/blob/e6ad80cf4782fca31f46e3a8ba8d1a450d562f49/gossipsub_test.go#L103
@@ -137,7 +142,10 @@ func TestBrokerAllowPeerReject(t *testing.T) {
 	// Init legs publisher and subscriber
 	srcStore := dssync.MutexWrap(datastore.NewMapDatastore())
 	dstStore := dssync.MutexWrap(datastore.NewMapDatastore())
-	_, dstHost, lp, lb := brokerInitPubSub(t, srcStore, dstStore)
+	_, dstHost, lp, lb, err := initPubSub(srcStore, dstStore)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	// Set function to reject anything except dstHost, which is not the one
 	// generating the update.
@@ -160,7 +168,7 @@ func TestBrokerAllowPeerReject(t *testing.T) {
 	})
 
 	// Update root with item
-	err := lp.UpdateRoot(context.Background(), c)
+	err = lp.UpdateRoot(context.Background(), c)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -178,7 +186,10 @@ func TestBrokerAllowPeerAllows(t *testing.T) {
 	// Init legs publisher and subscriber
 	srcStore := dssync.MutexWrap(datastore.NewMapDatastore())
 	dstStore := dssync.MutexWrap(datastore.NewMapDatastore())
-	_, _, lp, lb := brokerInitPubSub(t, srcStore, dstStore)
+	_, _, lp, lb, err := initPubSub(srcStore, dstStore)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	// Set function to allow any peer.
 	lb.SetAllowPeer(func(peerID peer.ID) (bool, error) {
@@ -200,7 +211,7 @@ func TestBrokerAllowPeerAllows(t *testing.T) {
 	})
 
 	// Update root with item
-	err := lp.UpdateRoot(context.Background(), c)
+	err = lp.UpdateRoot(context.Background(), c)
 	if err != nil {
 		t.Fatal(err)
 	}

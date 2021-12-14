@@ -1,10 +1,8 @@
-package legs
+package dtsync
 
 import (
 	"context"
-	"fmt"
 	"io/ioutil"
-	"os"
 
 	dt "github.com/filecoin-project/go-data-transfer"
 	datatransfer "github.com/filecoin-project/go-data-transfer/impl"
@@ -16,9 +14,6 @@ import (
 	gsnet "github.com/ipfs/go-graphsync/network"
 	"github.com/ipld/go-ipld-prime"
 	"github.com/libp2p/go-libp2p-core/host"
-	pubsub "github.com/libp2p/go-libp2p-pubsub"
-	pubsubpb "github.com/libp2p/go-libp2p-pubsub/pb"
-	"github.com/minio/blake2b-simd"
 )
 
 // configureDataTransferForLegs configures an existing data transfer instance to serve go-legs requests
@@ -60,32 +55,6 @@ func (lsc legStorageConfigration) configureTransport(chid dt.ChannelID, voucher 
 	if err != nil {
 		log.Errorf("attempting to configure data store: %s", err)
 	}
-}
-
-func makePubsub(ctx context.Context, h host.Host, topic string) (*pubsub.Topic, error) {
-	p, err := pubsub.NewGossipSub(ctx, h,
-		pubsub.WithPeerExchange(true),
-		pubsub.WithMessageIdFn(func(pmsg *pubsubpb.Message) string {
-			hash := blake2b.Sum256(pmsg.Data)
-			return string(hash[:])
-		}),
-		pubsub.WithFloodPublish(true),
-		pubsub.WithDirectConnectTicks(directConnectTicks),
-		pubsub.WithRawTracer(&loggingTracer{log}),
-	)
-	if err != nil {
-		log.Errorf("Failed instantiate pubsub for topic %s with peer ID %s: %s", topic, h.ID(), err)
-		return nil, fmt.Errorf("failed to instantiate pubsub: %w", err)
-	}
-
-	log.Infof("Instantiated pubsub with peer ID %s", h.ID())
-	t, err := p.Join(topic)
-	if err != nil {
-		log.Errorf("Failed to joing topic %s: %s", topic, err)
-		return nil, err
-	}
-	log.Infof("Joined pubsub topic %s", topic)
-	return t, nil
 }
 
 func makeDataTransfer(ctx context.Context, host host.Host, ds datastore.Batching, lsys ipld.LinkSystem, dt dt.Manager) (dt.Manager, graphsync.GraphExchange, string, error) {
@@ -150,49 +119,4 @@ func makeDataTransfer(ctx context.Context, host host.Host, ds datastore.Batching
 	}
 
 	return dt, gs, tmpDir, nil
-}
-
-type simpleSetup struct {
-	ctx    context.Context
-	t      *pubsub.Topic
-	dt     dt.Manager
-	tmpDir string
-}
-
-func newSimpleSetup(ctx context.Context,
-	host host.Host,
-	ds datastore.Batching,
-	lsys ipld.LinkSystem,
-	topic string) (*simpleSetup, error) {
-	t, err := makePubsub(ctx, host, topic)
-	if err != nil {
-		return nil, err
-	}
-	dt, _, tmpDir, err := makeDataTransfer(ctx, host, ds, lsys, nil)
-	if err != nil {
-		return nil, err
-	}
-
-	return &simpleSetup{
-		ctx, t, dt, tmpDir,
-	}, nil
-}
-
-func (ss *simpleSetup) onClose() error {
-	log.Debug("Closing legs simple setup")
-	err := ss.dt.Stop(ss.ctx)
-	err2 := os.RemoveAll(ss.tmpDir)
-	err3 := ss.t.Close()
-	if err != nil {
-		log.Errorf("Failed to stop datatransfer: %s", err)
-		return err
-	}
-	if err2 != nil {
-		log.Errorf("Failed to remove datatransfer temp dir: %s", err2)
-		return err2
-	}
-	if err3 != nil {
-		log.Errorf("Failed to close pubsub topic: %s", err3)
-	}
-	return err3
 }

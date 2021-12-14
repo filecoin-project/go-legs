@@ -1,4 +1,4 @@
-package legs
+package dtsync
 
 import (
 	"context"
@@ -7,6 +7,8 @@ import (
 	"sync/atomic"
 
 	dt "github.com/filecoin-project/go-data-transfer"
+	"github.com/filecoin-project/go-legs"
+	"github.com/filecoin-project/go-legs/gpubsub"
 	"github.com/ipfs/go-cid"
 	"github.com/ipfs/go-datastore"
 	"github.com/ipfs/go-graphsync"
@@ -15,21 +17,6 @@ import (
 	"github.com/libp2p/go-libp2p-core/host"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 )
-
-const (
-	// directConnectTicks makes pubsub check it's connected to direct peers every N seconds.
-	directConnectTicks uint64 = 30
-)
-
-// LegMultiSubscriber allows you to setup multiple subscriptions over single graphsync/datatransfer instance
-// with difference policy filters
-type LegMultiSubscriber interface {
-	NewSubscriber(PolicyHandler) (LegSubscriber, error)
-	NewSubscriberPartiallySynced(PolicyHandler, cid.Cid) (LegSubscriber, error)
-	GraphSync() graphsync.GraphExchange
-	DataTransfer() dt.Manager
-	Close(ctx context.Context) error
-}
 
 type legMultiSubscriber struct {
 	ctx    context.Context
@@ -44,6 +31,16 @@ type legMultiSubscriber struct {
 	dss ipld.Node
 }
 
+// LegMultiSubscriber allows you to setup multiple subscriptions over single graphsync/datatransfer instance
+// with difference policy filters
+type LegMultiSubscriber interface {
+	NewSubscriber(legs.PolicyHandler) (legs.LegSubscriber, error)
+	NewSubscriberPartiallySynced(legs.PolicyHandler, cid.Cid) (legs.LegSubscriber, error)
+	GraphSync() graphsync.GraphExchange
+	DataTransfer() dt.Manager
+	Close(ctx context.Context) error
+}
+
 // NewMultiSubscriber sets up a new instance of a multi subscriber.
 //
 // A default selector sequence, dss, may optionally be specified. The selector sequence is used
@@ -56,7 +53,7 @@ type legMultiSubscriber struct {
 //
 // See: ExploreRecursiveWithStopNode.
 func NewMultiSubscriber(ctx context.Context, host host.Host, ds datastore.Batching, lsys ipld.LinkSystem, topic string, dss ipld.Node) (LegMultiSubscriber, error) {
-	t, err := makePubsub(ctx, host, topic)
+	t, err := gpubsub.MakePubsub(ctx, host, topic)
 	if err != nil {
 		return nil, err
 	}
@@ -77,7 +74,7 @@ func NewMultiSubscriber(ctx context.Context, host host.Host, ds datastore.Batchi
 	}, nil
 }
 
-func (lt *legMultiSubscriber) NewSubscriber(policy PolicyHandler) (LegSubscriber, error) {
+func (lt *legMultiSubscriber) NewSubscriber(policy legs.PolicyHandler) (legs.LegSubscriber, error) {
 	l, err := newSubscriber(lt.ctx, lt.t, lt.topic, lt.onCloseSubscriber, lt.host, policy, lt.dss)
 	if err != nil {
 		return nil, err
@@ -86,7 +83,7 @@ func (lt *legMultiSubscriber) NewSubscriber(policy PolicyHandler) (LegSubscriber
 	return l, nil
 }
 
-func (lt *legMultiSubscriber) NewSubscriberPartiallySynced(policy PolicyHandler, latestSync cid.Cid) (LegSubscriber, error) {
+func (lt *legMultiSubscriber) NewSubscriberPartiallySynced(policy legs.PolicyHandler, latestSync cid.Cid) (legs.LegSubscriber, error) {
 	l, err := newSubscriber(lt.ctx, lt.t, lt.topic, lt.onCloseSubscriber, lt.host, policy, lt.dss)
 	if err != nil {
 		return nil, err
