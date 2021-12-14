@@ -2,6 +2,7 @@ package dtsync
 
 import (
 	"context"
+	"errors"
 	"net/http"
 
 	dt "github.com/filecoin-project/go-data-transfer"
@@ -74,6 +75,10 @@ func (lp *legPublisher) UpdateRoot(ctx context.Context, c cid.Cid) error {
 }
 
 func (lp *legPublisher) UpdateRootWithAddrs(ctx context.Context, c cid.Cid, addrs []ma.Multiaddr) error {
+	if c == cid.Undef {
+		return errors.New("cannot update to an undefined cid")
+	}
+
 	log.Debugf("Publishing CID and addresses in pubsub channel: %s", c)
 	var errs error
 	err := lp.headPublisher.UpdateRoot(ctx, c)

@@ -287,8 +287,13 @@ func TestLatestSyncFailure(t *testing.T) {
 }
 
 func newUpdateTest(t *testing.T, lp legs.LegPublisher, ls legs.LegSubscriber, dstStore datastore.Batching, watcher chan cid.Cid, lnk ipld.Link, withFailure bool, expectedSync cid.Cid) {
-	if err := lp.UpdateRoot(context.Background(), lnk.(cidlink.Link).Cid); err != nil {
-		t.Fatal(err)
+	var err error
+	c := lnk.(cidlink.Link).Cid
+	if c != cid.Undef {
+		err = lp.UpdateRoot(context.Background(), c)
+		if err != nil {
+			t.Fatal(err)
+		}
 	}
 
 	// If failure latestSync shouldn't be updated
@@ -304,10 +309,10 @@ func newUpdateTest(t *testing.T, lp legs.LegPublisher, ls legs.LegSubscriber, ds
 		case <-time.After(time.Second * 5):
 			t.Fatal("timed out waiting for sync to propagate")
 		case downstream := <-watcher:
-			if !downstream.Equals(lnk.(cidlink.Link).Cid) {
-				t.Fatalf("sync'd cid unexpected %s vs %s", downstream, lnk)
+			if !downstream.Equals(c) {
+				t.Fatalf("sync'd cid unexpected %s vs %s", downstream, c)
 			}
-			if _, err := dstStore.Get(datastore.NewKey(downstream.String())); err != nil {
+			if _, err = dstStore.Get(datastore.NewKey(downstream.String())); err != nil {
 				t.Fatalf("data not in receiver store: %v", err)
 			}
 		}

@@ -41,7 +41,7 @@ func TestBrokerLatestSyncSuccess(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	time.Sleep(2 * time.Second)
+	time.Sleep(5 * time.Second)
 	watcher, cncl := lb.OnSyncFinished()
 
 	// Store the whole chain in source node
@@ -361,9 +361,13 @@ func TestBrokerLatestSyncFailure(t *testing.T) {
 }
 
 func newBrokerUpdateTest(t *testing.T, lp legs.LegPublisher, lb *broker.Broker, dstStore datastore.Batching, watcher <-chan broker.SyncFinished, peerID peer.ID, lnk ipld.Link, withFailure bool, expectedSync cid.Cid) {
-	err := lp.UpdateRoot(context.Background(), lnk.(cidlink.Link).Cid)
-	if err != nil {
-		t.Fatal(err)
+	var err error
+	c := lnk.(cidlink.Link).Cid
+	if c != cid.Undef {
+		err = lp.UpdateRoot(context.Background(), c)
+		if err != nil {
+			t.Fatal(err)
+		}
 	}
 
 	// If failure. then latestSync should not be updated.
@@ -385,8 +389,8 @@ func newBrokerUpdateTest(t *testing.T, lp legs.LegPublisher, lb *broker.Broker, 
 			if !open {
 				return
 			}
-			if !downstream.Cid.Equals(lnk.(cidlink.Link).Cid) {
-				t.Fatalf("sync'd cid unexpected %s vs %s", downstream.Cid, lnk)
+			if !downstream.Cid.Equals(c) {
+				t.Fatalf("sync'd cid unexpected %s vs %s", downstream.Cid, c)
 			}
 			if _, err = dstStore.Get(datastore.NewKey(downstream.Cid.String())); err != nil {
 				t.Fatalf("data not in receiver store: %v", err)
