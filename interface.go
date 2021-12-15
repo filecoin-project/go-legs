@@ -6,8 +6,8 @@ import (
 	"github.com/ipfs/go-cid"
 	"github.com/ipld/go-ipld-prime"
 	"github.com/libp2p/go-libp2p-core/peer"
-	ma "github.com/multiformats/go-multiaddr"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
+	ma "github.com/multiformats/go-multiaddr"
 )
 
 // Publish will export an IPLD dag of data publicly for consumption.

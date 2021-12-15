@@ -10,8 +10,8 @@ import (
 	"github.com/ipfs/go-datastore"
 	"github.com/ipld/go-ipld-prime"
 	"github.com/libp2p/go-libp2p-core/host"
-	ma "github.com/multiformats/go-multiaddr"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
+	ma "github.com/multiformats/go-multiaddr"
 )
 
 type legPublisher struct {
