@@ -6,6 +6,7 @@ import (
 	"github.com/ipfs/go-cid"
 	"github.com/ipld/go-ipld-prime"
 	"github.com/libp2p/go-libp2p-core/peer"
+	ma "github.com/multiformats/go-multiaddr"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 )
 
@@ -16,6 +17,8 @@ import (
 type LegPublisher interface {
 	// Publishes and update for the DAG in the pubsub channel.
 	UpdateRoot(context.Context, cid.Cid) error
+	// Publishes and update for the DAG in the pubsub channel using custom multiaddrs.
+	UpdateRootWithAddrs(context.Context, cid.Cid, []ma.Multiaddr) error
 	// Close publisher
 	Close() error
 }

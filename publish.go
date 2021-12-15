@@ -10,6 +10,7 @@ import (
 	"github.com/ipfs/go-datastore"
 	"github.com/ipld/go-ipld-prime"
 	"github.com/libp2p/go-libp2p-core/host"
+	ma "github.com/multiformats/go-multiaddr"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 )
 
@@ -70,10 +71,14 @@ func NewPublisherFromExisting(ctx context.Context,
 }
 
 func (lp *legPublisher) UpdateRoot(ctx context.Context, c cid.Cid) error {
+	return lp.UpdateRootWithAddrs(ctx, c, lp.host.Addrs())
+}
+
+func (lp *legPublisher) UpdateRootWithAddrs(ctx context.Context, c cid.Cid, addrs []ma.Multiaddr) error {
 	log.Debugf("Published CID and addresses in pubsub channel: %s", c)
 	msg := message{
 		cid:   c,
-		addrs: lp.host.Addrs(),
+		addrs: addrs,
 	}
 	err1 := lp.topic.Publish(ctx, encodeMessage(msg))
 	err2 := lp.headPublisher.UpdateRoot(ctx, c)

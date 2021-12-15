@@ -15,6 +15,7 @@ import (
 	"github.com/ipld/go-ipld-prime/codec/dagjson"
 	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
 	basicnode "github.com/ipld/go-ipld-prime/node/basic"
+	ma "github.com/multiformats/go-multiaddr"
 )
 
 type httpPublisher struct {
@@ -78,6 +79,10 @@ func (h *httpPublisher) UpdateRoot(ctx context.Context, c cid.Cid) error {
 	defer h.rl.Unlock()
 	h.root = c
 	return nil
+}
+
+func (h *httpPublisher) UpdateRootWithAddrs(ctx context.Context, c cid.Cid, _ []ma.Multiaddr) error {
+	return h.UpdateRoot(ctx, c)
 }
 
 func (h *httpPublisher) Close() error {
