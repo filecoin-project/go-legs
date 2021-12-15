@@ -27,10 +27,10 @@ import (
 	"github.com/libp2p/go-libp2p-core/peer"
 )
 
-func initPubSub(srcStore, dstStore datastore.Batching) (host.Host, host.Host, legs.LegPublisher, *broker.Broker, error) {
+func initPubSub(srcStore, dstStore datastore.Batching) (host.Host, host.Host, legs.Publisher, *broker.Broker, error) {
 	srcHost := test.MkTestHost()
 	srcLnkS := test.MkLinkSystem(srcStore)
-	lp, err := dtsync.NewPublisher(context.Background(), srcHost, srcStore, srcLnkS, testTopic)
+	lp, err := dtsync.NewPublisher(srcHost, srcStore, srcLnkS, testTopic)
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
@@ -85,7 +85,7 @@ func TestBrokerRoundTripExistingDataTransfer(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer dt.Stop(context.Background())
-	lp, err := dtsync.NewPublisherFromExisting(context.Background(), dt, srcHost, testTopic, srcLnkS)
+	lp, err := dtsync.NewPublisherFromExisting(dt, srcHost, testTopic, srcLnkS)
 	if err != nil {
 		t.Fatal(err)
 	}

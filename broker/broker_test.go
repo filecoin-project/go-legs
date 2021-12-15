@@ -68,7 +68,7 @@ func TestBrokerRoundTrip(t *testing.T) {
 	srcHost1 := test.MkTestHost()
 	srcLnkS1 := test.MkLinkSystem(srcStore1)
 
-	lp1, err := dtsync.NewPublisher(context.Background(), srcHost1, srcStore1, srcLnkS1, testTopic)
+	lp1, err := dtsync.NewPublisher(srcHost1, srcStore1, srcLnkS1, testTopic)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -77,7 +77,7 @@ func TestBrokerRoundTrip(t *testing.T) {
 	srcStore2 := dssync.MutexWrap(datastore.NewMapDatastore())
 	srcHost2 := test.MkTestHost()
 	srcLnkS2 := test.MkLinkSystem(srcStore2)
-	lp2, err := dtsync.NewPublisher(context.Background(), srcHost2, srcStore2, srcLnkS2, testTopic)
+	lp2, err := dtsync.NewPublisher(srcHost2, srcStore2, srcLnkS2, testTopic)
 	if err != nil {
 		t.Fatal(err)
 	}

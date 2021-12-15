@@ -26,7 +26,7 @@ func TestLatestSyncSuccess(t *testing.T) {
 	dstStore := dssync.MutexWrap(datastore.NewMapDatastore())
 	srcHost := test.MkTestHost()
 	srcLnkS := test.MkLinkSystem(srcStore)
-	lp, err := dtsync.NewPublisher(context.Background(), srcHost, srcStore, srcLnkS, testTopic)
+	lp, err := dtsync.NewPublisher(srcHost, srcStore, srcLnkS, testTopic)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -63,7 +63,7 @@ func TestSyncFn(t *testing.T) {
 	dstStore := dssync.MutexWrap(datastore.NewMapDatastore())
 	srcHost := test.MkTestHost()
 	srcLnkS := test.MkLinkSystem(srcStore)
-	lp, err := dtsync.NewPublisher(context.Background(), srcHost, srcStore, srcLnkS, testTopic)
+	lp, err := dtsync.NewPublisher(srcHost, srcStore, srcLnkS, testTopic)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -156,7 +156,7 @@ func TestPartialSync(t *testing.T) {
 	srcHost := test.MkTestHost()
 	srcLnkS := test.MkLinkSystem(srcStore)
 	testLnkS := test.MkLinkSystem(testStore)
-	lp, err := dtsync.NewPublisher(context.Background(), srcHost, srcStore, srcLnkS, testTopic)
+	lp, err := dtsync.NewPublisher(srcHost, srcStore, srcLnkS, testTopic)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -211,7 +211,7 @@ func TestStepByStepSync(t *testing.T) {
 	dstStore := dssync.MutexWrap(datastore.NewMapDatastore())
 	srcHost := test.MkTestHost()
 	srcLnkS := test.MkLinkSystem(srcStore)
-	lp, err := dtsync.NewPublisher(context.Background(), srcHost, srcStore, srcLnkS, testTopic)
+	lp, err := dtsync.NewPublisher(srcHost, srcStore, srcLnkS, testTopic)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -252,7 +252,7 @@ func TestLatestSyncFailure(t *testing.T) {
 	dstStore := dssync.MutexWrap(datastore.NewMapDatastore())
 	srcHost := test.MkTestHost()
 	srcLnkS := test.MkLinkSystem(srcStore)
-	lp, err := dtsync.NewPublisher(context.Background(), srcHost, srcStore, srcLnkS, testTopic)
+	lp, err := dtsync.NewPublisher(srcHost, srcStore, srcLnkS, testTopic)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -292,7 +292,7 @@ func TestLatestSyncFailure(t *testing.T) {
 	newUpdateTest(t, lp, ls, dstStore, watcher, chainLnks[2], true, chainLnks[3].(cidlink.Link).Cid)
 }
 
-func newUpdateTest(t *testing.T, lp legs.LegPublisher, ls legs.LegSubscriber, dstStore datastore.Batching, watcher chan cid.Cid, lnk ipld.Link, withFailure bool, expectedSync cid.Cid) {
+func newUpdateTest(t *testing.T, lp legs.Publisher, ls legs.LegSubscriber, dstStore datastore.Batching, watcher chan cid.Cid, lnk ipld.Link, withFailure bool, expectedSync cid.Cid) {
 	var err error
 	c := lnk.(cidlink.Link).Cid
 	if c != cid.Undef {

@@ -13,7 +13,7 @@ Typically an application will be either a provider or a subscriber, but may be b
 Create a legs publisher.  Update its root to cause it to publish.
 
 ```golang
-pub, err :=  NewPublisher(ctx, host, dsstore, lsys, "/legs/topic")
+pub, err :=  NewPublisher(host, dsstore, lsys, "/legs/topic")
 if err != nil {
 	panic(err)
 }

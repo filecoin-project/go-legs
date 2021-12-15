@@ -24,13 +24,11 @@ type httpPublisher struct {
 	lsys ipld.LinkSystem
 }
 
-var _ legs.LegPublisher = (*httpPublisher)(nil)
+var _ legs.Publisher = (*httpPublisher)(nil)
 var _ http.Handler = (*httpPublisher)(nil)
 
 // NewPublisher creates a new http publisher
-func NewPublisher(ctx context.Context,
-	ds datastore.Batching,
-	lsys ipld.LinkSystem) (legs.LegPublisher, error) {
+func NewPublisher(ctx context.Context, ds datastore.Batching, lsys ipld.LinkSystem) (legs.Publisher, error) {
 	hp := &httpPublisher{}
 	hp.lsys = lsys
 	return hp, nil
