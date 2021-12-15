@@ -11,7 +11,6 @@ import (
 	"path"
 	"time"
 
-	"github.com/filecoin-project/go-legs"
 	maurl "github.com/filecoin-project/go-legs/httpsync/multiaddr"
 	"github.com/ipfs/go-cid"
 	logging "github.com/ipfs/go-log/v2"
@@ -26,8 +25,9 @@ import (
 
 const defaultHttpTimeout = 10 * time.Second
 
-var log = logging.Logger("go-legs-http")
+var log = logging.Logger("go-legs-httpsync")
 
+// Sync provides sync functionality for use with all http syncs.
 type Sync struct {
 	client *http.Client
 	lsys   ipld.LinkSystem
@@ -45,13 +45,14 @@ func NewSync(lsys ipld.LinkSystem, client *http.Client) *Sync {
 	}
 }
 
-func (s *Sync) NewSyncer(publisher multiaddr.Multiaddr) (legs.Syncer, error) {
+// NewSyncer creates a new Syncer to use for a single sync operation against a peer.
+func (s *Sync) NewSyncer(publisher multiaddr.Multiaddr) (*Syncer, error) {
 	rootURL, err := maurl.ToURL(publisher)
 	if err != nil {
 		return nil, err
 	}
 
-	return &syncer{
+	return &Syncer{
 		sync:    s,
 		rootURL: *rootURL,
 	}, nil
@@ -61,12 +62,12 @@ func (s *Sync) Close() {
 	s.client.CloseIdleConnections()
 }
 
-type syncer struct {
+type Syncer struct {
 	sync    *Sync
 	rootURL url.URL
 }
 
-func (s *syncer) GetHead(ctx context.Context) (cid.Cid, error) {
+func (s *Syncer) GetHead(ctx context.Context) (cid.Cid, error) {
 	var cidStr string
 	err := s.fetch(ctx, "head", func(msg io.Reader) error {
 		return json.NewDecoder(msg).Decode(&cidStr)
@@ -78,7 +79,7 @@ func (s *syncer) GetHead(ctx context.Context) (cid.Cid, error) {
 	return cid.Decode(cidStr)
 }
 
-func (s *syncer) Sync(ctx context.Context, nextCid cid.Cid, sel ipld.Node) error {
+func (s *Syncer) Sync(ctx context.Context, nextCid cid.Cid, sel ipld.Node) error {
 	err := s.fetchBlock(ctx, nextCid)
 	if err != nil {
 		msg := "failed to fetch requested block"
@@ -104,7 +105,7 @@ func (s *syncer) Sync(ctx context.Context, nextCid cid.Cid, sel ipld.Node) error
 	return nil
 }
 
-func (s *syncer) walkFetch(ctx context.Context, rootCid cid.Cid, sel selector.Selector) error {
+func (s *Syncer) walkFetch(ctx context.Context, rootCid cid.Cid, sel selector.Selector) error {
 	getMissingLs := cidlink.DefaultLinkSystem()
 	// trusted because it'll be hashed/verified on the way into the link system when fetched.
 	getMissingLs.TrustedStorage = true
@@ -142,7 +143,7 @@ func (s *syncer) walkFetch(ctx context.Context, rootCid cid.Cid, sel selector.Se
 	})
 }
 
-func (s *syncer) fetch(ctx context.Context, rsrc string, cb func(io.Reader) error) error {
+func (s *Syncer) fetch(ctx context.Context, rsrc string, cb func(io.Reader) error) error {
 	localURL := s.rootURL
 	localURL.Path = path.Join(s.rootURL.Path, rsrc)
 
@@ -167,7 +168,7 @@ func (s *syncer) fetch(ctx context.Context, rsrc string, cb func(io.Reader) erro
 }
 
 // fetchBlock fetches an item into the datastore at c if not locally avilable.
-func (s *syncer) fetchBlock(ctx context.Context, c cid.Cid) error {
+func (s *Syncer) fetchBlock(ctx context.Context, c cid.Cid) error {
 	n, err := s.sync.lsys.Load(ipld.LinkContext{}, cidlink.Link{Cid: c}, basicnode.Prototype.Any)
 	// node is already present.
 	if n != nil && err == nil {

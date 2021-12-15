@@ -1,4 +1,4 @@
-package broker
+package legs
 
 import (
 	"context"
@@ -7,7 +7,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/filecoin-project/go-legs"
 	"github.com/filecoin-project/go-legs/dtsync"
 	"github.com/filecoin-project/go-legs/gpubsub"
 	"github.com/filecoin-project/go-legs/httpsync"
@@ -24,7 +23,7 @@ import (
 	"github.com/multiformats/go-multiaddr"
 )
 
-var log = logging.Logger("go-legs-broker")
+var log = logging.Logger("go-legs")
 
 // defaultAddrTTL is the default amount of time that addresses discovered from
 // pubsub messages will remain in the peerstore.  This is twice the default
@@ -322,7 +321,7 @@ func (lb *Broker) Sync(ctx context.Context, peerID peer.ID, c cid.Cid, sel ipld.
 	}
 
 	var err error
-	var syncer legs.Syncer
+	var syncer Syncer
 
 	// If publisher specified, then get URL for http sync, or add multiaddr to peerstore.
 	if publisher != nil {
@@ -560,9 +559,9 @@ func (h *handler) handleAsync(ctx context.Context, c cid.Cid, ss ipld.Node) {
 // handle processes a message from the peer that the handler is responsible for.
 // The caller is responsible for ensuring that this is called while h.syncMutex
 // is locked.
-func (h *handler) handle(ctx context.Context, c cid.Cid, sel ipld.Node, wrapSel, updateLatest bool, syncer legs.Syncer) error {
+func (h *handler) handle(ctx context.Context, c cid.Cid, sel ipld.Node, wrapSel, updateLatest bool, syncer Syncer) error {
 	if wrapSel {
-		sel = legs.ExploreRecursiveWithStopNode(selector.RecursionLimitNone(), sel, h.latestSync)
+		sel = ExploreRecursiveWithStopNode(selector.RecursionLimitNone(), sel, h.latestSync)
 	}
 
 	log.Debugw("Starting data channel for message source", "cid", c, "latest_sync", h.latestSync, "source_peer", h.peerID)

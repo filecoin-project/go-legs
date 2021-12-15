@@ -1,12 +1,13 @@
-package broker_test
+package legs_test
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"testing"
 	"time"
 
 	"github.com/filecoin-project/go-legs"
-	"github.com/filecoin-project/go-legs/broker"
 	"github.com/filecoin-project/go-legs/dtsync"
 	"github.com/filecoin-project/go-legs/test"
 	"github.com/ipfs/go-cid"
@@ -33,7 +34,7 @@ func TestBrokerLatestSyncSuccess(t *testing.T) {
 	dstHost.Peerstore().AddAddrs(srcHost.ID(), srcHost.Addrs(), time.Hour)
 	dstLnkS := test.MkLinkSystem(dstStore)
 
-	bkr, err := broker.NewBroker(dstHost, dstStore, dstLnkS, testTopic, nil)
+	bkr, err := legs.NewBroker(dstHost, dstStore, dstLnkS, testTopic, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -50,9 +51,18 @@ func TestBrokerLatestSyncSuccess(t *testing.T) {
 	// Store the whole chain in source node
 	chainLnks := test.MkChain(srcLnkS, true)
 
-	newBrokerUpdateTest(t, lp, bkr, dstStore, watcher, srcHost.ID(), chainLnks[2], false, chainLnks[2].(cidlink.Link).Cid)
-	newBrokerUpdateTest(t, lp, bkr, dstStore, watcher, srcHost.ID(), chainLnks[1], false, chainLnks[1].(cidlink.Link).Cid)
-	newBrokerUpdateTest(t, lp, bkr, dstStore, watcher, srcHost.ID(), chainLnks[0], false, chainLnks[0].(cidlink.Link).Cid)
+	err = newBrokerUpdateTest(lp, bkr, dstStore, watcher, srcHost.ID(), chainLnks[2], false, chainLnks[2].(cidlink.Link).Cid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = newBrokerUpdateTest(lp, bkr, dstStore, watcher, srcHost.ID(), chainLnks[1], false, chainLnks[1].(cidlink.Link).Cid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = newBrokerUpdateTest(lp, bkr, dstStore, watcher, srcHost.ID(), chainLnks[0], false, chainLnks[0].(cidlink.Link).Cid)
+	if err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestBrokerSyncFn(t *testing.T) {
@@ -71,7 +81,7 @@ func TestBrokerSyncFn(t *testing.T) {
 	dstHost.Peerstore().AddAddrs(srcHost.ID(), srcHost.Addrs(), time.Hour)
 	dstLnkS := test.MkLinkSystem(dstStore)
 
-	bkr, err := broker.NewBroker(dstHost, dstStore, dstLnkS, testTopic, nil)
+	bkr, err := legs.NewBroker(dstHost, dstStore, dstLnkS, testTopic, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -180,7 +190,10 @@ func TestBrokerSyncFn(t *testing.T) {
 		}
 	}
 	syncncl()
-	assertBrokerLatestSyncEquals(t, bkr, srcHost.ID(), newHead)
+	err = assertBrokerLatestSyncEquals(bkr, srcHost.ID(), newHead)
+	if err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestBrokerPartialSync(t *testing.T) {
@@ -203,7 +216,7 @@ func TestBrokerPartialSync(t *testing.T) {
 	dstHost.Peerstore().AddAddrs(srcHost.ID(), srcHost.Addrs(), time.Hour)
 	dstLnkS := test.MkLinkSystem(dstStore)
 
-	bkr, err := broker.NewBroker(dstHost, dstStore, dstLnkS, testTopic, nil)
+	bkr, err := legs.NewBroker(dstHost, dstStore, dstLnkS, testTopic, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -226,7 +239,10 @@ func TestBrokerPartialSync(t *testing.T) {
 	defer cncl()
 
 	// Fetching first few nodes.
-	newBrokerUpdateTest(t, lp, bkr, dstStore, watcher, srcHost.ID(), chainLnks[2], false, chainLnks[2].(cidlink.Link).Cid)
+	err = newBrokerUpdateTest(lp, bkr, dstStore, watcher, srcHost.ID(), chainLnks[2], false, chainLnks[2].(cidlink.Link).Cid)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	// Check that first nodes hadn't been synced
 	if _, err := dstStore.Get(datastore.NewKey(chainLnks[3].(cidlink.Link).Cid.String())); err != datastore.ErrNotFound {
@@ -238,9 +254,16 @@ func TestBrokerPartialSync(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertBrokerLatestSyncEquals(t, bkr, srcHost.ID(), chainLnks[1].(cidlink.Link).Cid)
+	err = assertBrokerLatestSyncEquals(bkr, srcHost.ID(), chainLnks[1].(cidlink.Link).Cid)
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	// Update all the chain from scratch again.
-	newBrokerUpdateTest(t, lp, bkr, dstStore, watcher, srcHost.ID(), chainLnks[0], false, chainLnks[0].(cidlink.Link).Cid)
+	err = newBrokerUpdateTest(lp, bkr, dstStore, watcher, srcHost.ID(), chainLnks[0], false, chainLnks[0].(cidlink.Link).Cid)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	// Check if the node we pass through was retrieved
 	if _, err := dstStore.Get(datastore.NewKey(chainLnks[1].(cidlink.Link).Cid.String())); err != datastore.ErrNotFound {
@@ -263,7 +286,7 @@ func TestBrokerStepByStepSync(t *testing.T) {
 	dstHost.Peerstore().AddAddrs(srcHost.ID(), srcHost.Addrs(), time.Hour)
 	dstLnkS := test.MkLinkSystem(dstStore)
 
-	bkr, err := broker.NewBroker(dstHost, dstStore, dstLnkS, testTopic, nil)
+	bkr, err := legs.NewBroker(dstHost, dstStore, dstLnkS, testTopic, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -286,8 +309,14 @@ func TestBrokerStepByStepSync(t *testing.T) {
 	test.MkChain(dstLnkS, true)
 
 	// Sync the rest of the chain
-	newBrokerUpdateTest(t, lp, bkr, dstStore, watcher, srcHost.ID(), chainLnks[1], false, chainLnks[1].(cidlink.Link).Cid)
-	newBrokerUpdateTest(t, lp, bkr, dstStore, watcher, srcHost.ID(), chainLnks[0], false, chainLnks[0].(cidlink.Link).Cid)
+	err = newBrokerUpdateTest(lp, bkr, dstStore, watcher, srcHost.ID(), chainLnks[1], false, chainLnks[1].(cidlink.Link).Cid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = newBrokerUpdateTest(lp, bkr, dstStore, watcher, srcHost.ID(), chainLnks[0], false, chainLnks[0].(cidlink.Link).Cid)
+	if err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestBrokerLatestSyncFailure(t *testing.T) {
@@ -311,7 +340,7 @@ func TestBrokerLatestSyncFailure(t *testing.T) {
 	t.Log("source host:", srcHost.ID())
 	t.Log("targer host:", dstHost.ID())
 
-	bkr, err := broker.NewBroker(dstHost, dstStore, dstLnkS, testTopic, nil)
+	bkr, err := legs.NewBroker(dstHost, dstStore, dstLnkS, testTopic, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -326,14 +355,18 @@ func TestBrokerLatestSyncFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 	watcher, cncl := bkr.OnSyncFinished()
+	defer cncl()
 
 	t.Log("Testing sync fail when the other end does not have the data")
-	newBrokerUpdateTest(t, lp, bkr, dstStore, watcher, srcHost.ID(), cidlink.Link{Cid: cid.Undef}, true, chainLnks[3].(cidlink.Link).Cid)
+	err = newBrokerUpdateTest(lp, bkr, dstStore, watcher, srcHost.ID(), cidlink.Link{Cid: cid.Undef}, true, chainLnks[3].(cidlink.Link).Cid)
+	if err != nil {
+		t.Fatal(err)
+	}
 	cncl()
 	bkr.Close()
 
 	dstStore = dssync.MutexWrap(datastore.NewMapDatastore())
-	bkr, err = broker.NewBroker(dstHost, dstStore, dstLnkS, testTopic, nil)
+	bkr, err = legs.NewBroker(dstHost, dstStore, dstLnkS, testTopic, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -347,16 +380,19 @@ func TestBrokerLatestSyncFailure(t *testing.T) {
 	defer cncl()
 
 	t.Log("Testing sync fail when not able to run the full exchange")
-	newBrokerUpdateTest(t, lp, bkr, dstStore, watcher, srcHost.ID(), chainLnks[2], true, chainLnks[3].(cidlink.Link).Cid)
+	err = newBrokerUpdateTest(lp, bkr, dstStore, watcher, srcHost.ID(), chainLnks[2], true, chainLnks[3].(cidlink.Link).Cid)
+	if err != nil {
+		t.Fatal(err)
+	}
 }
 
-func newBrokerUpdateTest(t *testing.T, lp legs.Publisher, bkr *broker.Broker, dstStore datastore.Batching, watcher <-chan broker.SyncFinished, peerID peer.ID, lnk ipld.Link, withFailure bool, expectedSync cid.Cid) {
+func newBrokerUpdateTest(lp legs.Publisher, bkr *legs.Broker, dstStore datastore.Batching, watcher <-chan legs.SyncFinished, peerID peer.ID, lnk ipld.Link, withFailure bool, expectedSync cid.Cid) error {
 	var err error
 	c := lnk.(cidlink.Link).Cid
 	if c != cid.Undef {
 		err = lp.UpdateRoot(context.Background(), c)
 		if err != nil {
-			t.Fatal(err)
+			return err
 		}
 	}
 
@@ -364,39 +400,41 @@ func newBrokerUpdateTest(t *testing.T, lp legs.Publisher, bkr *broker.Broker, ds
 	if withFailure {
 		select {
 		case <-time.After(meshWaitTime):
-			assertBrokerLatestSyncEquals(t, bkr, peerID, expectedSync)
+			return assertBrokerLatestSyncEquals(bkr, peerID, expectedSync)
 		case changeEvent, open := <-watcher:
 			if !open {
-				return
+				return nil
 			}
-			t.Fatalf("no exchange should have been performed, but got change from peer %s for cid %s", changeEvent.PeerID, changeEvent.Cid)
+			return fmt.Errorf("no exchange should have been performed, but got change from peer %s for cid %s", changeEvent.PeerID, changeEvent.Cid)
 		}
 	} else {
 		select {
 		case <-time.After(updateTimeout):
-			t.Fatal("timed out waiting for sync to propagate")
+			return errors.New("timed out waiting for sync to propagate")
 		case downstream, open := <-watcher:
 			if !open {
-				return
+				return errors.New("event channle closed without receiving event")
 			}
 			if !downstream.Cid.Equals(c) {
-				t.Fatalf("sync'd cid unexpected %s vs %s", downstream.Cid, c)
+				return fmt.Errorf("sync returned unexpected cid %s, expected %s", downstream.Cid, c)
 			}
 			if _, err = dstStore.Get(datastore.NewKey(downstream.Cid.String())); err != nil {
-				t.Fatalf("data not in receiver store: %v", err)
+				return fmt.Errorf("data not in receiver store: %s", err)
 			}
 		}
-		assertBrokerLatestSyncEquals(t, bkr, peerID, expectedSync)
+		return assertBrokerLatestSyncEquals(bkr, peerID, expectedSync)
 	}
+	return nil
 }
 
-func assertBrokerLatestSyncEquals(t *testing.T, bkr *broker.Broker, peerID peer.ID, want cid.Cid) {
+func assertBrokerLatestSyncEquals(bkr *legs.Broker, peerID peer.ID, want cid.Cid) error {
 	latest := bkr.GetLatestSync(peerID)
 	if latest == nil {
-		t.Fatal("latest sync is nil")
+		errors.New("latest sync is nil")
 	}
 	got := latest.(cidlink.Link)
 	if got.Cid != want {
-		t.Fatalf("latestSync not updated correctly, got %s want %s", got, want)
+		fmt.Errorf("latestSync not updated correctly, got %s want %s", got, want)
 	}
+	return nil
 }

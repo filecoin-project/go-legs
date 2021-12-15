@@ -4,14 +4,11 @@ import (
 	"context"
 
 	"github.com/ipfs/go-cid"
-	logging "github.com/ipfs/go-log/v2"
 	"github.com/ipld/go-ipld-prime"
 	"github.com/libp2p/go-libp2p-core/peer"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	ma "github.com/multiformats/go-multiaddr"
 )
-
-var log = logging.Logger("go-legs")
 
 // Publisher is an interface for updating the published dag.
 type Publisher interface {

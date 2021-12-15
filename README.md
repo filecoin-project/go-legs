@@ -32,7 +32,7 @@ The `Broker` handles subscribing to a topic, reading messages from the topic and
 Create a `Broker`:
 
 ```golang
-bkr, err := broker.NewBroker(dstHost, dstStore, dstLnkS, "/legs/topic", nil)
+bkr, err := legs.NewBroker(dstHost, dstStore, dstLnkS, "/legs/topic", nil)
 if err != nil {
 	panic(err)
 }
@@ -45,7 +45,7 @@ watcher, cancelWatcher := bkr.OnSyncFinished()
 defer cancelWatcher()
 go watch(watcher)
 
-func watch(notifications <-chan Broker.SyncFinished) {
+func watch(notifications <-chan legs.SyncFinished) {
     for {
         syncFinished := <-notifications
         // newHead is now available in the local dataStore
@@ -60,7 +60,7 @@ Brokers can be created with a `AllowPeer` function.  This function determines if
 Broker keep track of the latest head each publisher is already synced, to avoid exchanging all the DAG from scratch in every update, and instead downloading only the part that has not been synced. This value is not persisted as part
 of the library. If you want to start a `Broker` which has already partially synced with a provider you can use:
 ```golang
-bkr, err := broker.NewBroker(dstHost, dstStore, dstLnkS, "/legs/topic", allowPeer)
+bkr, err := legs.NewBroker(dstHost, dstStore, dstLnkS, "/legs/topic", allowPeer)
 if err != nil {
     panic(err)
 }

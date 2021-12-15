@@ -7,7 +7,6 @@ import (
 	"sync"
 
 	dt "github.com/filecoin-project/go-data-transfer"
-	"github.com/filecoin-project/go-legs"
 	"github.com/hashicorp/go-multierror"
 	"github.com/ipfs/go-cid"
 	"github.com/ipfs/go-datastore"
@@ -18,7 +17,7 @@ import (
 	"github.com/libp2p/go-libp2p-core/peer"
 )
 
-var log = logging.Logger("go-legs-syncdt")
+var log = logging.Logger("go-legs-dtsync")
 
 type Sync struct {
 	cancel      context.CancelFunc
@@ -33,6 +32,7 @@ type Sync struct {
 	syncDoneMutex sync.Mutex
 }
 
+// Sync provides sync functionality for use with all datatransfer syncs.
 func NewSync(host host.Host, ds datastore.Batching, lsys ipld.LinkSystem, dt dt.Manager) (*Sync, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -95,8 +95,9 @@ func (s *Sync) Close() error {
 	return errs
 }
 
-func (s *Sync) NewSyncer(peerID peer.ID, topicName string) legs.Syncer {
-	return &syncer{
+// NewSyncer creates a new Syncer to use for a single sync operation against a peer.
+func (s *Sync) NewSyncer(peerID peer.ID, topicName string) *Syncer {
+	return &Syncer{
 		peerID:    peerID,
 		sync:      s,
 		topicName: topicName,
@@ -145,11 +146,14 @@ func (s *Sync) signalSyncDone(c cid.Cid, err error) bool {
 func (s *Sync) onEvent(event dt.Event, channelState dt.ChannelState) {
 	var err error
 	switch event.Code {
-	case dt.Error:
-		err = errors.New(event.Message)
-	case dt.FinishTransfer:
 	default:
+		// Ignore unrecognized event type.
 		return
+	case dt.FinishTransfer:
+		// Tell the waiting handler that the sync has finished.
+	case dt.Error:
+		// Communicate the error back to the waiting handler.
+		err = errors.New(event.Message)
 	}
 
 	// Send the FinishTransfer signal to the handler.  This will allow its

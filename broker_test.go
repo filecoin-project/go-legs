@@ -1,11 +1,11 @@
-package broker_test
+package legs_test
 
 import (
 	"context"
 	"testing"
 	"time"
 
-	"github.com/filecoin-project/go-legs/broker"
+	"github.com/filecoin-project/go-legs"
 	"github.com/filecoin-project/go-legs/dtsync"
 	"github.com/filecoin-project/go-legs/test"
 	"github.com/ipfs/go-datastore"
@@ -24,7 +24,7 @@ func TestBrokerRoundTripSimple(t *testing.T) {
 	// Init legs publisher and subscriber
 	srcStore := dssync.MutexWrap(datastore.NewMapDatastore())
 	dstStore := dssync.MutexWrap(datastore.NewMapDatastore())
-	_, _, lp, bkr, err := initPubSub(srcStore, dstStore)
+	_, _, lp, bkr, err := brokerInitPubSub(srcStore, dstStore)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -67,21 +67,20 @@ func TestBrokerRoundTrip(t *testing.T) {
 	srcStore1 := dssync.MutexWrap(datastore.NewMapDatastore())
 	srcHost1 := test.MkTestHost()
 	srcLnkS1 := test.MkLinkSystem(srcStore1)
-
-	lp1, err := dtsync.NewPublisher(srcHost1, srcStore1, srcLnkS1, testTopic)
+	pub1, err := dtsync.NewPublisher(srcHost1, srcStore1, srcLnkS1, testTopic)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer lp1.Close()
+	defer pub1.Close()
 
 	srcStore2 := dssync.MutexWrap(datastore.NewMapDatastore())
 	srcHost2 := test.MkTestHost()
 	srcLnkS2 := test.MkLinkSystem(srcStore2)
-	lp2, err := dtsync.NewPublisher(srcHost2, srcStore2, srcLnkS2, testTopic)
+	pub2, err := dtsync.NewPublisher(srcHost2, srcStore2, srcLnkS2, testTopic)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer lp2.Close()
+	defer pub2.Close()
 
 	dstStore := dssync.MutexWrap(datastore.NewMapDatastore())
 	dstHost := test.MkTestHost()
@@ -92,7 +91,7 @@ func TestBrokerRoundTrip(t *testing.T) {
 	dstHost.Peerstore().AddAddrs(srcHost2.ID(), srcHost2.Addrs(), time.Hour)
 
 	dstLnkS := test.MkLinkSystem(dstStore)
-	bkr, err := broker.NewBroker(dstHost, dstStore, dstLnkS, testTopic, nil)
+	bkr, err := legs.NewBroker(dstHost, dstStore, dstLnkS, testTopic, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -128,12 +127,12 @@ func TestBrokerRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := lp1.UpdateRoot(context.Background(), lnk1.(cidlink.Link).Cid); err != nil {
+	if err = pub1.UpdateRoot(context.Background(), lnk1.(cidlink.Link).Cid); err != nil {
 		t.Fatal(err)
 	}
 	t.Log("Publish 1:", lnk1.(cidlink.Link).Cid)
 
-	if err := lp2.UpdateRoot(context.Background(), lnk2.(cidlink.Link).Cid); err != nil {
+	if err = pub2.UpdateRoot(context.Background(), lnk2.(cidlink.Link).Cid); err != nil {
 		t.Fatal(err)
 	}
 	t.Log("Publish 2:", lnk2.(cidlink.Link).Cid)
@@ -168,7 +167,7 @@ func TestCloseBroker(t *testing.T) {
 	sh := test.MkTestHost()
 	lsys := test.MkLinkSystem(st)
 
-	bkr, err := broker.NewBroker(sh, st, lsys, testTopic, nil)
+	bkr, err := legs.NewBroker(sh, st, lsys, testTopic, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

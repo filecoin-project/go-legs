@@ -10,18 +10,18 @@ import (
 	"github.com/libp2p/go-libp2p-core/peer"
 )
 
-type syncer struct {
+type Syncer struct {
 	peerID    peer.ID
 	sync      *Sync
 	topicName string
 }
 
-func (s *syncer) GetHead(ctx context.Context) (cid.Cid, error) {
+func (s *Syncer) GetHead(ctx context.Context) (cid.Cid, error) {
 	// Query the peer for the latest CID
 	return head.QueryRootCid(ctx, s.sync.host, s.topicName, s.peerID)
 }
 
-func (s *syncer) Sync(ctx context.Context, nextCid cid.Cid, sel ipld.Node) error {
+func (s *Syncer) Sync(ctx context.Context, nextCid cid.Cid, sel ipld.Node) error {
 	syncDone := s.sync.notifyOnSyncDone(nextCid)
 
 	v := Voucher{&nextCid}

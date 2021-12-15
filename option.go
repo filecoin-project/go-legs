@@ -1,4 +1,4 @@
-package broker
+package legs
 
 import (
 	"fmt"

@@ -9,7 +9,6 @@ import (
 	"time"
 
 	dt "github.com/filecoin-project/go-data-transfer"
-	"github.com/filecoin-project/go-legs"
 	"github.com/filecoin-project/go-legs/gpubsub"
 	"github.com/filecoin-project/go-legs/p2p/protocol/head"
 	"github.com/hashicorp/go-multierror"
@@ -34,7 +33,7 @@ type publisher struct {
 const shutdownTime = 5 * time.Second
 
 // NewPublisher creates a new legs publisher
-func NewPublisher(host host.Host, ds datastore.Batching, lsys ipld.LinkSystem, topic string) (legs.Publisher, error) {
+func NewPublisher(host host.Host, ds datastore.Batching, lsys ipld.LinkSystem, topic string) (*publisher, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	t, err := gpubsub.MakePubsub(ctx, host, topic)
@@ -74,7 +73,7 @@ func startHeadPublisher(host host.Host, topic string, headPublisher *head.Publis
 
 // NewPublisherFromExisting instantiates go-legs publishing on an existing
 // data transfer instance
-func NewPublisherFromExisting(dtManager dt.Manager, host host.Host, topic string, lsys ipld.LinkSystem) (legs.Publisher, error) {
+func NewPublisherFromExisting(dtManager dt.Manager, host host.Host, topic string, lsys ipld.LinkSystem) (*publisher, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	t, err := gpubsub.MakePubsub(ctx, host, topic)
