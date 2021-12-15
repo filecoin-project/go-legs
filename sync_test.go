@@ -17,8 +17,8 @@ import (
 
 const (
 	testTopic     = "/legs/testtopic"
-	meshWaitTime  = 10 * time.Second
-	updateTimeout = time.Minute
+	meshWaitTime  = 2 * time.Second
+	updateTimeout = 10 * time.Second
 )
 
 func TestLatestSyncSuccess(t *testing.T) {

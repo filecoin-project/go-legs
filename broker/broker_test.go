@@ -16,22 +16,22 @@ import (
 
 const (
 	testTopic     = "/legs/testtopic"
-	meshWaitTime  = 10 * time.Second
-	updateTimeout = time.Minute
+	meshWaitTime  = 2 * time.Second
+	updateTimeout = 10 * time.Second
 )
 
 func TestBrokerRoundTripSimple(t *testing.T) {
 	// Init legs publisher and subscriber
 	srcStore := dssync.MutexWrap(datastore.NewMapDatastore())
 	dstStore := dssync.MutexWrap(datastore.NewMapDatastore())
-	_, _, lp, lb, err := initPubSub(srcStore, dstStore)
+	_, _, lp, bkr, err := initPubSub(srcStore, dstStore)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer lp.Close()
-	defer lb.Close()
+	defer bkr.Close()
 
-	watcher, cncl := lb.OnSyncFinished()
+	watcher, cncl := bkr.OnSyncFinished()
 	defer cncl()
 
 	// Update root with item
@@ -92,11 +92,11 @@ func TestBrokerRoundTrip(t *testing.T) {
 	dstHost.Peerstore().AddAddrs(srcHost2.ID(), srcHost2.Addrs(), time.Hour)
 
 	dstLnkS := test.MkLinkSystem(dstStore)
-	lb, err := broker.NewBroker(dstHost, dstStore, dstLnkS, testTopic, nil)
+	bkr, err := broker.NewBroker(dstHost, dstStore, dstLnkS, testTopic, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer lb.Close()
+	defer bkr.Close()
 
 	// Connections must be made after Broker is created, because the
 	// gossip pubsub must be created before connections are made.  Otherwise,
@@ -110,9 +110,9 @@ func TestBrokerRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	watcher1, cncl1 := lb.OnSyncFinished()
+	watcher1, cncl1 := bkr.OnSyncFinished()
 	defer cncl1()
-	watcher2, cncl2 := lb.OnSyncFinished()
+	watcher2, cncl2 := bkr.OnSyncFinished()
 	defer cncl2()
 
 	// Update root on publisher one with item
@@ -168,15 +168,15 @@ func TestCloseBroker(t *testing.T) {
 	sh := test.MkTestHost()
 	lsys := test.MkLinkSystem(st)
 
-	lb, err := broker.NewBroker(sh, st, lsys, testTopic, nil)
+	bkr, err := broker.NewBroker(sh, st, lsys, testTopic, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	watcher, cncl := lb.OnSyncFinished()
+	watcher, cncl := bkr.OnSyncFinished()
 	defer cncl()
 
-	err = lb.Close()
+	err = bkr.Close()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -190,7 +190,7 @@ func TestCloseBroker(t *testing.T) {
 		t.Fatal("timed out waiting for watcher to close")
 	}
 
-	err = lb.Close()
+	err = bkr.Close()
 	if err != nil {
 		t.Fatal(err)
 	}
