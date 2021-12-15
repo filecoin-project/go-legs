@@ -17,7 +17,7 @@ import (
 
 const (
 	testTopic     = "/legs/testtopic"
-	meshWaitTime  = 3 * time.Second
+	meshWaitTime  = 10 * time.Second
 	updateTimeout = time.Minute
 )
 
