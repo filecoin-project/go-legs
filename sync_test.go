@@ -15,7 +15,11 @@ import (
 	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
 )
 
-const testTopic = "/legs/testtopic"
+const (
+	testTopic     = "/legs/testtopic"
+	meshWaitTime  = 3 * time.Second
+	updateTimeout = time.Minute
+)
 
 func TestLatestSyncSuccess(t *testing.T) {
 	srcStore := dssync.MutexWrap(datastore.NewMapDatastore())
@@ -42,7 +46,7 @@ func TestLatestSyncSuccess(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	time.Sleep(5 * time.Second)
+	time.Sleep(meshWaitTime)
 	watcher, cncl := ls.OnChange()
 	defer cncl()
 
@@ -80,7 +84,7 @@ func TestSyncFn(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	time.Sleep(3 * time.Second)
+	time.Sleep(meshWaitTime)
 
 	// Store the whole chain in source node
 	chainLnks := test.MkChain(srcLnkS, true)
@@ -102,7 +106,7 @@ func TestSyncFn(t *testing.T) {
 		t.Fatal(err)
 	}
 	select {
-	case <-time.After(time.Second * 2):
+	case <-time.After(updateTimeout):
 		t.Fatal("timed out waiting for sync to propogate")
 	case downstream := <-out:
 		if !downstream.Equals(lnk.(cidlink.Link).Cid) {
@@ -131,7 +135,7 @@ func TestSyncFn(t *testing.T) {
 		t.Fatal(err)
 	}
 	select {
-	case <-time.After(time.Second * 2):
+	case <-time.After(updateTimeout):
 		t.Fatal("timed out waiting for sync to propogate")
 	case downstream := <-out:
 		if !downstream.Equals(newHead) {
@@ -175,7 +179,7 @@ func TestPartialSync(t *testing.T) {
 
 	test.MkChain(srcLnkS, true)
 
-	time.Sleep(5 * time.Second)
+	time.Sleep(meshWaitTime)
 
 	watcher, cncl := ls.OnChange()
 	defer cncl()
@@ -226,7 +230,7 @@ func TestStepByStepSync(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	time.Sleep(5 * time.Second)
+	time.Sleep(meshWaitTime)
 
 	watcher, cncl := ls.OnChange()
 	defer cncl()
@@ -301,14 +305,14 @@ func newUpdateTest(t *testing.T, lp legs.LegPublisher, ls legs.LegSubscriber, ds
 	// If failure latestSync shouldn't be updated
 	if withFailure {
 		select {
-		case <-time.After(time.Second * 5):
+		case <-time.After(meshWaitTime):
 			assertLatestSyncEquals(t, ls, expectedSync)
 		case <-watcher:
 			t.Fatal("no exchange should have been performed")
 		}
 	} else {
 		select {
-		case <-time.After(time.Second * 5):
+		case <-time.After(updateTimeout):
 			t.Fatal("timed out waiting for sync to propagate")
 		case downstream := <-watcher:
 			if !downstream.Equals(c) {

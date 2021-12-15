@@ -40,7 +40,7 @@ func initPubSub(srcStore, dstStore datastore.Batching) (host.Host, host.Host, le
 	dstHost.Peerstore().AddAddrs(srcHost.ID(), srcHost.Addrs(), time.Hour)
 	dstLnkS := test.MkLinkSystem(dstStore)
 
-	lb, err := broker.NewBroker(dstHost, dstStore, dstLnkS, testTopic, nil)
+	bkr, err := broker.NewBroker(dstHost, dstStore, dstLnkS, testTopic, nil)
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
@@ -49,7 +49,7 @@ func initPubSub(srcStore, dstStore datastore.Batching) (host.Host, host.Host, le
 		return nil, nil, nil, nil, err
 	}
 
-	return srcHost, dstHost, lp, lb, nil
+	return srcHost, dstHost, lp, bkr, nil
 }
 
 func TestBrokerRoundTripExistingDataTransfer(t *testing.T) {
@@ -84,6 +84,7 @@ func TestBrokerRoundTripExistingDataTransfer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer dt.Stop(context.Background())
 	lp, err := dtsync.NewPublisherFromExisting(context.Background(), dt, srcHost, testTopic, srcLnkS)
 	if err != nil {
 		t.Fatal(err)
@@ -96,16 +97,16 @@ func TestBrokerRoundTripExistingDataTransfer(t *testing.T) {
 	dstStore := dssync.MutexWrap(datastore.NewMapDatastore())
 	dstLnkS := test.MkLinkSystem(dstStore)
 
-	lb, err := broker.NewBroker(dstHost, dstStore, dstLnkS, testTopic, nil)
+	bkr, err := broker.NewBroker(dstHost, dstStore, dstLnkS, testTopic, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer lb.Close()
+	defer bkr.Close()
 	if err := srcHost.Connect(context.Background(), dstHost.Peerstore().PeerInfo(dstHost.ID())); err != nil {
 		t.Fatal(err)
 	}
 
-	watcher, cncl := lb.OnSyncFinished()
+	watcher, cncl := bkr.OnSyncFinished()
 	defer cncl()
 
 	// Update root with item
@@ -117,14 +118,14 @@ func TestBrokerRoundTripExistingDataTransfer(t *testing.T) {
 
 	// per https://github.com/libp2p/go-libp2p-pubsub/blob/e6ad80cf4782fca31f46e3a8ba8d1a450d562f49/gossipsub_test.go#L103
 	// we don't seem to have a way to manually trigger needed gossip-sub heartbeats for mesh establishment.
-	time.Sleep(5 * time.Second)
+	time.Sleep(meshWaitTime)
 
 	if err := lp.UpdateRoot(context.Background(), lnk.(cidlink.Link).Cid); err != nil {
 		t.Fatal(err)
 	}
 
 	select {
-	case <-time.After(time.Second * 5):
+	case <-time.After(updateTimeout):
 		t.Fatal("timed out waiting for sync to propogate")
 	case downstream := <-watcher:
 		if !downstream.Cid.Equals(lnk.(cidlink.Link).Cid) {
@@ -140,24 +141,24 @@ func TestBrokerAllowPeerReject(t *testing.T) {
 	// Init legs publisher and subscriber
 	srcStore := dssync.MutexWrap(datastore.NewMapDatastore())
 	dstStore := dssync.MutexWrap(datastore.NewMapDatastore())
-	_, dstHost, lp, lb, err := initPubSub(srcStore, dstStore)
+	_, dstHost, lp, bkr, err := initPubSub(srcStore, dstStore)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer lp.Close()
-	defer lb.Close()
+	defer bkr.Close()
 
 	// Set function to reject anything except dstHost, which is not the one
 	// generating the update.
-	lb.SetAllowPeer(func(peerID peer.ID) (bool, error) {
+	bkr.SetAllowPeer(func(peerID peer.ID) (bool, error) {
 		return peerID == dstHost.ID(), nil
 	})
 
 	// per https://github.com/libp2p/go-libp2p-pubsub/blob/e6ad80cf4782fca31f46e3a8ba8d1a450d562f49/gossipsub_test.go#L103
 	// we don't seem to have a way to manually trigger needed gossip-sub heartbeats for mesh establishment.
-	time.Sleep(2 * time.Second)
+	time.Sleep(meshWaitTime)
 
-	watcher, cncl := lb.OnSyncFinished()
+	watcher, cncl := bkr.OnSyncFinished()
 	defer cncl()
 
 	c := mkLnk(t, srcStore)
@@ -181,23 +182,23 @@ func TestBrokerAllowPeerAllows(t *testing.T) {
 	// Init legs publisher and subscriber
 	srcStore := dssync.MutexWrap(datastore.NewMapDatastore())
 	dstStore := dssync.MutexWrap(datastore.NewMapDatastore())
-	_, _, lp, lb, err := initPubSub(srcStore, dstStore)
+	_, _, lp, bkr, err := initPubSub(srcStore, dstStore)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer lp.Close()
-	defer lb.Close()
+	defer bkr.Close()
 
 	// Set function to allow any peer.
-	lb.SetAllowPeer(func(peerID peer.ID) (bool, error) {
+	bkr.SetAllowPeer(func(peerID peer.ID) (bool, error) {
 		return true, nil
 	})
 
 	// per https://github.com/libp2p/go-libp2p-pubsub/blob/e6ad80cf4782fca31f46e3a8ba8d1a450d562f49/gossipsub_test.go#L103
 	// we don't seem to have a way to manually trigger needed gossip-sub heartbeats for mesh establishment.
-	time.Sleep(2 * time.Second)
+	time.Sleep(meshWaitTime)
 
-	watcher, cncl := lb.OnSyncFinished()
+	watcher, cncl := bkr.OnSyncFinished()
 	defer cncl()
 
 	c := mkLnk(t, srcStore)
@@ -209,7 +210,7 @@ func TestBrokerAllowPeerAllows(t *testing.T) {
 	}
 
 	select {
-	case <-time.After(time.Second * 7):
+	case <-time.After(updateTimeout):
 		t.Fatal("timed out waiting for SyncFinished")
 	case <-watcher:
 	}

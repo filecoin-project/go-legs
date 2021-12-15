@@ -14,7 +14,11 @@ import (
 	basicnode "github.com/ipld/go-ipld-prime/node/basic"
 )
 
-const testTopic = "legs/testtopic"
+const (
+	testTopic     = "/legs/testtopic"
+	meshWaitTime  = 3 * time.Second
+	updateTimeout = time.Minute
+)
 
 func TestBrokerRoundTripSimple(t *testing.T) {
 	// Init legs publisher and subscriber
@@ -39,14 +43,14 @@ func TestBrokerRoundTripSimple(t *testing.T) {
 
 	// per https://github.com/libp2p/go-libp2p-pubsub/blob/e6ad80cf4782fca31f46e3a8ba8d1a450d562f49/gossipsub_test.go#L103
 	// we don't seem to have a way to manually trigger needed gossip-sub heartbeats for mesh establishment.
-	time.Sleep(5 * time.Second)
+	time.Sleep(meshWaitTime)
 
 	if err := lp.UpdateRoot(context.Background(), lnk.(cidlink.Link).Cid); err != nil {
 		t.Fatal(err)
 	}
 
 	select {
-	case <-time.After(time.Second * 7):
+	case <-time.After(updateTimeout):
 		t.Fatal("timed out waiting for sync to propogate")
 	case downstream := <-watcher:
 		if !downstream.Cid.Equals(lnk.(cidlink.Link).Cid) {
@@ -137,7 +141,7 @@ func TestBrokerRoundTrip(t *testing.T) {
 	// Check that watcher 1 gets both events.
 	for i := 0; i < 4; i++ {
 		select {
-		case <-time.After(time.Second * 5):
+		case <-time.After(updateTimeout):
 			t.Fatal("timed out waiting for sync to propogate")
 		case downstream := <-watcher1:
 			if !downstream.Cid.Equals(lnk1.(cidlink.Link).Cid) && !downstream.Cid.Equals(lnk2.(cidlink.Link).Cid) {
@@ -182,7 +186,7 @@ func TestCloseBroker(t *testing.T) {
 		if open {
 			t.Fatal("Watcher channel should have been closed")
 		}
-	case <-time.After(time.Second):
+	case <-time.After(updateTimeout):
 		t.Fatal("timed out waiting for watcher to close")
 	}
 
@@ -198,7 +202,7 @@ func TestCloseBroker(t *testing.T) {
 	}()
 	select {
 	case <-done:
-	case <-time.After(time.Second):
+	case <-time.After(updateTimeout):
 		t.Fatal("OnSyncFinished cancel func did not return after Close")
 	}
 }

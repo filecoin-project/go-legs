@@ -69,14 +69,14 @@ func TestRoundTrip(t *testing.T) {
 
 	// per https://github.com/libp2p/go-libp2p-pubsub/blob/e6ad80cf4782fca31f46e3a8ba8d1a450d562f49/gossipsub_test.go#L103
 	// we don't seem to have a way to manually trigger needed gossip-sub heartbeats for mesh establishment.
-	time.Sleep(5 * time.Second)
+	time.Sleep(meshWaitTime)
 
 	if err = lp.UpdateRoot(context.Background(), lnk.(cidlink.Link).Cid); err != nil {
 		t.Fatal(err)
 	}
 
 	select {
-	case <-time.After(time.Second * 5):
+	case <-time.After(updateTimeout):
 		t.Fatal("timed out waiting for sync to propogate")
 	case downstream := <-watcher:
 		if !downstream.Equals(lnk.(cidlink.Link).Cid) {
@@ -119,6 +119,7 @@ func TestRoundTripExistingDataTransfer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer dt.Stop(context.Background())
 	lp, err := dtsync.NewPublisherFromExisting(context.Background(), dt, srcHost, testTopic, srcLnkS)
 	if err != nil {
 		t.Fatal(err)
@@ -152,14 +153,14 @@ func TestRoundTripExistingDataTransfer(t *testing.T) {
 
 	// per https://github.com/libp2p/go-libp2p-pubsub/blob/e6ad80cf4782fca31f46e3a8ba8d1a450d562f49/gossipsub_test.go#L103
 	// we don't seem to have a way to manually trigger needed gossip-sub heartbeats for mesh establishment.
-	time.Sleep(3 * time.Second)
+	time.Sleep(meshWaitTime)
 
 	if err = lp.UpdateRoot(context.Background(), lnk.(cidlink.Link).Cid); err != nil {
 		t.Fatal(err)
 	}
 
 	select {
-	case <-time.After(time.Second * 5):
+	case <-time.After(updateTimeout):
 		t.Fatal("timed out waiting for sync to propogate")
 	case downstream := <-watcher:
 		if !downstream.Equals(lnk.(cidlink.Link).Cid) {
@@ -186,7 +187,7 @@ func TestSetAndFilterPeerPolicy(t *testing.T) {
 	}
 	// per https://github.com/libp2p/go-libp2p-pubsub/blob/e6ad80cf4782fca31f46e3a8ba8d1a450d562f49/gossipsub_test.go#L103
 	// we don't seem to have a way to manually trigger needed gossip-sub heartbeats for mesh establishment.
-	time.Sleep(3 * time.Second)
+	time.Sleep(meshWaitTime)
 
 	watcher, cncl := ls.OnChange()
 	defer cncl()
@@ -220,7 +221,7 @@ func TestSetAndFilterPeerPolicy(t *testing.T) {
 	}
 
 	select {
-	case <-time.After(time.Second * 3):
+	case <-time.After(meshWaitTime):
 	case <-watcher:
 		t.Fatal("something was exchanged, and that is wrong")
 	}
