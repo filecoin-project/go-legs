@@ -7,6 +7,7 @@ import (
 	"github.com/ipld/go-ipld-prime"
 	"github.com/libp2p/go-libp2p-core/peer"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
+	ma "github.com/multiformats/go-multiaddr"
 )
 
 // Publish will export an IPLD dag of data publicly for consumption.
@@ -16,6 +17,8 @@ import (
 type LegPublisher interface {
 	// Publishes and update for the DAG in the pubsub channel.
 	UpdateRoot(context.Context, cid.Cid) error
+	// Publishes and update for the DAG in the pubsub channel using custom multiaddrs.
+	UpdateRootWithAddrs(context.Context, cid.Cid, []ma.Multiaddr) error
 	// Close publisher
 	Close() error
 }
