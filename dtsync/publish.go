@@ -39,10 +39,12 @@ func NewPublisher(host host.Host, ds datastore.Batching, lsys ipld.LinkSystem, t
 
 	t, err := gpubsub.MakePubsub(ctx, host, topic)
 	if err != nil {
+		cancel()
 		return nil, err
 	}
 	dtManager, _, tmpDir, err := makeDataTransfer(context.Background(), host, ds, lsys, nil)
 	if err != nil {
+		cancel()
 		return nil, err
 	}
 
@@ -77,10 +79,12 @@ func NewPublisherFromExisting(dtManager dt.Manager, host host.Host, topic string
 
 	t, err := gpubsub.MakePubsub(ctx, host, topic)
 	if err != nil {
+		cancel()
 		return nil, err
 	}
 	err = configureDataTransferForLegs(context.Background(), dtManager, lsys)
 	if err != nil {
+		cancel()
 		return nil, err
 	}
 	headPublisher := head.NewPublisher()
