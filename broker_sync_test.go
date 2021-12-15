@@ -44,7 +44,8 @@ func TestBrokerLatestSyncSuccess(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	time.Sleep(meshWaitTime)
+	test.WaitForMesh()
+
 	watcher, cncl := bkr.OnSyncFinished()
 	defer cncl()
 
@@ -91,7 +92,7 @@ func TestBrokerSyncFn(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	time.Sleep(meshWaitTime)
+	test.WaitForMesh()
 
 	// Store the whole chain in source node
 	chainLnks := test.MkChain(srcLnkS, true)
@@ -233,7 +234,7 @@ func TestBrokerPartialSync(t *testing.T) {
 
 	test.MkChain(srcLnkS, true)
 
-	time.Sleep(meshWaitTime)
+	test.WaitForMesh()
 
 	watcher, cncl := bkr.OnSyncFinished()
 	defer cncl()
@@ -296,7 +297,7 @@ func TestBrokerStepByStepSync(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	time.Sleep(meshWaitTime)
+	test.WaitForMesh()
 
 	watcher, cncl := bkr.OnSyncFinished()
 	defer cncl()
@@ -399,7 +400,7 @@ func newBrokerUpdateTest(lp legs.Publisher, bkr *legs.Broker, dstStore datastore
 	// If failure. then latestSync should not be updated.
 	if withFailure {
 		select {
-		case <-time.After(meshWaitTime):
+		case <-time.After(3 * time.Second):
 			return assertBrokerLatestSyncEquals(bkr, peerID, expectedSync)
 		case changeEvent, open := <-watcher:
 			if !open {

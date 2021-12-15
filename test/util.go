@@ -18,6 +18,14 @@ import (
 	"github.com/multiformats/go-multicodec"
 )
 
+// WaitForMesh waits for gossip mesh to establish.  This is just a sleep for
+// now, until there is a better way to check if the mesh is established.
+func WaitForMesh() {
+	// per https://github.com/libp2p/go-libp2p-pubsub/blob/e6ad80cf4782fca31f46e3a8ba8d1a450d562f49/gossipsub_test.go#L103
+	// we don't seem to have a way to manually trigger needed gossip-sub heartbeats for mesh establishment.
+	time.Sleep(2 * time.Second)
+}
+
 // encode hardcodes some encoding choices for ease of use in fixture generation;
 // just gimme a link and stuff the bytes in a map.
 // (also return the node again for convenient assignment.)

@@ -115,9 +115,7 @@ func TestBrokerRoundTripExistingDataTransfer(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// per https://github.com/libp2p/go-libp2p-pubsub/blob/e6ad80cf4782fca31f46e3a8ba8d1a450d562f49/gossipsub_test.go#L103
-	// we don't seem to have a way to manually trigger needed gossip-sub heartbeats for mesh establishment.
-	time.Sleep(meshWaitTime)
+	test.WaitForMesh()
 
 	if err := lp.UpdateRoot(context.Background(), lnk.(cidlink.Link).Cid); err != nil {
 		t.Fatal(err)
@@ -153,9 +151,7 @@ func TestBrokerAllowPeerReject(t *testing.T) {
 		return peerID == dstHost.ID(), nil
 	})
 
-	// per https://github.com/libp2p/go-libp2p-pubsub/blob/e6ad80cf4782fca31f46e3a8ba8d1a450d562f49/gossipsub_test.go#L103
-	// we don't seem to have a way to manually trigger needed gossip-sub heartbeats for mesh establishment.
-	time.Sleep(meshWaitTime)
+	test.WaitForMesh()
 
 	watcher, cncl := bkr.OnSyncFinished()
 	defer cncl()
@@ -193,9 +189,7 @@ func TestBrokerAllowPeerAllows(t *testing.T) {
 		return true, nil
 	})
 
-	// per https://github.com/libp2p/go-libp2p-pubsub/blob/e6ad80cf4782fca31f46e3a8ba8d1a450d562f49/gossipsub_test.go#L103
-	// we don't seem to have a way to manually trigger needed gossip-sub heartbeats for mesh establishment.
-	time.Sleep(meshWaitTime)
+	test.WaitForMesh()
 
 	watcher, cncl := bkr.OnSyncFinished()
 	defer cncl()
