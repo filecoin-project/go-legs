@@ -98,11 +98,11 @@ func NewPublisherFromExisting(dtManager dt.Manager, host host.Host, topic string
 	}, nil
 }
 
-func (lp *legPublisher) UpdateRoot(ctx context.Context, c cid.Cid) error {
+func (lp *publisher) UpdateRoot(ctx context.Context, c cid.Cid) error {
 	return lp.UpdateRootWithAddrs(ctx, c, lp.host.Addrs())
 }
 
-func (lp *legPublisher) UpdateRootWithAddrs(ctx context.Context, c cid.Cid, addrs []ma.Multiaddr) error {
+func (lp *publisher) UpdateRootWithAddrs(ctx context.Context, c cid.Cid, addrs []ma.Multiaddr) error {
 	if c == cid.Undef {
 		return errors.New("cannot update to an undefined cid")
 	}
@@ -113,9 +113,9 @@ func (lp *legPublisher) UpdateRootWithAddrs(ctx context.Context, c cid.Cid, addr
 	if err != nil {
 		errs = multierror.Append(errs, err)
 	}
-	msg := message{
-		cid:   c,
-		addrs: addrs,
+	msg := Message{
+		Cid:   c,
+		Addrs: addrs,
 	}
 	err = lp.topic.Publish(ctx, EncodeMessage(msg))
 	if err != nil {

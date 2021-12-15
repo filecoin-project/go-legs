@@ -18,29 +18,29 @@ import (
 	ma "github.com/multiformats/go-multiaddr"
 )
 
-type httpPublisher struct {
+type publisher struct {
 	rl   sync.RWMutex
 	root cid.Cid
 	lsys ipld.LinkSystem
 }
 
-var _ legs.Publisher = (*httpPublisher)(nil)
-var _ http.Handler = (*httpPublisher)(nil)
+var _ legs.Publisher = (*publisher)(nil)
+var _ http.Handler = (*publisher)(nil)
 
 // NewPublisher creates a new http publisher
 func NewPublisher(ctx context.Context, ds datastore.Batching, lsys ipld.LinkSystem) (legs.Publisher, error) {
-	hp := &httpPublisher{}
-	hp.lsys = lsys
-	return hp, nil
+	p := &publisher{}
+	p.lsys = lsys
+	return p, nil
 }
 
-func (h *httpPublisher) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+func (p *publisher) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	ask := path.Base(r.URL.Path)
 	if ask == "head" {
 		// serve the
-		h.rl.RLock()
-		defer h.rl.RUnlock()
-		out, err := json.Marshal(h.root.String())
+		p.rl.RLock()
+		defer p.rl.RUnlock()
+		out, err := json.Marshal(p.root.String())
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			log.Errorw("Failed to serve root", "err", err)
@@ -55,7 +55,7 @@ func (h *httpPublisher) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid request: not a cid", http.StatusBadRequest)
 		return
 	}
-	item, err := h.lsys.Load(ipld.LinkContext{}, cidlink.Link{Cid: c}, basicnode.Prototype.Any)
+	item, err := p.lsys.Load(ipld.LinkContext{}, cidlink.Link{Cid: c}, basicnode.Prototype.Any)
 	if err != nil {
 		if errors.Is(err, ipld.ErrNotExists{}) {
 			http.Error(w, "cid not found", http.StatusNotFound)
@@ -69,17 +69,17 @@ func (h *httpPublisher) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	_ = dagjson.Encode(item, w)
 }
 
-func (h *httpPublisher) UpdateRoot(ctx context.Context, c cid.Cid) error {
-	h.rl.Lock()
-	defer h.rl.Unlock()
-	h.root = c
+func (p *publisher) UpdateRoot(ctx context.Context, c cid.Cid) error {
+	p.rl.Lock()
+	defer p.rl.Unlock()
+	p.root = c
 	return nil
 }
 
-func (h *httpPublisher) UpdateRootWithAddrs(ctx context.Context, c cid.Cid, _ []ma.Multiaddr) error {
-	return h.UpdateRoot(ctx, c)
+func (p *publisher) UpdateRootWithAddrs(ctx context.Context, c cid.Cid, _ []ma.Multiaddr) error {
+	return p.UpdateRoot(ctx, c)
 }
 
-func (h *httpPublisher) Close() error {
+func (p *publisher) Close() error {
 	return nil
 }
