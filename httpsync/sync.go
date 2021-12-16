@@ -113,15 +113,15 @@ func (s *Syncer) walkFetch(ctx context.Context, rootCid cid.Cid, sel selector.Se
 		r, err := s.sync.lsys.StorageReadOpener(lc, l)
 		if err != nil {
 			log.Errorw("Failed to get block read opener", "err", err, "link", l)
-			return r, nil
+			// get.
+			c := l.(cidlink.Link).Cid
+			if err := s.fetchBlock(ctx, c); err != nil {
+				log.Errorw("Failed to fetch block", "err", err, "cid", c)
+				return nil, err
+			}
+			return s.sync.lsys.StorageReadOpener(lc, l)
 		}
-		// get.
-		c := l.(cidlink.Link).Cid
-		if err := s.fetchBlock(ctx, c); err != nil {
-			log.Errorw("Failed to fetch block", "err", err, "cid", c)
-			return nil, err
-		}
-		return s.sync.lsys.StorageReadOpener(lc, l)
+		return r, nil
 	}
 
 	progress := traversal.Progress{
