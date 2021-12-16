@@ -300,14 +300,14 @@ func (lb *Broker) OnSyncFinished() (<-chan SyncFinished, context.CancelFunc) {
 // A SyncFinished channel is returned to allow the caller to wait for this
 // particular sync to complete.  Any OnSyncFinished readers will also get a
 // SyncFinished when the sync succeeds, but only if syncing to the latest using
-// the default selector.
+// the default selector and a `cid.Undef`.
 //
 // It is the responsibility of the caller to make sure the given CID appears
 // after the latest sync in order to avid re-syncing of content that may have
 // previously been synced.
 //
 // The selector sequence, selSec, can optionally be specified to customize the
-// selection sequence during traversal.  If unspecified, the subscriber's
+// selection sequence during traversal.  If unspecified, the broker's
 // default selector sequence is used.
 //
 // Note that the selector sequence is wrapped with a selector logic that will
