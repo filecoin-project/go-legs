@@ -16,14 +16,14 @@ import (
 
 const (
 	testTopic     = "/legs/testtopic"
-	updateTimeout = 10 * time.Second
+	updateTimeout = 1 * time.Second
 )
 
 func TestBrokerRoundTripSimple(t *testing.T) {
 	// Init legs publisher and subscriber
 	srcStore := dssync.MutexWrap(datastore.NewMapDatastore())
 	dstStore := dssync.MutexWrap(datastore.NewMapDatastore())
-	_, _, lp, bkr, err := brokerInitPubSub(srcStore, dstStore)
+	_, _, lp, bkr, err := brokerInitPubSub(t, srcStore, dstStore)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -39,8 +39,6 @@ func TestBrokerRoundTripSimple(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-
-	test.WaitForMesh()
 
 	if err := lp.UpdateRoot(context.Background(), lnk.(cidlink.Link).Cid); err != nil {
 		t.Fatal(err)
@@ -64,47 +62,35 @@ func TestBrokerRoundTrip(t *testing.T) {
 	srcStore1 := dssync.MutexWrap(datastore.NewMapDatastore())
 	srcHost1 := test.MkTestHost()
 	srcLnkS1 := test.MkLinkSystem(srcStore1)
-	pub1, err := dtsync.NewPublisher(srcHost1, srcStore1, srcLnkS1, testTopic)
+
+	srcStore2 := dssync.MutexWrap(datastore.NewMapDatastore())
+	srcHost2 := test.MkTestHost()
+	srcLnkS2 := test.MkLinkSystem(srcStore2)
+
+	dstStore := dssync.MutexWrap(datastore.NewMapDatastore())
+	dstHost := test.MkTestHost()
+
+	dstLnkS := test.MkLinkSystem(dstStore)
+
+	topics := test.WaitForMeshWithMessage(t, "testTopic", srcHost1, srcHost2, dstHost)
+
+	pub1, err := dtsync.NewPublisher(srcHost1, srcStore1, srcLnkS1, "", dtsync.Topic(topics[0]))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer pub1.Close()
 
-	srcStore2 := dssync.MutexWrap(datastore.NewMapDatastore())
-	srcHost2 := test.MkTestHost()
-	srcLnkS2 := test.MkLinkSystem(srcStore2)
-	pub2, err := dtsync.NewPublisher(srcHost2, srcStore2, srcLnkS2, testTopic)
+	pub2, err := dtsync.NewPublisher(srcHost2, srcStore2, srcLnkS2, "", dtsync.Topic(topics[1]))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer pub2.Close()
 
-	dstStore := dssync.MutexWrap(datastore.NewMapDatastore())
-	dstHost := test.MkTestHost()
-
-	srcHost1.Peerstore().AddAddrs(dstHost.ID(), dstHost.Addrs(), time.Hour)
-	dstHost.Peerstore().AddAddrs(srcHost1.ID(), srcHost1.Addrs(), time.Hour)
-	srcHost2.Peerstore().AddAddrs(dstHost.ID(), dstHost.Addrs(), time.Hour)
-	dstHost.Peerstore().AddAddrs(srcHost2.ID(), srcHost2.Addrs(), time.Hour)
-
-	dstLnkS := test.MkLinkSystem(dstStore)
-	bkr, err := legs.NewBroker(dstHost, dstStore, dstLnkS, testTopic, nil)
+	bkr, err := legs.NewBroker(dstHost, dstStore, dstLnkS, testTopic, nil, legs.Topic(topics[2]))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer bkr.Close()
-
-	// Connections must be made after Broker is created, because the
-	// gossip pubsub must be created before connections are made.  Otherwise,
-	// the connecting hosts will not see the destination host has pubsub and
-	// messages will not get published.
-	dstPeerInfo := dstHost.Peerstore().PeerInfo(dstHost.ID())
-	if err = srcHost1.Connect(context.Background(), dstPeerInfo); err != nil {
-		t.Fatal(err)
-	}
-	if err = srcHost2.Connect(context.Background(), dstPeerInfo); err != nil {
-		t.Fatal(err)
-	}
 
 	watcher1, cncl1 := bkr.OnSyncFinished()
 	defer cncl1()
@@ -128,35 +114,31 @@ func TestBrokerRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Log("Publish 1:", lnk1.(cidlink.Link).Cid)
+	waitForSync(t, "Watcher 1", dstStore, lnk1.(cidlink.Link), watcher1)
+	waitForSync(t, "Watcher 2", dstStore, lnk1.(cidlink.Link), watcher2)
 
 	if err = pub2.UpdateRoot(context.Background(), lnk2.(cidlink.Link).Cid); err != nil {
 		t.Fatal(err)
 	}
 	t.Log("Publish 2:", lnk2.(cidlink.Link).Cid)
+	waitForSync(t, "Watcher 1", dstStore, lnk2.(cidlink.Link), watcher1)
+	waitForSync(t, "Watcher 2", dstStore, lnk2.(cidlink.Link), watcher2)
+}
 
-	// Check that watcher 1 gets both events.
-	for i := 0; i < 4; i++ {
-		select {
-		case <-time.After(updateTimeout):
-			t.Fatal("timed out waiting for sync to propogate")
-		case downstream := <-watcher1:
-			if !downstream.Cid.Equals(lnk1.(cidlink.Link).Cid) && !downstream.Cid.Equals(lnk2.(cidlink.Link).Cid) {
-				t.Fatalf("sync'd cid unexpected %s vs %s", downstream, lnk1)
-			}
-			if _, err := dstStore.Get(datastore.NewKey(downstream.Cid.String())); err != nil {
-				t.Fatalf("data not in receiver store: %v", err)
-			}
-			t.Log("Watcher 1 got sync:", downstream.Cid)
-		case downstream := <-watcher2:
-			if !downstream.Cid.Equals(lnk1.(cidlink.Link).Cid) && !downstream.Cid.Equals(lnk2.(cidlink.Link).Cid) {
-				t.Fatalf("sync'd cid unexpected %s vs %s", downstream, lnk1)
-			}
-			if _, err := dstStore.Get(datastore.NewKey(downstream.Cid.String())); err != nil {
-				t.Fatalf("data not in receiver store: %v", err)
-			}
-			t.Log("Watcher 2 got sync:", downstream.Cid)
+func waitForSync(t *testing.T, logPrefix string, store *dssync.MutexDatastore, expectedCid cidlink.Link, watcher <-chan legs.SyncFinished) {
+	select {
+	case <-time.After(updateTimeout):
+		t.Fatal("timed out waiting for sync to propogate")
+	case downstream := <-watcher:
+		if !downstream.Cid.Equals(expectedCid.Cid) {
+			t.Fatalf("sync'd cid unexpected %s vs %s", downstream, expectedCid.Cid)
 		}
+		if _, err := store.Get(datastore.NewKey(downstream.Cid.String())); err != nil {
+			t.Fatalf("data not in receiver store: %v", err)
+		}
+		t.Log(logPrefix+" got sync:", downstream.Cid)
 	}
+
 }
 
 func TestCloseBroker(t *testing.T) {

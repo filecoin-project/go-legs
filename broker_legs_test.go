@@ -26,20 +26,24 @@ import (
 	"github.com/libp2p/go-libp2p-core/peer"
 )
 
-func brokerInitPubSub(srcStore, dstStore datastore.Batching) (host.Host, host.Host, legs.Publisher, *legs.Broker, error) {
+func brokerInitPubSub(t *testing.T, srcStore, dstStore datastore.Batching) (host.Host, host.Host, legs.Publisher, *legs.Broker, error) {
 	srcHost := test.MkTestHost()
+	dstHost := test.MkTestHost()
+
+	topics := test.WaitForMeshWithMessage(t, testTopic, srcHost, dstHost)
+
 	srcLnkS := test.MkLinkSystem(srcStore)
-	lp, err := dtsync.NewPublisher(srcHost, srcStore, srcLnkS, testTopic)
+
+	lp, err := dtsync.NewPublisher(srcHost, srcStore, srcLnkS, testTopic, dtsync.Topic(topics[0]))
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
 
-	dstHost := test.MkTestHost()
 	srcHost.Peerstore().AddAddrs(dstHost.ID(), dstHost.Addrs(), time.Hour)
 	dstHost.Peerstore().AddAddrs(srcHost.ID(), srcHost.Addrs(), time.Hour)
 	dstLnkS := test.MkLinkSystem(dstStore)
 
-	bkr, err := legs.NewBroker(dstHost, dstStore, dstLnkS, testTopic, nil)
+	bkr, err := legs.NewBroker(dstHost, dstStore, dstLnkS, testTopic, nil, legs.Topic(topics[1]))
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
@@ -84,11 +88,6 @@ func TestBrokerRoundTripExistingDataTransfer(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer dt.Stop(context.Background())
-	lp, err := dtsync.NewPublisherFromExisting(dt, srcHost, testTopic, srcLnkS)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer lp.Close()
 
 	dstHost := test.MkTestHost()
 	srcHost.Peerstore().AddAddrs(dstHost.ID(), dstHost.Addrs(), time.Hour)
@@ -96,7 +95,15 @@ func TestBrokerRoundTripExistingDataTransfer(t *testing.T) {
 	dstStore := dssync.MutexWrap(datastore.NewMapDatastore())
 	dstLnkS := test.MkLinkSystem(dstStore)
 
-	bkr, err := legs.NewBroker(dstHost, dstStore, dstLnkS, testTopic, nil)
+	topics := test.WaitForMeshWithMessage(t, testTopic, srcHost, dstHost)
+
+	lp, err := dtsync.NewPublisherFromExisting(dt, srcHost, testTopic, srcLnkS, dtsync.Topic(topics[0]))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lp.Close()
+
+	bkr, err := legs.NewBroker(dstHost, dstStore, dstLnkS, testTopic, nil, legs.Topic(topics[1]))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -114,8 +121,6 @@ func TestBrokerRoundTripExistingDataTransfer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-
-	test.WaitForMesh()
 
 	if err := lp.UpdateRoot(context.Background(), lnk.(cidlink.Link).Cid); err != nil {
 		t.Fatal(err)
@@ -138,7 +143,7 @@ func TestBrokerAllowPeerReject(t *testing.T) {
 	// Init legs publisher and subscriber
 	srcStore := dssync.MutexWrap(datastore.NewMapDatastore())
 	dstStore := dssync.MutexWrap(datastore.NewMapDatastore())
-	_, dstHost, lp, bkr, err := brokerInitPubSub(srcStore, dstStore)
+	_, dstHost, lp, bkr, err := brokerInitPubSub(t, srcStore, dstStore)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -150,8 +155,6 @@ func TestBrokerAllowPeerReject(t *testing.T) {
 	bkr.SetAllowPeer(func(peerID peer.ID) (bool, error) {
 		return peerID == dstHost.ID(), nil
 	})
-
-	test.WaitForMesh()
 
 	watcher, cncl := bkr.OnSyncFinished()
 	defer cncl()
@@ -177,7 +180,7 @@ func TestBrokerAllowPeerAllows(t *testing.T) {
 	// Init legs publisher and subscriber
 	srcStore := dssync.MutexWrap(datastore.NewMapDatastore())
 	dstStore := dssync.MutexWrap(datastore.NewMapDatastore())
-	_, _, lp, bkr, err := brokerInitPubSub(srcStore, dstStore)
+	_, _, lp, bkr, err := brokerInitPubSub(t, srcStore, dstStore)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -188,8 +191,6 @@ func TestBrokerAllowPeerAllows(t *testing.T) {
 	bkr.SetAllowPeer(func(peerID peer.ID) (bool, error) {
 		return true, nil
 	})
-
-	test.WaitForMesh()
 
 	watcher, cncl := bkr.OnSyncFinished()
 	defer cncl()

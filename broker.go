@@ -156,8 +156,8 @@ func NewBroker(host host.Host, ds datastore.Batching, lsys ipld.LinkSystem, topi
 
 		addrTTL:   cfg.addrTTL,
 		psub:      psub,
-		topic:     pubsubTopic,
-		topicName: pubsubTopic.String(),
+		topic:     cfg.topic,
+		topicName: cfg.topic.String(),
 		closing:   make(chan struct{}),
 		cancelps:  cancelPubsub,
 
