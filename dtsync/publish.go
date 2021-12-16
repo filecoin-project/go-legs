@@ -33,14 +33,27 @@ type publisher struct {
 const shutdownTime = 5 * time.Second
 
 // NewPublisher creates a new legs publisher
-func NewPublisher(host host.Host, ds datastore.Batching, lsys ipld.LinkSystem, topic string) (*publisher, error) {
-	ctx, cancel := context.WithCancel(context.Background())
-
-	t, err := gpubsub.MakePubsub(ctx, host, topic)
+func NewPublisher(host host.Host, ds datastore.Batching, lsys ipld.LinkSystem, topic string, options ...Option) (*publisher, error) {
+	cfg := config{}
+	err := cfg.apply(options)
 	if err != nil {
-		cancel()
 		return nil, err
 	}
+
+	var cancel context.CancelFunc
+	t := cfg.topic
+	if t == nil {
+		var ctx context.Context
+		ctx, cancel = context.WithCancel(context.Background())
+		t, err = gpubsub.MakePubsub(ctx, host, topic)
+		if err != nil {
+			cancel()
+			return nil, err
+		}
+	} else {
+		cancel = func() {}
+	}
+
 	dtManager, _, tmpDir, err := makeDataTransfer(context.Background(), host, ds, lsys, nil)
 	if err != nil {
 		cancel()
@@ -73,14 +86,27 @@ func startHeadPublisher(host host.Host, topic string, headPublisher *head.Publis
 
 // NewPublisherFromExisting instantiates go-legs publishing on an existing
 // data transfer instance
-func NewPublisherFromExisting(dtManager dt.Manager, host host.Host, topic string, lsys ipld.LinkSystem) (*publisher, error) {
-	ctx, cancel := context.WithCancel(context.Background())
-
-	t, err := gpubsub.MakePubsub(ctx, host, topic)
+func NewPublisherFromExisting(dtManager dt.Manager, host host.Host, topic string, lsys ipld.LinkSystem, options ...Option) (*publisher, error) {
+	cfg := config{}
+	err := cfg.apply(options)
 	if err != nil {
-		cancel()
 		return nil, err
 	}
+
+	var cancel context.CancelFunc
+	t := cfg.topic
+	if t == nil {
+		var ctx context.Context
+		ctx, cancel = context.WithCancel(context.Background())
+		t, err = gpubsub.MakePubsub(ctx, host, topic)
+		if err != nil {
+			cancel()
+			return nil, err
+		}
+	} else {
+		cancel = func() {}
+	}
+
 	err = configureDataTransferForLegs(context.Background(), dtManager, lsys)
 	if err != nil {
 		cancel()

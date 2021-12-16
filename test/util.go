@@ -3,8 +3,11 @@ package test
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"math/rand"
+	"sync"
+	"testing"
 	"time"
 
 	"github.com/ipfs/go-cid"
@@ -15,15 +18,126 @@ import (
 	basicnode "github.com/ipld/go-ipld-prime/node/basic"
 	"github.com/libp2p/go-libp2p"
 	"github.com/libp2p/go-libp2p-core/host"
+	"github.com/libp2p/go-libp2p-core/peer"
+	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	"github.com/multiformats/go-multicodec"
 )
 
-// WaitForMesh waits for gossip mesh to establish.  This is just a sleep for
-// now, until there is a better way to check if the mesh is established.
-func WaitForMesh() {
-	// per https://github.com/libp2p/go-libp2p-pubsub/blob/e6ad80cf4782fca31f46e3a8ba8d1a450d562f49/gossipsub_test.go#L103
-	// we don't seem to have a way to manually trigger needed gossip-sub heartbeats for mesh establishment.
-	time.Sleep(2 * time.Second)
+const waitForMeshTimeout = 4 * time.Second
+
+// WaitForMeshWithMessage sets up a gossipsub network and sends a test message.
+// Blocks until all other hosts see the first host's message.
+func WaitForMeshWithMessage(t *testing.T, topic string, hosts ...host.Host) []*pubsub.Topic {
+	now := time.Now()
+	meshFormed := false
+	defer func() {
+		if meshFormed {
+			fmt.Println("Mesh formed in", time.Since(now))
+		}
+	}()
+
+	addrInfos := make([]peer.AddrInfo, 0, len(hosts))
+	for _, h := range hosts {
+		addrInfos = append(addrInfos, *host.InfoFromHost(h))
+	}
+
+	for _, h := range hosts {
+		for _, addrInfo := range addrInfos {
+			if h.ID() == addrInfo.ID {
+				continue
+			}
+			h.Peerstore().AddAddrs(addrInfo.ID, addrInfo.Addrs, time.Hour)
+			err := h.Connect(context.Background(), addrInfo)
+			if err != nil {
+				t.Fatalf("Failed to connect: %v", err)
+			}
+		}
+	}
+
+	pubsubs := make([]*pubsub.PubSub, 0, len(hosts))
+	topics := make([]*pubsub.Topic, 0, len(hosts))
+	for _, h := range hosts {
+		addrInfosWithoutSelf := make([]peer.AddrInfo, 0, len(addrInfos)-1)
+		for _, ai := range addrInfos {
+			if ai.ID != h.ID() {
+				addrInfosWithoutSelf = append(addrInfosWithoutSelf, ai)
+			}
+		}
+
+		pubsub, err := pubsub.NewGossipSub(context.Background(), h, pubsub.WithDirectPeers(addrInfosWithoutSelf))
+		if err != nil {
+			t.Fatalf("Failed to start gossipsub: %v", err)
+		}
+
+		tpc, err := pubsub.Join(topic)
+		if err != nil {
+			t.Fatalf("Failed to join topic: %v", err)
+		}
+
+		pubsubs = append(pubsubs, pubsub)
+		topics = append(topics, tpc)
+	}
+
+	if len(pubsubs) == 1 {
+		t.Fatalf("No point in using this helper if there's only one host. Did you mean to pass in another host?")
+	}
+
+	restTopics := topics[1:]
+	wg := sync.WaitGroup{}
+
+	for _, tpc := range restTopics {
+		wg.Add(1)
+
+		s, err := tpc.Subscribe()
+		if err != nil {
+			t.Fatalf("Failed to subscribe: %v", err)
+		}
+
+		go func(s *pubsub.Subscription) {
+			_, err := s.Next(context.Background())
+			if err != nil {
+				fmt.Println("Failed in waiting for startupCheck msg in goroutine", err)
+			}
+			wg.Done()
+
+			// Wait until someone else picks up this topic and sends a message before
+			// we cancel. This way the topic isn't unsubscribed to before we start
+			// the test.
+			s.Next(context.Background())
+			s.Cancel()
+		}(s)
+	}
+
+	done := make(chan (struct{}))
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+
+	tpc := topics[0]
+	err := tpc.Publish(context.Background(), []byte("hi"))
+	if err != nil {
+		t.Fatalf("Failed to publish: %v", err)
+	}
+
+	timeout := time.NewTicker(waitForMeshTimeout)
+	// If not all subscribers get the msg, let's resend the message until they
+	// get it or we timeout.
+	for {
+		select {
+		case <-done:
+			meshFormed = true
+			return topics
+		case <-timeout.C:
+			t.Fatalf("Mesh failed to startup")
+			return nil
+		case <-time.After(100 * time.Millisecond):
+			err := tpc.Publish(context.Background(), []byte("hi"))
+			if err != nil {
+				fmt.Println("Failed to publish:", err)
+			}
+		}
+	}
 }
 
 // encode hardcodes some encoding choices for ease of use in fixture generation;

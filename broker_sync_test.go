@@ -23,28 +23,25 @@ func TestBrokerLatestSyncSuccess(t *testing.T) {
 	dstStore := dssync.MutexWrap(datastore.NewMapDatastore())
 	srcHost := test.MkTestHost()
 	srcLnkS := test.MkLinkSystem(srcStore)
-	lp, err := dtsync.NewPublisher(srcHost, srcStore, srcLnkS, testTopic)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer lp.Close()
 
 	dstHost := test.MkTestHost()
 	srcHost.Peerstore().AddAddrs(dstHost.ID(), dstHost.Addrs(), time.Hour)
 	dstHost.Peerstore().AddAddrs(srcHost.ID(), srcHost.Addrs(), time.Hour)
 	dstLnkS := test.MkLinkSystem(dstStore)
 
-	bkr, err := legs.NewBroker(dstHost, dstStore, dstLnkS, testTopic, nil)
+	topics := test.WaitForMeshWithMessage(t, testTopic, srcHost, dstHost)
+
+	lp, err := dtsync.NewPublisher(srcHost, srcStore, srcLnkS, testTopic, dtsync.Topic(topics[0]))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lp.Close()
+
+	bkr, err := legs.NewBroker(dstHost, dstStore, dstLnkS, testTopic, nil, legs.Topic(topics[1]))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer bkr.Close()
-
-	if err := srcHost.Connect(context.Background(), dstHost.Peerstore().PeerInfo(dstHost.ID())); err != nil {
-		t.Fatal(err)
-	}
-
-	test.WaitForMesh()
 
 	watcher, cncl := bkr.OnSyncFinished()
 	defer cncl()
@@ -71,18 +68,21 @@ func TestBrokerSyncFn(t *testing.T) {
 	dstStore := dssync.MutexWrap(datastore.NewMapDatastore())
 	srcHost := test.MkTestHost()
 	srcLnkS := test.MkLinkSystem(srcStore)
-	lp, err := dtsync.NewPublisher(srcHost, srcStore, srcLnkS, testTopic)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer lp.Close()
 
 	dstHost := test.MkTestHost()
 	srcHost.Peerstore().AddAddrs(dstHost.ID(), dstHost.Addrs(), time.Hour)
 	dstHost.Peerstore().AddAddrs(srcHost.ID(), srcHost.Addrs(), time.Hour)
 	dstLnkS := test.MkLinkSystem(dstStore)
 
-	bkr, err := legs.NewBroker(dstHost, dstStore, dstLnkS, testTopic, nil)
+	topics := test.WaitForMeshWithMessage(t, testTopic, srcHost, dstHost)
+
+	lp, err := dtsync.NewPublisher(srcHost, srcStore, srcLnkS, testTopic, dtsync.Topic(topics[0]))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lp.Close()
+
+	bkr, err := legs.NewBroker(dstHost, dstStore, dstLnkS, testTopic, nil, legs.Topic(topics[1]))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -91,8 +91,6 @@ func TestBrokerSyncFn(t *testing.T) {
 	if err := srcHost.Connect(context.Background(), dstHost.Peerstore().PeerInfo(dstHost.ID())); err != nil {
 		t.Fatal(err)
 	}
-
-	test.WaitForMesh()
 
 	// Store the whole chain in source node
 	chainLnks := test.MkChain(srcLnkS, true)
@@ -204,11 +202,6 @@ func TestBrokerPartialSync(t *testing.T) {
 	srcHost := test.MkTestHost()
 	srcLnkS := test.MkLinkSystem(srcStore)
 	testLnkS := test.MkLinkSystem(testStore)
-	lp, err := dtsync.NewPublisher(srcHost, srcStore, srcLnkS, testTopic)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer lp.Close()
 
 	chainLnks := test.MkChain(testLnkS, true)
 
@@ -217,7 +210,16 @@ func TestBrokerPartialSync(t *testing.T) {
 	dstHost.Peerstore().AddAddrs(srcHost.ID(), srcHost.Addrs(), time.Hour)
 	dstLnkS := test.MkLinkSystem(dstStore)
 
-	bkr, err := legs.NewBroker(dstHost, dstStore, dstLnkS, testTopic, nil)
+	topics := test.WaitForMeshWithMessage(t, testTopic, srcHost, dstHost)
+
+	lp, err := dtsync.NewPublisher(srcHost, srcStore, srcLnkS, testTopic, dtsync.Topic(topics[0]))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lp.Close()
+	test.MkChain(srcLnkS, true)
+
+	bkr, err := legs.NewBroker(dstHost, dstStore, dstLnkS, testTopic, nil, legs.Topic(topics[1]))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -231,10 +233,6 @@ func TestBrokerPartialSync(t *testing.T) {
 	if err := srcHost.Connect(context.Background(), dstHost.Peerstore().PeerInfo(dstHost.ID())); err != nil {
 		t.Fatal(err)
 	}
-
-	test.MkChain(srcLnkS, true)
-
-	test.WaitForMesh()
 
 	watcher, cncl := bkr.OnSyncFinished()
 	defer cncl()
@@ -274,30 +272,26 @@ func TestBrokerPartialSync(t *testing.T) {
 func TestBrokerStepByStepSync(t *testing.T) {
 	srcStore := dssync.MutexWrap(datastore.NewMapDatastore())
 	dstStore := dssync.MutexWrap(datastore.NewMapDatastore())
-	srcHost := test.MkTestHost()
 	srcLnkS := test.MkLinkSystem(srcStore)
-	lp, err := dtsync.NewPublisher(srcHost, srcStore, srcLnkS, testTopic)
+
+	srcHost := test.MkTestHost()
+	dstHost := test.MkTestHost()
+
+	topics := test.WaitForMeshWithMessage(t, testTopic, srcHost, dstHost)
+
+	dstLnkS := test.MkLinkSystem(dstStore)
+
+	lp, err := dtsync.NewPublisher(srcHost, srcStore, srcLnkS, testTopic, dtsync.Topic(topics[0]))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer lp.Close()
 
-	dstHost := test.MkTestHost()
-	srcHost.Peerstore().AddAddrs(dstHost.ID(), dstHost.Addrs(), time.Hour)
-	dstHost.Peerstore().AddAddrs(srcHost.ID(), srcHost.Addrs(), time.Hour)
-	dstLnkS := test.MkLinkSystem(dstStore)
-
-	bkr, err := legs.NewBroker(dstHost, dstStore, dstLnkS, testTopic, nil)
+	bkr, err := legs.NewBroker(dstHost, dstStore, dstLnkS, testTopic, nil, legs.Topic(topics[1]))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer bkr.Close()
-
-	if err := srcHost.Connect(context.Background(), dstHost.Peerstore().PeerInfo(dstHost.ID())); err != nil {
-		t.Fatal(err)
-	}
-
-	test.WaitForMesh()
 
 	watcher, cncl := bkr.OnSyncFinished()
 	defer cncl()
