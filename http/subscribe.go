@@ -248,6 +248,11 @@ func (h *httpSubscriber) background() {
 	}
 }
 
+// walkFetch is run by a traversal of the selector.  For each block that the
+// selector walks over, walkFetch will look to see if it can find it in the
+// local data store. If it cannot, it will then go and get it over HTTP.  This
+// emulates way libp2p/graphsync fetches data, but the actual fetch of data is
+// done over HTTP.
 func (h *httpSubscriber) walkFetch(ctx context.Context, root cid.Cid, sel selector.Selector) error {
 	getMissingLs := cidlink.DefaultLinkSystem()
 	// trusted because it'll be hashed/verified on the way into the link system when fetched.
@@ -255,10 +260,10 @@ func (h *httpSubscriber) walkFetch(ctx context.Context, root cid.Cid, sel select
 	getMissingLs.StorageReadOpener = func(lc ipld.LinkContext, l ipld.Link) (io.Reader, error) {
 		r, err := h.lsys.StorageReadOpener(lc, l)
 		if err == nil {
-			log.Errorw("Failed to get block read opener", "err", err, "link", l)
+			// Found block read opener, so return it.
 			return r, nil
 		}
-		// get.
+		// Did not find block read opener, so fetch block via HTTP.
 		c := l.(cidlink.Link).Cid
 		if err := h.fetchBlock(ctx, c); err != nil {
 			log.Errorw("Failed to fetch block", "err", err, "cid", c)

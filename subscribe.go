@@ -180,26 +180,25 @@ func (ls *legSubscriber) watch(ctx context.Context, sub *pubsub.Subscription) {
 			return
 		}
 
-		// Run policy from pubsub message to see if exchange needs to be run.
-		//
-		// TODO: Change this to call callback to evaluate peer using policy
-		// callback provided to go-legs.
+		// Evaluate policy for pubsub message to see if this subscriber is handling it.
 		if ls.policy != nil {
 			var allow bool
 			ls.hndmtx.RLock()
 			allow, err = ls.policy(msg)
+			ls.hndmtx.RUnlock()
+
 			if err != nil {
 				log.Errorf("Error running policy: %v", err)
+				continue
 			}
-			ls.hndmtx.RUnlock()
 			if !allow {
-				log.Infof("Message from peer %s not allowed by legs policy", msg.GetFrom())
+				log.Debugf("Message from peer %s not for this subscriber", msg.GetFrom())
 				continue
 			}
 		}
 
-		log.Debugf("Pubsub message received. Policy says we are allowed to process")
 		src := msg.GetFrom()
+		log.Debugf("Pubsub message from %s received by subscriber", src)
 
 		// Decode cid and originator addresses from message.
 		m, err := decodeMessage(msg.GetData())
