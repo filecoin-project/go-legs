@@ -4,13 +4,11 @@ import (
 	"context"
 	"net"
 	"net/http"
-	"net/url"
 	"testing"
 	"time"
 
 	"github.com/filecoin-project/go-legs"
 	"github.com/filecoin-project/go-legs/httpsync"
-	maurl "github.com/filecoin-project/go-legs/httpsync/multiaddr"
 	"github.com/filecoin-project/go-legs/test"
 	"github.com/ipfs/go-cid"
 	"github.com/ipfs/go-datastore"
@@ -61,21 +59,10 @@ func TestManualSync(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	pubAddr := nl.Addr()
-	u, err := url.Parse("http://" + pubAddr.String())
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Log("HTTP publisher listening on", u.String())
-	mu, err := maurl.ToMA(u)
-	if err != nil {
-		t.Fatal(err)
-	}
-
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	cchan, err := bkr.Sync(ctx, srcHost.ID(), cid.Undef, nil, *mu)
+	cchan, err := bkr.Sync(ctx, srcHost.ID(), cid.Undef, nil, nlm)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -66,8 +66,8 @@ func (s *Sync) Close() error {
 	s.unsubEvents()
 
 	var err, errs error
-	// If tmpDir is non-empty, that means the Broker started the dtManager and
-	// it is ok to stop is and clean up the tmpDir.
+	// If tmpDir is non-empty, that means this Sync started the dtManager and
+	// it is ok to stop it and clean up the tmpDir.
 	if s.tmpDir != "" {
 		err = s.dtManager.Stop(context.Background())
 		if err != nil {

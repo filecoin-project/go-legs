@@ -58,7 +58,7 @@ func ExamplePublisher() {
 	log.Print("Publish 2:", lnk2.(cidlink.Link).Cid)
 }
 
-func ExampleSubscriber(ctx context.Context) {
+func ExampleBroker() {
 	dstHost, _ := libp2p.New(context.Background())
 
 	dstStore := dssync.MutexWrap(datastore.NewMapDatastore())
@@ -85,14 +85,9 @@ func ExampleSubscriber(ctx context.Context) {
 	watcher, cancelWatcher := bkr.OnSyncFinished()
 	defer cancelWatcher()
 
-	go func() {
-		for syncFin := range watcher {
-			fmt.Println("Finished sync to", syncFin.Cid, "with peer:", syncFin.PeerID)
-		}
-	}()
-
-	// Stop when context conceled
-	<-ctx.Done()
+	for syncFin := range watcher {
+		fmt.Println("Finished sync to", syncFin.Cid, "with peer:", syncFin.PeerID)
+	}
 }
 
 func makeLinkSystem(ds datastore.Batching) ipld.LinkSystem {

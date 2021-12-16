@@ -401,7 +401,6 @@ func newBrokerUpdateTest(lp legs.Publisher, bkr *legs.Broker, dstStore datastore
 	if withFailure {
 		select {
 		case <-time.After(3 * time.Second):
-			return assertBrokerLatestSyncEquals(bkr, peerID, expectedSync)
 		case changeEvent, open := <-watcher:
 			if !open {
 				return nil
@@ -423,19 +422,18 @@ func newBrokerUpdateTest(lp legs.Publisher, bkr *legs.Broker, dstStore datastore
 				return fmt.Errorf("data not in receiver store: %s", err)
 			}
 		}
-		return assertBrokerLatestSyncEquals(bkr, peerID, expectedSync)
 	}
-	return nil
+	return assertBrokerLatestSyncEquals(bkr, peerID, expectedSync)
 }
 
 func assertBrokerLatestSyncEquals(bkr *legs.Broker, peerID peer.ID, want cid.Cid) error {
 	latest := bkr.GetLatestSync(peerID)
 	if latest == nil {
-		errors.New("latest sync is nil")
+		return errors.New("latest sync is nil")
 	}
 	got := latest.(cidlink.Link)
 	if got.Cid != want {
-		fmt.Errorf("latestSync not updated correctly, got %s want %s", got, want)
+		return fmt.Errorf("latestSync not updated correctly, got %s want %s", got, want)
 	}
 	return nil
 }

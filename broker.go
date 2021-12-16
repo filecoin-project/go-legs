@@ -263,10 +263,9 @@ func (lb *Broker) doClose() error {
 // OnSyncFinished creates a channel that receives change notifications, and
 // adds that channel to the list of notification channels.
 //
-// Calling the returned cancel function removed the notification channel from
-// those the receive change notifications, and closes the channel to allow any
-// waiting goroutines to stop waiting on the channel.  For this reason, channel
-// readers should check for channel closure.
+// Calling the returned cancel function removes the notification channel from
+// the list of channels to be notified on changes, and it closes the channel to
+// allow any waiting goroutines to stop waiting on the channel.
 func (lb *Broker) OnSyncFinished() (<-chan SyncFinished, context.CancelFunc) {
 	// Channel is buffered to prevent distribute() from blocking if a reader is
 	// not reading the channel immediately.
@@ -320,8 +319,12 @@ func (lb *Broker) Sync(ctx context.Context, peerID peer.ID, c cid.Cid, sel ipld.
 		return nil, errors.New("empty peer id")
 	}
 
+	log := log.With("peer", peerID)
+
 	var err error
 	var syncer Syncer
+
+	log.Infow("Start sync", "cid", c)
 
 	// If publisher specified, then get URL for http sync, or add multiaddr to peerstore.
 	if publisher != nil {
@@ -359,11 +362,11 @@ func (lb *Broker) Sync(ctx context.Context, peerID peer.ID, c cid.Cid, sel ipld.
 			// Query the peer for the latest CID
 			c, err = syncer.GetHead(ctx)
 			if err != nil {
-				log.Errorw("Cannot get head for sync", "err", err, "peer", peerID)
+				log.Errorw("Cannot get head for sync", "err", err)
 				return
 			}
 
-			log.Debugw("Sync queried head CID", "peer", peerID, "cid", c)
+			log.Debugw("Sync queried head CID", "cid", c)
 			if sel == nil {
 				// Update the latestSync only if no CID and no selector given.
 				updateLatest = true
@@ -371,7 +374,7 @@ func (lb *Broker) Sync(ctx context.Context, peerID peer.ID, c cid.Cid, sel ipld.
 		}
 
 		if ctx.Err() != nil {
-			log.Errorw("Sync canceled", "err", ctx.Err(), "peer", peerID)
+			log.Errorw("Sync canceled", "err", ctx.Err())
 			return
 		}
 
@@ -387,7 +390,7 @@ func (lb *Broker) Sync(ctx context.Context, peerID peer.ID, c cid.Cid, sel ipld.
 		// Check for existing handler.  If none, create on if allowed.
 		hnd, err := lb.getOrCreateHandler(peerID, true)
 		if err != nil {
-			log.Errorw("Cannot sync", "err", err, "peer", peerID)
+			log.Errorw("Cannot sync", "err", err)
 			return
 		}
 
@@ -396,7 +399,7 @@ func (lb *Broker) Sync(ctx context.Context, peerID peer.ID, c cid.Cid, sel ipld.
 
 		err = hnd.handle(ctx, c, sel, wrapSel, updateLatest, syncer)
 		if err != nil {
-			log.Errorw("Cannot sync", "err", err, "peer", peerID)
+			log.Errorw("Cannot sync", "err", err)
 			return
 		}
 
