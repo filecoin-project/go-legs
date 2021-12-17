@@ -46,7 +46,7 @@ func (p *Publisher) Serve(host host.Host, topic string) error {
 		log.Errorf("Failed to listen to gostream on host %s with prpotocol ID %s", host.ID(), pid)
 		return err
 	}
-	log.Errorf("Serving gostream on host %s with prpotocol ID %s", host.ID(), pid)
+	log.Infow("Serving gostream", "host", host.ID(), "protocolID", pid)
 	return p.server.Serve(l)
 }
 

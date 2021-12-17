@@ -1,66 +1,78 @@
-legs 🦵
-===
+## legs 🦵
 
-Legs is a simplified interface for [go-data-transfer](https://github.com/filecoin-project/go-data-transfer),
+Legs is an interface for [go-data-transfer](https://github.com/filecoin-project/go-data-transfer),
 providing a 1:1 mechanism for maintaining a synchronized [IPLD dag](https://docs.ipld.io/) of data between
-a publisher and subscriber.
+a publisher and a subscriber's current state for that publisher.
 
-Usage
----
+## Usage
 
-Creating a legs publisher is as simple as creating a `LegTransport` and starting
-a publisher. `LegTransport` handles all the transport machinery to enable
-the instantiation of several publishers and subscribers in the same libp2p host:
+Typically an application will be either a provider or a subscriber, but may be both.
+
+### Publisher
+
+Create a legs publisher.  Update its root to cause it to publish.
 
 ```golang
-t, err := legs.MakeLegTransport(ctx, host, host, lsys, "legs/topic")
+pub, err :=  NewPublisher(host, dsstore, lsys, "/legs/topic")
 if err != nil {
 	panic(err)
 }
-publisher, err := legs.Publish(ctx, t)
 ...
 // Publish updated root.
-if err := publisher.UpdateRoot(ctx, lnk.(cidlink.Link).Cid); err != nil {
-	panic(err)
-}
-```
-
-A subscriber to the same "legs/topic" would be created similarly 
-```golang
-t, err := legs.MakeLegTransport(ctx, host, host, lsys, "legs/topic")
+err = publisher.UpdateRoot(ctx, lnk.(cidlink.Link).Cid)
 if err != nil {
 	panic(err)
 }
-subscriber, err := legs.NewSubscriber(ctx, t, policy)
 ```
-and can watch to changes via:
+
+### Subscriber
+
+The `Subscriber` handles subscribing to a topic, reading messages from the topic and tracking the state of each publisher.
+
+Create a `Subscriber`:
 
 ```golang
-subscriber, err := legs.Subscribe(ctx, dataStore, lp2pHost, "legs/topic")
-subscriptionWatcher, cncl := subscriber.OnChange()
-go watch(subscriptionWatcher)
+sub, err := legs.NewSubscriber(dstHost, dstStore, dstLnkS, "/legs/topic", nil)
+if err != nil {
+	panic(err)
+}
 
-func watch(notifications chan cid.Cid) {
+```
+Optionally, request notification of updates:
+
+```golang
+watcher, cancelWatcher := sub.OnSyncFinished()
+defer cancelWatcher()
+go watch(watcher)
+
+func watch(notifications <-chan legs.SyncFinished) {
     for {
-        newHead := <-notifications
+        syncFinished := <-notifications
         // newHead is now available in the local dataStore
     }
 }
 ```
 
-Subscribers can be created with a `PolicyHandler`. This policy is
-used to filter the exchanges and updates a subscriber will process.
-Subscribers started with `FilterPeerPolicy`, for instance, will only
-process (and thus exchange) updates from the specific peer specified
-in the policy.
+To shutdown a `Subscriber`, call its `Close()` method.
 
-Subscribers keep track of the latest head they've already synced
-to prevent from exchanging all the DAG from scratch in every update, downloading
-exclusively the part they're missing. This value is not persisted as part
-of the library. If you want to start a subscriber which has already
-partially synced with a provider you can use:
+A `Subscriber` can be created with a `AllowPeer` function.  This function determines if the `Subscriber` accepts or rejects messages from a publisher, when a message is received from a new publisher with whom a sync has not already been done.
+
+The `Subscriber` keeps track of the latest head for each publisher that it has synced. This avoids exchanging the whole DAG from scratch in every update and instead downloads only the part that has not been synced. This value is not persisted as part of the library. If you want to start a `Subscriber` which has already partially synced with a provider you can use:
 ```golang
-subscriber, err := legs.NewSubscriberPartiallySynced(ctx, t, policy, latestSync)
+sub, err := legs.NewSubscriber(dstHost, dstStore, dstLnkS, "/legs/topic", allowPeer)
+if err != nil {
+    panic(err)
+}
+// Set up partially synced publishers
+if err = brk.SetLatestSync(peerID1, lastSync1) ; err != nil {
+    panic(err)
+}
+if err = brk.SetLatestSync(peerID2, lastSync2) ; err != nil {
+    panic(err)
+}
+if err = brk.SetLatestSync(peerID3, lastSync3) ; err != nil {
+    panic(err)
+}
 ```
 
 License
