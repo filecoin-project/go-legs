@@ -23,7 +23,10 @@ import (
 	"github.com/multiformats/go-multicodec"
 )
 
-const waitForMeshTimeout = 4 * time.Second
+const (
+	waitForMeshTimeout = 5 * time.Second
+	publishTimeout     = 100 * time.Millisecond
+)
 
 // WaitForMeshWithMessage sets up a gossipsub network and sends a test message.
 // Blocks until all other hosts see the first host's message.
@@ -120,7 +123,11 @@ func WaitForMeshWithMessage(t *testing.T, topic string, hosts ...host.Host) []*p
 		t.Fatalf("Failed to publish: %v", err)
 	}
 
-	timeout := time.NewTicker(waitForMeshTimeout)
+	timeout := time.NewTimer(waitForMeshTimeout)
+	defer timeout.Stop()
+	pubTimeout := time.NewTimer(publishTimeout)
+	defer pubTimeout.Stop()
+
 	// If not all subscribers get the msg, let's resend the message until they
 	// get it or we timeout.
 	for {
@@ -131,11 +138,12 @@ func WaitForMeshWithMessage(t *testing.T, topic string, hosts ...host.Host) []*p
 		case <-timeout.C:
 			t.Fatalf("Mesh failed to startup")
 			return nil
-		case <-time.After(100 * time.Millisecond):
+		case <-pubTimeout.C:
 			err := tpc.Publish(context.Background(), []byte("hi"))
 			if err != nil {
 				fmt.Println("Failed to publish:", err)
 			}
+			pubTimeout.Reset(publishTimeout)
 		}
 	}
 }
