@@ -19,18 +19,18 @@ const (
 	updateTimeout = 1 * time.Second
 )
 
-func TestBrokerRoundTripSimple(t *testing.T) {
+func TestRoundTripSimple(t *testing.T) {
 	// Init legs publisher and subscriber
 	srcStore := dssync.MutexWrap(datastore.NewMapDatastore())
 	dstStore := dssync.MutexWrap(datastore.NewMapDatastore())
-	_, _, lp, bkr, err := brokerInitPubSub(t, srcStore, dstStore)
+	_, _, lp, sub, err := initPubSub(t, srcStore, dstStore)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer lp.Close()
-	defer bkr.Close()
+	defer sub.Close()
 
-	watcher, cncl := bkr.OnSyncFinished()
+	watcher, cncl := sub.OnSyncFinished()
 	defer cncl()
 
 	// Update root with item
@@ -57,7 +57,7 @@ func TestBrokerRoundTripSimple(t *testing.T) {
 	}
 }
 
-func TestBrokerRoundTrip(t *testing.T) {
+func TestRoundTrip(t *testing.T) {
 	// Init legs publisher and subscriber
 	srcStore1 := dssync.MutexWrap(datastore.NewMapDatastore())
 	srcHost1 := test.MkTestHost()
@@ -86,15 +86,15 @@ func TestBrokerRoundTrip(t *testing.T) {
 	}
 	defer pub2.Close()
 
-	bkr, err := legs.NewBroker(dstHost, dstStore, dstLnkS, testTopic, nil, legs.Topic(topics[2]))
+	sub, err := legs.NewSubscriber(dstHost, dstStore, dstLnkS, testTopic, nil, legs.Topic(topics[2]))
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer bkr.Close()
+	defer sub.Close()
 
-	watcher1, cncl1 := bkr.OnSyncFinished()
+	watcher1, cncl1 := sub.OnSyncFinished()
 	defer cncl1()
-	watcher2, cncl2 := bkr.OnSyncFinished()
+	watcher2, cncl2 := sub.OnSyncFinished()
 	defer cncl2()
 
 	// Update root on publisher one with item
@@ -141,20 +141,20 @@ func waitForSync(t *testing.T, logPrefix string, store *dssync.MutexDatastore, e
 
 }
 
-func TestCloseBroker(t *testing.T) {
+func TestCloseSubscriber(t *testing.T) {
 	st := dssync.MutexWrap(datastore.NewMapDatastore())
 	sh := test.MkTestHost()
 	lsys := test.MkLinkSystem(st)
 
-	bkr, err := legs.NewBroker(sh, st, lsys, testTopic, nil)
+	sub, err := legs.NewSubscriber(sh, st, lsys, testTopic, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	watcher, cncl := bkr.OnSyncFinished()
+	watcher, cncl := sub.OnSyncFinished()
 	defer cncl()
 
-	err = bkr.Close()
+	err = sub.Close()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -168,7 +168,7 @@ func TestCloseBroker(t *testing.T) {
 		t.Fatal("timed out waiting for watcher to close")
 	}
 
-	err = bkr.Close()
+	err = sub.Close()
 	if err != nil {
 		t.Fatal(err)
 	}

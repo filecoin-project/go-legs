@@ -45,11 +45,11 @@ func TestManualSync(t *testing.T) {
 	dstLinkSys := test.MkLinkSystem(dstStore)
 	dstHost := test.MkTestHost()
 
-	bkr, err := legs.NewBroker(dstHost, dstStore, dstLinkSys, testTopic, nil)
+	sub, err := legs.NewSubscriber(dstHost, dstStore, dstLinkSys, testTopic, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer bkr.Close()
+	defer sub.Close()
 
 	rootLnk, err := test.Store(srcStore, basicnode.NewString("hello world"))
 	if err != nil {
@@ -62,7 +62,7 @@ func TestManualSync(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	cchan, err := bkr.Sync(ctx, srcHost.ID(), cid.Undef, nil, nlm)
+	cchan, err := sub.Sync(ctx, srcHost.ID(), cid.Undef, nil, nlm)
 	if err != nil {
 		t.Fatal(err)
 	}

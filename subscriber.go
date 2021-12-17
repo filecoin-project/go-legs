@@ -35,19 +35,18 @@ const defaultAddrTTL = 48 * time.Hour
 // pre-allocated here as it may occur frequently.
 var errSourceNotAllowed = errors.New("message source not allowed")
 
-// AllowPeerFunc is the function signature of a function given to Broker that
-// the broker uses to determine whether to allow or reject messages originating
-// from peer passed into the function.  Returning true indicates that messages
-// from the peer are allowed, and false indicated they should be rejected.
-// Returning an error indicates that there was a problem evaluating the peer,
-// and results in the messages being rejected.
+// AllowPeerFunc is the signature of a function given to Subscriber that
+// determines whether to allow or reject messages originating from a peer
+// passed into the function.  Returning true or false indicates that messages
+// from that peer are allowed rejected, respectively.  Returning an error
+// indicates that there was a problem evaluating the function, and results in
+// the messages being rejected.
 type AllowPeerFunc func(peerID peer.ID) (bool, error)
 
-// Broker is a message broker for pubsub messages.  Broker creates a single
-// pubsub subscriber that receives messages from a gossip pubsub topic, and
-// creates a stateful message handler for each message source peer.  An
-// optional externally-defined AllowPeerFunc determines whether to allow or
-// deny handling messages from specific peers.
+// Subscriber creates a single pubsub subscriber that receives messages from a
+// gossip pubsub topic, and creates a stateful message handler for each message
+// source peer.  An optional externally-defined AllowPeerFunc determines
+// whether to allow or deny messages from specific peers.
 //
 // Messages from separate peers are handled concurrently, and multiple messages
 // from the same peer are handled serially.  If a handler is busy handling a
@@ -55,7 +54,7 @@ type AllowPeerFunc func(peerID peer.ID) (bool, error)
 // replaces the previous unhandled message to avoid having to maintain queues
 // of messages.  Handlers do not have persistent goroutines, but start a new
 // goroutine to handle a single message.
-type Broker struct {
+type Subscriber struct {
 	// dss captures the default selector sequence passed to
 	// ExploreRecursiveWithStopNode.
 	dss  ipld.Node
@@ -80,7 +79,7 @@ type Broker struct {
 	outEventsChans []chan SyncFinished
 	outEventsMutex sync.Mutex
 
-	// closing signals that the Broker is closing.
+	// closing signals that the Subscriber is closing.
 	closing chan struct{}
 	// cancelps cancels pubsub.
 	cancelps context.CancelFunc
@@ -104,9 +103,9 @@ type SyncFinished struct {
 
 // handler holds state that is specific to a peer
 type handler struct {
-	broker *Broker
-	// distEvents is used to communicate a syncDone event back to the Broker
-	// for distribution to OnSyncFinished readers.
+	subscriber *Subscriber
+	// distEvents is used to communicate a SyncFinished event back to the
+	// Subscriber for distribution to OnSyncFinished readers.
 	distEvents chan<- SyncFinished
 	latestSync ipld.Link
 	msgChan    chan cid.Cid
@@ -116,8 +115,8 @@ type handler struct {
 	syncMutex sync.Mutex
 }
 
-// NewBroker creates a new Broker that process pubsub messages.
-func NewBroker(host host.Host, ds datastore.Batching, lsys ipld.LinkSystem, topic string, dss ipld.Node, options ...Option) (*Broker, error) {
+// NewSubscriber creates a new Subscriber that process pubsub messages.
+func NewSubscriber(host host.Host, ds datastore.Batching, lsys ipld.LinkSystem, topic string, dss ipld.Node, options ...Option) (*Subscriber, error) {
 	cfg := config{
 		addrTTL: defaultAddrTTL,
 	}
@@ -149,7 +148,7 @@ func NewBroker(host host.Host, ds datastore.Batching, lsys ipld.LinkSystem, topi
 		return nil, err
 	}
 
-	lb := &Broker{
+	lb := &Subscriber{
 		dss:  dss,
 		host: host,
 		lsys: lsys,
@@ -179,9 +178,9 @@ func NewBroker(host host.Host, ds datastore.Batching, lsys ipld.LinkSystem, topi
 
 // GetLatestSync returns the latest synced CID for the specified peer. If there
 // is not handler for the peer, then nil is returned.  This does not mean that
-// no data is synced with that peer, it means that the broker does not know
+// no data is synced with that peer, it means that the Subscriber does not know
 // about it.  Calling Sync() first may be necessary.
-func (lb *Broker) GetLatestSync(peerID peer.ID) ipld.Link {
+func (lb *Subscriber) GetLatestSync(peerID peer.ID) ipld.Link {
 	lb.handlersMutex.Lock()
 	hnd, ok := lb.handlers[peerID]
 	if !ok {
@@ -196,7 +195,7 @@ func (lb *Broker) GetLatestSync(peerID peer.ID) ipld.Link {
 // SetLatestSync sets the latest synced CID for a specified peer.  If there is
 // no handler for the peer, then one is created without consulting any
 // AllowPeerFunc.
-func (lb *Broker) SetLatestSync(peerID peer.ID, latestSync cid.Cid) error {
+func (lb *Subscriber) SetLatestSync(peerID peer.ID, latestSync cid.Cid) error {
 	if latestSync == cid.Undef {
 		return errors.New("cannot set latest sync to undefined value")
 	}
@@ -209,18 +208,18 @@ func (lb *Broker) SetLatestSync(peerID peer.ID, latestSync cid.Cid) error {
 	return nil
 }
 
-// SetAllowPeer configures Broker with a function to evaluate whether to allow
-// or reject messages from the specified peer.  Setting nil removes any
-// filtering and allows messages from all peers.  This replaces any previously
-// configured AllowPeerFunc.
-func (lb *Broker) SetAllowPeer(allowPeer AllowPeerFunc) {
+// SetAllowPeer configures Subscriber with a function to evaluate whether to
+// allow or reject messages from a peer.  Setting nil removes any filtering and
+// allows messages from all peers.  Calling SetAllowPeer replaces any
+// previously configured AllowPeerFunc.
+func (lb *Subscriber) SetAllowPeer(allowPeer AllowPeerFunc) {
 	lb.handlersMutex.Lock()
 	defer lb.handlersMutex.Unlock()
 	lb.allowPeer = allowPeer
 }
 
-// Close shuts down the broker.
-func (lb *Broker) Close() error {
+// Close shuts down the Subscriber.
+func (lb *Subscriber) Close() error {
 	var err error
 	lb.closeOnce.Do(func() {
 		err = lb.doClose()
@@ -228,7 +227,7 @@ func (lb *Broker) Close() error {
 	return err
 }
 
-func (lb *Broker) doClose() error {
+func (lb *Subscriber) doClose() error {
 	lb.psub.Cancel()
 
 	var err, errs error
@@ -236,7 +235,7 @@ func (lb *Broker) doClose() error {
 		errs = multierror.Append(errs, err)
 	}
 
-	// If Broker owns the pubsub topic, then close it.
+	// If Subscriber owns the pubsub topic, then close it.
 	if lb.topic != nil {
 		if err = lb.topic.Close(); err != nil {
 			log.Errorf("Failed to close pubsub topic: %s", err)
@@ -265,8 +264,8 @@ func (lb *Broker) doClose() error {
 //
 // Calling the returned cancel function removes the notification channel from
 // the list of channels to be notified on changes, and it closes the channel to
-// allow any waiting goroutines to stop waiting on the channel.
-func (lb *Broker) OnSyncFinished() (<-chan SyncFinished, context.CancelFunc) {
+// allow any reading goroutines to stop waiting on the channel.
+func (lb *Subscriber) OnSyncFinished() (<-chan SyncFinished, context.CancelFunc) {
 	// Channel is buffered to prevent distribute() from blocking if a reader is
 	// not reading the channel immediately.
 	ch := make(chan SyncFinished, 1)
@@ -306,15 +305,15 @@ func (lb *Broker) OnSyncFinished() (<-chan SyncFinished, context.CancelFunc) {
 // previously been synced.
 //
 // The selector sequence, selSec, can optionally be specified to customize the
-// selection sequence during traversal.  If unspecified, the broker's
-// default selector sequence is used.
+// selection sequence during traversal.  If unspecified, the default selector
+// sequence is used.
 //
 // Note that the selector sequence is wrapped with a selector logic that will
 // stop traversal when the latest synced link is reached. Therefore, it must
 // only specify the selection sequence itself.
 //
 // See: ExploreRecursiveWithStopNode.
-func (lb *Broker) Sync(ctx context.Context, peerID peer.ID, c cid.Cid, sel ipld.Node, publisher multiaddr.Multiaddr) (<-chan SyncFinished, error) {
+func (lb *Subscriber) Sync(ctx context.Context, peerID peer.ID, c cid.Cid, sel ipld.Node, publisher multiaddr.Multiaddr) (<-chan SyncFinished, error) {
 	if peerID == "" {
 		return nil, errors.New("empty peer id")
 	}
@@ -415,7 +414,7 @@ func (lb *Broker) Sync(ctx context.Context, peerID peer.ID, c cid.Cid, sel ipld.
 // distributeEvents reads a SyncFinished, sent by a peer handler, and copies
 // the even to all channels in outEventsChans.  This delivers the SyncFinished
 // to all OnSyncFinished channel readers.
-func (lb *Broker) distributeEvents() {
+func (lb *Subscriber) distributeEvents() {
 	for event := range lb.inEvents {
 		if !event.Cid.Defined() {
 			panic("SyncFinished event with undefined cid")
@@ -430,7 +429,7 @@ func (lb *Broker) distributeEvents() {
 }
 
 // getOrCreateHandler creates a handler for a specific peer
-func (lb *Broker) getOrCreateHandler(peerID peer.ID, force bool) (*handler, error) {
+func (lb *Subscriber) getOrCreateHandler(peerID peer.ID, force bool) (*handler, error) {
 	lb.handlersMutex.Lock()
 	defer lb.handlersMutex.Unlock()
 
@@ -453,7 +452,7 @@ func (lb *Broker) getOrCreateHandler(peerID peer.ID, force bool) (*handler, erro
 
 	log.Infow("Message sender allowed, creating new handler", "peer", peerID)
 	hnd = &handler{
-		broker:     lb,
+		subscriber: lb,
 		msgChan:    make(chan cid.Cid, 1),
 		peerID:     peerID,
 		distEvents: lb.inEvents,
@@ -468,12 +467,12 @@ func (lb *Broker) getOrCreateHandler(peerID peer.ID, force bool) (*handler, erro
 // message.  If the handler does not yet exist, then the allowPeer callback is
 // consulted to determine if the peer's messages are allowed.  If allowed, a
 // new handler is created.  Otherwise, the message is ignored.
-func (lb *Broker) watch(ctx context.Context) {
+func (lb *Subscriber) watch(ctx context.Context) {
 	for {
 		msg, err := lb.psub.Next(ctx)
 		if err != nil {
 			if ctx.Err() != nil || err == pubsub.ErrSubscriptionCancelled {
-				// This is a normal result of shutting down the broker.
+				// This is a normal result of shutting down the Subscriber.
 				log.Debug("Canceled watching pubsub subscription")
 			} else {
 				log.Errorf("Error reading from pubsub: %s", err)
@@ -524,18 +523,18 @@ func (lb *Broker) watch(ctx context.Context) {
 
 // handleAsync starts a goroutine to process the latest message received over
 // pubsub.
-func (h *handler) handleAsync(ctx context.Context, c cid.Cid, ss ipld.Node) {
+func (h *handler) handleAsync(ctx context.Context, nextCid cid.Cid, ss ipld.Node) {
 	// Remove any previous message and replace it with the most recent.
 	select {
-	case oldmsg := <-h.msgChan:
-		log.Info("Message %s replaced by %s", oldmsg, c)
+	case prevCid := <-h.msgChan:
+		log.Infow("Penging update replaced by new", "previous_cid", prevCid, "new_cid", nextCid)
 	default:
 	}
 
 	// Put new message on channel.  This is necessary so that if multiple
 	// messages arrive while this handler is already syncing, the messages are
 	// handled in order, regardless of goroutine scheduling.
-	h.msgChan <- c
+	h.msgChan <- nextCid
 
 	go func() {
 		// Wait for this handler to become available.
@@ -545,7 +544,7 @@ func (h *handler) handleAsync(ctx context.Context, c cid.Cid, ss ipld.Node) {
 		select {
 		case <-ctx.Done():
 		case c := <-h.msgChan:
-			err := h.handle(ctx, c, ss, true, true, h.broker.dtSync.NewSyncer(h.peerID, h.broker.topicName))
+			err := h.handle(ctx, c, ss, true, true, h.subscriber.dtSync.NewSyncer(h.peerID, h.subscriber.topicName))
 			if err != nil {
 				// Log error for now.
 				log.Errorw("Cannot process message", "err", err, "peer", h.peerID)
@@ -562,14 +561,14 @@ func (h *handler) handleAsync(ctx context.Context, c cid.Cid, ss ipld.Node) {
 // handle processes a message from the peer that the handler is responsible for.
 // The caller is responsible for ensuring that this is called while h.syncMutex
 // is locked.
-func (h *handler) handle(ctx context.Context, c cid.Cid, sel ipld.Node, wrapSel, updateLatest bool, syncer Syncer) error {
+func (h *handler) handle(ctx context.Context, nextCid cid.Cid, sel ipld.Node, wrapSel, updateLatest bool, syncer Syncer) error {
 	if wrapSel {
 		sel = ExploreRecursiveWithStopNode(selector.RecursionLimitNone(), sel, h.latestSync)
 	}
 
-	log.Debugw("Starting data channel for message source", "cid", c, "latest_sync", h.latestSync, "source_peer", h.peerID)
+	log.Debugw("Starting data channel for message source", "cid", nextCid, "latest_sync", h.latestSync, "source_peer", h.peerID)
 
-	err := syncer.Sync(ctx, c, sel)
+	err := syncer.Sync(ctx, nextCid, sel)
 	if err != nil {
 		return err
 	}
@@ -582,12 +581,12 @@ func (h *handler) handle(ctx context.Context, c cid.Cid, sel ipld.Node, wrapSel,
 	// NOTE: This is not persisted anywhere. Is the top-level user's
 	// responsibility to persist if needed to initialize a
 	// partiallySynced subscriber.
-	h.latestSync = cidlink.Link{Cid: c}
-	log.Infow("Updating latest sync", "sync_cid", c, "peer", h.peerID)
+	h.latestSync = cidlink.Link{Cid: nextCid}
+	log.Infow("Updating latest sync", "sync_cid", nextCid, "peer", h.peerID)
 
-	// Tell the broker to distribute SyncFinished to all notification
+	// Tell the Subscriber to distribute SyncFinished to all notification
 	// destinations.
-	h.distEvents <- SyncFinished{Cid: c, PeerID: h.peerID}
+	h.distEvents <- SyncFinished{Cid: nextCid, PeerID: h.peerID}
 
 	return nil
 }

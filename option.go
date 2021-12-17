@@ -9,7 +9,7 @@ import (
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 )
 
-// config contains all options for configuring LegBroker.
+// config contains all options for configuring Subscriber.
 type config struct {
 	addrTTL   time.Duration
 	allowPeer AllowPeerFunc

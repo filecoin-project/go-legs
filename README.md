@@ -27,12 +27,12 @@ if err != nil {
 
 ### Subscriber
 
-The `Broker` handles subscribing to a topic, reading messages from the topic and routing the messages to the handler that is responsible for keeping track of a publisher.
+The `Subscriber` handles subscribing to a topic, reading messages from the topic and tracking the state of each publisher.
 
-Create a `Broker`:
+Create a `Subscriber`:
 
 ```golang
-bkr, err := legs.NewBroker(dstHost, dstStore, dstLnkS, "/legs/topic", nil)
+sub, err := legs.NewSubscriber(dstHost, dstStore, dstLnkS, "/legs/topic", nil)
 if err != nil {
 	panic(err)
 }
@@ -41,7 +41,7 @@ if err != nil {
 Optionally, request notification of updates:
 
 ```golang
-watcher, cancelWatcher := bkr.OnSyncFinished()
+watcher, cancelWatcher := sub.OnSyncFinished()
 defer cancelWatcher()
 go watch(watcher)
 
@@ -53,14 +53,13 @@ func watch(notifications <-chan legs.SyncFinished) {
 }
 ```
 
-To shutdown a `Broker`, call its `Close()` method.
+To shutdown a `Subscriber`, call its `Close()` method.
 
-Brokers can be created with a `AllowPeer` function.  This function determines if the broker handles messages from a publisher, when a message is received from a new publisher with whom a sync has not already been done.
+A `Subscriber` can be created with a `AllowPeer` function.  This function determines if the `Subscriber` accepts or rejects messages from a publisher, when a message is received from a new publisher with whom a sync has not already been done.
 
-Brokers keep track of the latest head for each publisher that it has synced to avoid exchanging the whole DAG from scratch in every update, instead downloading only the part that has not been synced. This value is not persisted as part
-of the library. If you want to start a `Broker` which has already partially synced with a provider you can use:
+The `Subscriber` keeps track of the latest head for each publisher that it has synced. This avoids exchanging the whole DAG from scratch in every update and instead downloads only the part that has not been synced. This value is not persisted as part of the library. If you want to start a `Subscriber` which has already partially synced with a provider you can use:
 ```golang
-bkr, err := legs.NewBroker(dstHost, dstStore, dstLnkS, "/legs/topic", allowPeer)
+sub, err := legs.NewSubscriber(dstHost, dstStore, dstLnkS, "/legs/topic", allowPeer)
 if err != nil {
     panic(err)
 }

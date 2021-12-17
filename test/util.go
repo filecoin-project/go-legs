@@ -32,7 +32,7 @@ func WaitForMeshWithMessage(t *testing.T, topic string, hosts ...host.Host) []*p
 	meshFormed := false
 	defer func() {
 		if meshFormed {
-			fmt.Println("Mesh formed in", time.Since(now))
+			t.Log("Mesh formed in", time.Since(now))
 		}
 	}()
 

@@ -58,7 +58,7 @@ func ExamplePublisher() {
 	log.Print("Publish 2:", lnk2.(cidlink.Link).Cid)
 }
 
-func ExampleBroker() {
+func ExampleSubscriber() {
 	dstHost, _ := libp2p.New(context.Background())
 
 	dstStore := dssync.MutexWrap(datastore.NewMapDatastore())
@@ -67,13 +67,13 @@ func ExampleBroker() {
 	srcHost.Peerstore().AddAddrs(dstHost.ID(), dstHost.Addrs(), time.Hour)
 	dstHost.Peerstore().AddAddrs(srcHost.ID(), srcHost.Addrs(), time.Hour)
 
-	bkr, err := legs.NewBroker(dstHost, dstStore, dstLnkSys, "/indexer/ingest/testnet", nil)
+	sub, err := legs.NewSubscriber(dstHost, dstStore, dstLnkSys, "/indexer/ingest/testnet", nil)
 	if err != nil {
 		panic(err)
 	}
-	defer bkr.Close()
+	defer sub.Close()
 
-	// Connections must be made after Broker is created, because the
+	// Connections must be made after Subscriber is created, because the
 	// gossip pubsub must be created before connections are made.  Otherwise,
 	// the connecting hosts will not see the destination host has pubsub and
 	// messages will not get published.
@@ -82,7 +82,7 @@ func ExampleBroker() {
 		panic(err)
 	}
 
-	watcher, cancelWatcher := bkr.OnSyncFinished()
+	watcher, cancelWatcher := sub.OnSyncFinished()
 	defer cancelWatcher()
 
 	for syncFin := range watcher {
