@@ -3,7 +3,9 @@ package legs_test
 import (
 	"context"
 	"io/ioutil"
+	"log"
 	"os"
+	"runtime"
 	"testing"
 	"time"
 
@@ -25,6 +27,16 @@ import (
 	"github.com/libp2p/go-libp2p-core/host"
 	"github.com/libp2p/go-libp2p-core/peer"
 )
+
+func TestMain(m *testing.M) {
+	if runtime.GOARCH == "386" {
+		log.Println("Skipping tests, cannot use GOARCH=386")
+		return
+	}
+
+	// Run tests.
+	os.Exit(m.Run())
+}
 
 func initPubSub(t *testing.T, srcStore, dstStore datastore.Batching) (host.Host, host.Host, legs.Publisher, *legs.Subscriber, error) {
 	srcHost := test.MkTestHost()
