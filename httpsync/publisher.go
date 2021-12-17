@@ -2,7 +2,6 @@ package httpsync
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"io"
 	"net"
@@ -93,13 +92,23 @@ func (p *publisher) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		// serve the
 		p.rl.RLock()
 		defer p.rl.RUnlock()
-		out, err := json.Marshal(p.root.String())
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			log.Errorw("Failed to serve root", "err", err)
-		} else {
-			_, _ = w.Write(out)
+
+		if p.privKey == nil {
+			http.Error(w, "Server not initialized", http.StatusInternalServerError)
+			log.Errorw("Failed to load private key to sign head request")
+			return
 		}
+
+		headMsg := &HeadMsg{
+			CidStr: p.root.String(),
+		}
+		marshalledMsg, err := headMsg.SignedEnvelope(p.privKey)
+		if err != nil {
+			http.Error(w, "Failed to encode", http.StatusInternalServerError)
+			log.Errorw("Failed to serve root", "err", err)
+		}
+
+		_, _ = w.Write(marshalledMsg)
 		return
 	}
 	// interpret `ask` as a CID to serve.

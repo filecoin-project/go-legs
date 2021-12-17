@@ -2,6 +2,8 @@ package legs_test
 
 import (
 	"context"
+	"crypto/rand"
+	"strings"
 	"testing"
 	"time"
 
@@ -11,24 +13,72 @@ import (
 	"github.com/ipfs/go-cid"
 	"github.com/ipfs/go-datastore"
 	dssync "github.com/ipfs/go-datastore/sync"
+	"github.com/ipld/go-ipld-prime/linking"
 	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
 	"github.com/ipld/go-ipld-prime/node/basicnode"
+	"github.com/libp2p/go-libp2p"
+	ic "github.com/libp2p/go-libp2p-core/crypto"
+	"github.com/libp2p/go-libp2p-core/host"
 	"github.com/libp2p/go-libp2p-core/peer"
+	"github.com/multiformats/go-multiaddr"
 )
 
-func TestManualSync(t *testing.T) {
-	srcHost := test.MkTestHost()
+type httpTestEnv struct {
+	srcHost    host.Host
+	dstHost    host.Host
+	pub        legs.Publisher
+	sub        *legs.Subscriber
+	srcStore   *dssync.MutexDatastore
+	srcLinkSys linking.LinkSystem
+	dstStore   *dssync.MutexDatastore
+	pubAddr    multiaddr.Multiaddr
+}
+
+func setupPublisherSubscriber(t *testing.T, subscriberOptions []legs.Option) httpTestEnv {
+	srcPrivKey, _, err := ic.GenerateECDSAKeyPair(rand.Reader)
+	if err != nil {
+		t.Fatal("Err generarting private key", err)
+	}
+
+	srcHost = test.MkTestHost(libp2p.Identity(srcPrivKey))
 	srcStore := dssync.MutexWrap(datastore.NewMapDatastore())
-	srcSys := test.MkLinkSystem(srcStore)
-	pub, err := httpsync.NewPublisher("127.0.0.1:0", srcSys, srcHost.ID(), nil)
+	srcLinkSys := test.MkLinkSystem(srcStore)
+	httpPub, err := httpsync.NewPublisher("127.0.0.1:0", srcLinkSys, srcHost.ID(), srcPrivKey)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer pub.Close()
+	t.Cleanup(func() {
+		httpPub.Close()
+	})
+	pub := httpPub
 
 	dstStore := dssync.MutexWrap(datastore.NewMapDatastore())
 	dstLinkSys := test.MkLinkSystem(dstStore)
 	dstHost := test.MkTestHost()
+
+	sub, err := legs.NewSubscriber(dstHost, dstStore, dstLinkSys, testTopic, nil, subscriberOptions...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		sub.Close()
+	})
+
+	httpPub.Address()
+
+	return httpTestEnv{
+		srcHost:    srcHost,
+		dstHost:    dstHost,
+		pub:        pub,
+		sub:        sub,
+		srcStore:   srcStore,
+		srcLinkSys: srcLinkSys,
+		dstStore:   dstStore,
+		pubAddr:    httpPub.Address(),
+	}
+}
+
+func TestManualSync(t *testing.T) {
 
 	blocksSeenByHook := make(map[cid.Cid]struct{})
 	blockHook := func(p peer.ID, c cid.Cid) {
@@ -36,24 +86,20 @@ func TestManualSync(t *testing.T) {
 		t.Log("http block hook got", c, "from", p)
 	}
 
-	sub, err := legs.NewSubscriber(dstHost, dstStore, dstLinkSys, testTopic, nil, legs.BlockHook(blockHook))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer sub.Close()
+	te := setupPublisherSubscriber(t, []legs.Option{legs.BlockHook(blockHook)})
 
-	rootLnk, err := test.Store(srcStore, basicnode.NewString("hello world"))
+	rootLnk, err := test.Store(te.srcStore, basicnode.NewString("hello world"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := pub.UpdateRoot(context.Background(), rootLnk.(cidlink.Link).Cid); err != nil {
+	if err := te.pub.UpdateRoot(context.Background(), rootLnk.(cidlink.Link).Cid); err != nil {
 		t.Fatal(err)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	syncCid, err := sub.Sync(ctx, srcHost.ID(), cid.Undef, nil, pub.Address())
+	syncCid, err := te.sub.Sync(ctx, te.srcHost.ID(), cid.Undef, nil, te.pubAddr)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -68,38 +114,52 @@ func TestManualSync(t *testing.T) {
 	}
 }
 
-func TestSyncFnHttp(t *testing.T) {
-	srcHost := test.MkTestHost()
-	srcStore := dssync.MutexWrap(datastore.NewMapDatastore())
-	srcLnkS := test.MkLinkSystem(srcStore)
+func TestSyncHttpFailsUnexpectedPeer(t *testing.T) {
+	te := setupPublisherSubscriber(t, nil)
 
-	dstHost := test.MkTestHost()
-	dstStore := dssync.MutexWrap(datastore.NewMapDatastore())
-	dstLnkS := test.MkLinkSystem(dstStore)
-
-	pub, err := httpsync.NewPublisher("127.0.0.1:0", srcLnkS, srcHost.ID(), nil)
+	rootLnk, err := test.Store(te.srcStore, basicnode.NewString("hello world"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer pub.Close()
+	if err := te.pub.UpdateRoot(context.Background(), rootLnk.(cidlink.Link).Cid); err != nil {
+		t.Fatal(err)
+	}
 
+	ctx, cancel := context.WithTimeout(context.Background(), updateTimeout)
+
+	defer cancel()
+	_, otherPubKey, err := ic.GenerateECDSAKeyPair(rand.Reader)
+	if err != nil {
+		t.Fatal("failed to make another peerid")
+	}
+	otherPeerID, err := peer.IDFromPublicKey(otherPubKey)
+	if err != nil {
+		t.Fatal("failed to make another peerid")
+	}
+
+	// This fails because the head msg is signed by srcHost.ID(), but we are asking this to check if it's signed by otherPeerID.
+	_, err = te.sub.Sync(ctx, otherPeerID, cid.Undef, nil, te.pubAddr)
+	if err == nil {
+		t.Fatalf("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "unexpected peer") {
+		t.Fatalf("expected error to contain the string 'unexpected peer', got %s", err.Error())
+	}
+}
+
+func TestSyncFnHttp(t *testing.T) {
 	var blockHookCalls int
 	blocksSeenByHook := make(map[cid.Cid]struct{})
 	blockHook := func(_ peer.ID, c cid.Cid) {
 		blockHookCalls++
 		blocksSeenByHook[c] = struct{}{}
 	}
-
-	sub, err := legs.NewSubscriber(dstHost, dstStore, dstLnkS, testTopic, nil, legs.BlockHook(blockHook))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer sub.Close()
+	te := setupPublisherSubscriber(t, []legs.Option{legs.BlockHook(blockHook)})
 
 	// Store the whole chain in source node
-	chainLnks := test.MkChain(srcLnkS, true)
+	chainLnks := test.MkChain(te.srcLinkSys, true)
 
-	watcher, cancelWatcher := sub.OnSyncFinished()
+	watcher, cancelWatcher := te.sub.OnSyncFinished()
 	defer cancelWatcher()
 
 	// Try to sync with a non-existing cid to chack that sync returns with err,
@@ -107,9 +167,12 @@ func TestSyncFnHttp(t *testing.T) {
 	cids, _ := test.RandomCids(1)
 	ctx, syncncl := context.WithTimeout(context.Background(), time.Second)
 	defer syncncl()
-	syncCid, err := sub.Sync(ctx, srcHost.ID(), cids[0], nil, srcHost.Addrs()[0])
+	syncCid, err := te.sub.Sync(ctx, te.srcHost.ID(), cids[0], nil, te.pubAddr)
 	if err == nil {
 		t.Fatal("expected error when no content to sync")
+	}
+	if !strings.Contains(err.Error(), "failed to fetch requested block") {
+		t.Fatalf("expected error to contain the string 'failed to fetch requested block', got %s", err.Error())
 	}
 	syncncl()
 
@@ -121,16 +184,18 @@ func TestSyncFnHttp(t *testing.T) {
 
 	// Assert the latestSync is updated by explicit sync when cid and selector are unset.
 	newHead := chainLnks[0].(cidlink.Link).Cid
-	if err := pub.UpdateRoot(context.Background(), newHead); err != nil {
+	if err := te.pub.UpdateRoot(context.Background(), newHead); err != nil {
 		t.Fatal(err)
 	}
 
 	lnk := chainLnks[1]
 
+	curLatestSync := te.sub.GetLatestSync(te.srcHost.ID())
+
 	// Sync with publisher via HTTP.
 	ctx, syncncl = context.WithTimeout(context.Background(), updateTimeout)
 	defer syncncl()
-	syncCid, err = sub.Sync(ctx, srcHost.ID(), lnk.(cidlink.Link).Cid, nil, pub.Address())
+	syncCid, err = te.sub.Sync(ctx, te.srcHost.ID(), lnk.(cidlink.Link).Cid, nil, te.pubAddr)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -138,7 +203,7 @@ func TestSyncFnHttp(t *testing.T) {
 	if !syncCid.Equals(lnk.(cidlink.Link).Cid) {
 		t.Fatalf("sync'd cid unexpected %s vs %s", syncCid, lnk)
 	}
-	if _, err := dstStore.Get(datastore.NewKey(syncCid.String())); err != nil {
+	if _, err := te.dstStore.Get(datastore.NewKey(syncCid.String())); err != nil {
 		t.Fatalf("data not in receiver store: %v", err)
 	}
 	syncncl()
@@ -152,20 +217,20 @@ func TestSyncFnHttp(t *testing.T) {
 	}
 
 	// Assert the latestSync is not updated by explicit sync when cid is set
-	if sub.GetLatestSync(srcHost.ID()) != nil {
+	if te.sub.GetLatestSync(te.srcHost.ID()) != nil && assertLatestSyncEquals(te.sub, te.srcHost.ID(), curLatestSync.(cidlink.Link).Cid) != nil {
 		t.Fatal("Sync should not update latestSync")
 	}
 
 	ctx, syncncl = context.WithTimeout(context.Background(), updateTimeout)
 	defer syncncl()
-	syncCid, err = sub.Sync(ctx, srcHost.ID(), cid.Undef, nil, pub.Address())
+	syncCid, err = te.sub.Sync(ctx, te.srcHost.ID(), cid.Undef, nil, te.pubAddr)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !syncCid.Equals(newHead) {
 		t.Fatalf("sync'd cid unexpected %s vs %s", syncCid, lnk)
 	}
-	if _, err := dstStore.Get(datastore.NewKey(syncCid.String())); err != nil {
+	if _, err := te.dstStore.Get(datastore.NewKey(syncCid.String())); err != nil {
 		t.Fatalf("data not in receiver store: %v", err)
 	}
 	syncncl()
@@ -183,7 +248,7 @@ func TestSyncFnHttp(t *testing.T) {
 	}
 	cancelWatcher()
 
-	err = assertLatestSyncEquals(sub, srcHost.ID(), newHead)
+	err = assertLatestSyncEquals(te.sub, te.srcHost.ID(), newHead)
 	if err != nil {
 		t.Fatal(err)
 	}

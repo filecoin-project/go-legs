@@ -218,8 +218,8 @@ func Store(srcStore datastore.Batching, n ipld.Node) (ipld.Link, error) {
 	return lsys.Store(ipld.LinkContext{}, linkproto, n)
 }
 
-func MkTestHost() host.Host {
-	h, _ := libp2p.New(context.Background())
+func MkTestHost(options ...libp2p.Option) host.Host {
+	h, _ := libp2p.New(context.Background(), options...)
 	return h
 }
 
