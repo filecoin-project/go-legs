@@ -450,7 +450,7 @@ func (lb *Subscriber) getOrCreateHandler(peerID peer.ID, force bool) (*handler, 
 		}
 	}
 
-	log.Infow("Message sender allowed, creating new handler", "peer", peerID)
+	log.Infow("Creating new handler for publisher", "peer", peerID)
 	hnd = &handler{
 		subscriber: lb,
 		msgChan:    make(chan cid.Cid, 1),
