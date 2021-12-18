@@ -58,12 +58,15 @@ func (lsc legStorageConfigration) configureTransport(chid dt.ChannelID, voucher 
 }
 
 func makeDataTransfer(ctx context.Context, host host.Host, ds datastore.Batching, lsys ipld.LinkSystem, dtManager dt.Manager) (dt.Manager, graphsync.GraphExchange, string, error) {
-	gsnet := gsnet.NewFromLibp2pHost(host)
-	gs := gsimpl.New(context.Background(), gsnet, lsys)
-
-	var err error
-	var tmpDir string
+	var (
+		gs     graphsync.GraphExchange
+		err    error
+		tmpDir string
+	)
 	if dtManager == nil {
+		gsNet := gsnet.NewFromLibp2pHost(host)
+		gs = gsimpl.New(context.Background(), gsNet, lsys)
+
 		dtNet := dtnetwork.NewFromLibp2pHost(host)
 		tp := gstransport.NewTransport(host.ID(), gs, dtNet)
 

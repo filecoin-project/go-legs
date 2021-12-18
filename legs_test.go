@@ -4,6 +4,7 @@ import (
 	"context"
 	"io/ioutil"
 	"log"
+	"net/http"
 	"os"
 	"runtime"
 	"testing"
@@ -74,9 +75,9 @@ func TestRoundTripExistingDataTransfer(t *testing.T) {
 	fakeLsys := cidlink.DefaultLinkSystem()
 	srcLnkS := test.MkLinkSystem(srcStore)
 
-	gsnet := gsnet.NewFromLibp2pHost(srcHost)
+	gsNet := gsnet.NewFromLibp2pHost(srcHost)
 	dtNet := dtnetwork.NewFromLibp2pHost(srcHost)
-	gs := gsimpl.New(context.Background(), gsnet, fakeLsys)
+	gs := gsimpl.New(context.Background(), gsNet, fakeLsys)
 	tp := gstransport.NewTransport(srcHost.ID(), gs, dtNet)
 
 	// DataTransfer channels use this file to track cidlist of exchanges
@@ -115,7 +116,37 @@ func TestRoundTripExistingDataTransfer(t *testing.T) {
 	}
 	defer lp.Close()
 
-	sub, err := legs.NewSubscriber(dstHost, dstStore, dstLnkS, testTopic, nil, legs.Topic(topics[1]))
+	gsNetDst := gsnet.NewFromLibp2pHost(dstHost)
+	dtNetDst := dtnetwork.NewFromLibp2pHost(dstHost)
+	gsDst := gsimpl.New(context.Background(), gsNetDst, dstLnkS)
+	tpDst := gstransport.NewTransport(dstHost.ID(), gsDst, dtNetDst)
+
+	// DataTransfer channels use this file to track cidlist of exchanges
+	// NOTE: It needs to be initialized for the datatransfer not to fail, but
+	// it has no other use outside the cidlist, so I don't think it should be
+	// exposed publicly. It's only used for the life of a data transfer.
+	// In the future, once an empty directory is accepted as input, it
+	// this may be removed.
+	tmpDirDst, err := ioutil.TempDir("", "go-legs")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tmpDirDst)
+	dtManagerDst, err := dt.NewDataTransfer(dstStore, tmpDirDst, dtNetDst, tpDst)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = dtManagerDst.Start(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer dtManagerDst.Stop(context.Background())
+
+	allowAll := func(_ peer.ID) (bool, error) {
+		return true, nil
+	}
+
+	sub, err := legs.NewSubscriber(dstHost, dstStore, dstLnkS, testTopic, nil, legs.Topic(topics[1]), legs.DtManager(dtManagerDst), legs.AllowPeer(allowAll), legs.HttpClient(http.DefaultClient), legs.AddrTTL(time.Hour))
 	if err != nil {
 		t.Fatal(err)
 	}
