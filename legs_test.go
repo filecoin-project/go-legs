@@ -91,15 +91,15 @@ func TestRoundTripExistingDataTransfer(t *testing.T) {
 	}
 	defer os.RemoveAll(tmpDir)
 
-	dt, err := dt.NewDataTransfer(srcStore, tmpDir, dtNet, tp)
+	dtManager, err := dt.NewDataTransfer(srcStore, tmpDir, dtNet, tp)
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = dt.Start(context.Background())
+	err = dtManager.Start(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer dt.Stop(context.Background())
+	defer dtManager.Stop(context.Background())
 
 	dstHost := test.MkTestHost()
 	srcHost.Peerstore().AddAddrs(dstHost.ID(), dstHost.Addrs(), time.Hour)
@@ -109,7 +109,7 @@ func TestRoundTripExistingDataTransfer(t *testing.T) {
 
 	topics := test.WaitForMeshWithMessage(t, testTopic, srcHost, dstHost)
 
-	lp, err := dtsync.NewPublisherFromExisting(dt, srcHost, testTopic, srcLnkS, dtsync.Topic(topics[0]))
+	lp, err := dtsync.NewPublisherFromExisting(dtManager, srcHost, testTopic, srcLnkS, dtsync.Topic(topics[0]))
 	if err != nil {
 		t.Fatal(err)
 	}

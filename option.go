@@ -58,13 +58,14 @@ func Topic(topic *pubsub.Topic) Option {
 }
 
 // DtManager provides an existing datatransfer manager.
-func DtManager(dt dt.Manager) Option {
+func DtManager(dtManager dt.Manager) Option {
 	return func(c *config) error {
-		c.dtManager = dt
+		c.dtManager = dtManager
 		return nil
 	}
 }
 
+// HttpClient provides Subscriber with an existing http client.
 func HttpClient(client *http.Client) Option {
 	return func(c *config) error {
 		c.httpClient = client

@@ -33,10 +33,10 @@ type Sync struct {
 }
 
 // Sync provides sync functionality for use with all datatransfer syncs.
-func NewSync(host host.Host, ds datastore.Batching, lsys ipld.LinkSystem, dt dt.Manager) (*Sync, error) {
+func NewSync(host host.Host, ds datastore.Batching, lsys ipld.LinkSystem, dtManager dt.Manager) (*Sync, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 
-	dt, gs, tmpDir, err := makeDataTransfer(ctx, host, ds, lsys, dt)
+	dtManager, gs, tmpDir, err := makeDataTransfer(ctx, host, ds, lsys, dtManager)
 	if err != nil {
 		cancel()
 		return nil, err
@@ -44,13 +44,13 @@ func NewSync(host host.Host, ds datastore.Batching, lsys ipld.LinkSystem, dt dt.
 
 	s := &Sync{
 		cancel:     cancel,
-		dtManager:  dt,
+		dtManager:  dtManager,
 		gsExchange: gs,
 		host:       host,
 		tmpDir:     tmpDir,
 	}
 
-	s.unsubEvents = dt.SubscribeToEvents(s.onEvent)
+	s.unsubEvents = dtManager.SubscribeToEvents(s.onEvent)
 	return s, nil
 }
 

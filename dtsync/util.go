@@ -18,20 +18,20 @@ import (
 
 // configureDataTransferForLegs configures an existing data transfer instance to serve go-legs requests
 // from given linksystem (publisher only)
-func configureDataTransferForLegs(ctx context.Context, dt dt.Manager, lsys ipld.LinkSystem) error {
+func configureDataTransferForLegs(ctx context.Context, dtManager dt.Manager, lsys ipld.LinkSystem) error {
 	v := &Voucher{}
 	lvr := &VoucherResult{}
 	val := &legsValidator{}
 	lsc := legStorageConfigration{lsys}
-	if err := dt.RegisterVoucherType(v, val); err != nil {
+	if err := dtManager.RegisterVoucherType(v, val); err != nil {
 		log.Errorf("Failed to register legs voucher validator type: %s", err)
 		return err
 	}
-	if err := dt.RegisterVoucherResultType(lvr); err != nil {
+	if err := dtManager.RegisterVoucherResultType(lvr); err != nil {
 		log.Errorf("Failed to register legs voucher result type: %s", err)
 		return err
 	}
-	if err := dt.RegisterTransportConfigurer(v, lsc.configureTransport); err != nil {
+	if err := dtManager.RegisterTransportConfigurer(v, lsc.configureTransport); err != nil {
 		log.Errorf("Failed to register datatrasfer TransportConfigurer: %s", err)
 		return err
 	}
@@ -57,13 +57,13 @@ func (lsc legStorageConfigration) configureTransport(chid dt.ChannelID, voucher 
 	}
 }
 
-func makeDataTransfer(ctx context.Context, host host.Host, ds datastore.Batching, lsys ipld.LinkSystem, dt dt.Manager) (dt.Manager, graphsync.GraphExchange, string, error) {
+func makeDataTransfer(ctx context.Context, host host.Host, ds datastore.Batching, lsys ipld.LinkSystem, dtManager dt.Manager) (dt.Manager, graphsync.GraphExchange, string, error) {
 	gsnet := gsnet.NewFromLibp2pHost(host)
 	gs := gsimpl.New(context.Background(), gsnet, lsys)
 
 	var err error
 	var tmpDir string
-	if dt == nil {
+	if dtManager == nil {
 		dtNet := dtnetwork.NewFromLibp2pHost(host)
 		tp := gstransport.NewTransport(host.ID(), gs, dtNet)
 
@@ -79,7 +79,7 @@ func makeDataTransfer(ctx context.Context, host host.Host, ds datastore.Batching
 			return nil, nil, "", err
 		}
 		log.Debugf("Created datatransfer temp dir at path: %s", tmpDir)
-		dt, err = datatransfer.NewDataTransfer(ds, tmpDir, dtNet, tp)
+		dtManager, err = datatransfer.NewDataTransfer(ds, tmpDir, dtNet, tp)
 		if err != nil {
 			log.Errorf("Failed to instantiate datatransfer: %s", err)
 			return nil, nil, "", err
@@ -89,11 +89,11 @@ func makeDataTransfer(ctx context.Context, host host.Host, ds datastore.Batching
 	v := &Voucher{}
 	lvr := &VoucherResult{}
 	val := &legsValidator{}
-	if err := dt.RegisterVoucherType(v, val); err != nil {
+	if err := dtManager.RegisterVoucherType(v, val); err != nil {
 		log.Errorf("Failed to register legs validator voucher type: %s", err)
 		return nil, nil, "", err
 	}
-	if err = dt.RegisterVoucherResultType(lvr); err != nil {
+	if err = dtManager.RegisterVoucherResultType(lvr); err != nil {
 		log.Errorf("Failed to register legs voucher result: %s", err)
 		return nil, nil, "", err
 	}
@@ -101,12 +101,12 @@ func makeDataTransfer(ctx context.Context, host host.Host, ds datastore.Batching
 	if tmpDir != "" {
 		// Tell datatransfer to notify when ready.
 		dtReady := make(chan error)
-		dt.OnReady(func(e error) {
+		dtManager.OnReady(func(e error) {
 			dtReady <- e
 		})
 
 		// Start datatransfer.
-		if err = dt.Start(ctx); err != nil {
+		if err = dtManager.Start(ctx); err != nil {
 			log.Errorf("Failed to start datatransfer: %s", err)
 			return nil, nil, "", err
 		}
@@ -118,5 +118,5 @@ func makeDataTransfer(ctx context.Context, host host.Host, ds datastore.Batching
 		}
 	}
 
-	return dt, gs, tmpDir, nil
+	return dtManager, gs, tmpDir, nil
 }
