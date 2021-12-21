@@ -3,7 +3,9 @@ package dtsync
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
+	"strings"
 	"sync"
 
 	dt "github.com/filecoin-project/go-data-transfer"
@@ -153,7 +155,11 @@ func (s *Sync) onEvent(event dt.Event, channelState dt.ChannelState) {
 		// Tell the waiting handler that the sync has finished.
 	case dt.Error:
 		// Communicate the error back to the waiting handler.
-		err = errors.New(event.Message)
+		if strings.HasSuffix(event.Message, "content not found") {
+			err = errors.New("datatransfer error: content not found")
+		} else {
+			err = fmt.Errorf("datatransfer error: %s", event.Message)
+		}
 	}
 
 	// Send the FinishTransfer signal to the handler.  This will allow its
@@ -163,6 +169,10 @@ func (s *Sync) onEvent(event dt.Event, channelState dt.ChannelState) {
 	// know it is the correct on since it was used to look up this syncDone
 	// channel.
 	if !s.signalSyncDone(channelState.BaseCID(), err) {
+		// No channel to return error on, so log it here.
+		if err != nil {
+			log.Error(err.Error())
+		}
 		log.Errorw("Could not find channel for completed transfer notice", "cid", channelState.BaseCID())
 		return
 	}

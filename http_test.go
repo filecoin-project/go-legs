@@ -59,20 +59,15 @@ func TestManualSync(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	cchan, err := sub.Sync(ctx, srcHost.ID(), cid.Undef, nil, nlm)
+	syncCid, err := sub.Sync(ctx, srcHost.ID(), cid.Undef, nil, nlm)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	select {
-	case rc := <-cchan:
-		if !rc.Cid.Equals(rootLnk.(cidlink.Link).Cid) {
-			t.Fatalf("didn't get expected cid. expected %s, got %s", rootLnk, rc)
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("timed out")
+	if !syncCid.Equals(rootLnk.(cidlink.Link).Cid) {
+		t.Fatalf("didn't get expected cid. expected %s, got %s", rootLnk, syncCid)
 	}
 }

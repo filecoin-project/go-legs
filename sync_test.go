@@ -95,50 +95,41 @@ func TestSyncFn(t *testing.T) {
 	// Store the whole chain in source node
 	chainLnks := test.MkChain(srcLnkS, true)
 
-	// Try to sync with a non-existing cid, and cancel right away.
-	// This is to check that we unlock syncmtx if the exchange is cancelled.
+	watcher, cancelWatcher := sub.OnSyncFinished()
+	defer cancelWatcher()
+
+	// Try to sync with a non-existing cid to chack that sync returns with err, and SyncFinished watcher does not get event.
 	cids, _ := test.RandomCids(1)
 
-	ctx, syncncl := context.WithCancel(context.Background())
+	ctx, syncncl := context.WithTimeout(context.Background(), updateTimeout)
 	defer syncncl()
-	out, err := sub.Sync(ctx, srcHost.ID(), cids[0], nil, nil)
-	if err != nil {
-		t.Fatal(err)
+	syncCid, err := sub.Sync(ctx, srcHost.ID(), cids[0], nil, nil)
+	if err == nil {
+		t.Fatal("expected error when no content to sync")
 	}
-	select {
-	case <-time.After(updateTimeout):
-		t.Fatal("timed out waiting for sync to finish")
-	case _, open := <-out:
-		if open {
-			t.Error("sync channel should have closed")
-		}
-	}
-	// Cancel without any exchange being done.
 	syncncl()
 
+	select {
+	case <-time.After(updateTimeout):
+	case <-watcher:
+		t.Fatal("watcher should not receive event if sync error")
+	}
+
 	lnk := chainLnks[1]
-	// Proactively sync with publisher without him publishing to gossipsub channel.
-	ctx, syncncl = context.WithCancel(context.Background())
+
+	// Sync with publisher without publisher publishing to gossipsub channel.
+	ctx, syncncl = context.WithTimeout(context.Background(), updateTimeout)
 	defer syncncl()
-	out, err = sub.Sync(ctx, srcHost.ID(), lnk.(cidlink.Link).Cid, nil, nil)
+	syncCid, err = sub.Sync(ctx, srcHost.ID(), lnk.(cidlink.Link).Cid, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	select {
-	case <-time.After(updateTimeout):
-		t.Fatal("timed out waiting for sync to propogate")
-	case downstream, open := <-out:
-		if !open {
-			t.Fatal("sync chennel closed with no output")
-		}
-		if !downstream.Cid.Equals(lnk.(cidlink.Link).Cid) {
-			t.Fatalf("sync'd cid unexpected %s vs %s", downstream.Cid, lnk)
-		}
-		if _, err := dstStore.Get(datastore.NewKey(downstream.Cid.String())); err != nil {
-			t.Fatalf("data not in receiver store: %v", err)
-		}
+	if !syncCid.Equals(lnk.(cidlink.Link).Cid) {
+		t.Fatalf("sync'd cid unexpected %s vs %s", syncCid, lnk)
 	}
-	// Stop listening to sync events.
+	if _, err := dstStore.Get(datastore.NewKey(syncCid.String())); err != nil {
+		t.Fatalf("data not in receiver store: %v", err)
+	}
 	syncncl()
 
 	// Assert the latestSync is not updated by explicit sync when cid is set
@@ -146,10 +137,7 @@ func TestSyncFn(t *testing.T) {
 		t.Fatal("Sync should not update latestSync")
 	}
 
-	watcher, cancelWatcher := sub.OnSyncFinished()
-	defer cancelWatcher()
-
-	// Assert the latestSync is updated by explicit sync when cid and selector are unset
+	// Assert the latestSync is updated by explicit sync when cid and selector are unset.
 	newHead := chainLnks[0].(cidlink.Link).Cid
 	if err := lp.UpdateRoot(context.Background(), newHead); err != nil {
 		t.Fatal(err)
@@ -168,27 +156,20 @@ func TestSyncFn(t *testing.T) {
 	}
 	cancelWatcher()
 
-	ctx, syncncl = context.WithCancel(context.Background())
+	ctx, syncncl = context.WithTimeout(context.Background(), updateTimeout)
 	defer syncncl()
-	out, err = sub.Sync(ctx, srcHost.ID(), cid.Undef, nil, nil)
+	syncCid, err = sub.Sync(ctx, srcHost.ID(), cid.Undef, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	select {
-	case <-time.After(updateTimeout):
-		t.Fatal("timed out waiting for sync to propogate")
-	case downstream, open := <-out:
-		if !open {
-			t.Fatal("synce channel closed with no output")
-		}
-		if !downstream.Cid.Equals(newHead) {
-			t.Fatalf("sync'd cid unexpected %s vs %s", downstream.Cid, lnk)
-		}
-		if _, err := dstStore.Get(datastore.NewKey(downstream.Cid.String())); err != nil {
-			t.Fatalf("data not in receiver store: %v", err)
-		}
+	if !syncCid.Equals(newHead) {
+		t.Fatalf("sync'd cid unexpected %s vs %s", syncCid, lnk)
+	}
+	if _, err := dstStore.Get(datastore.NewKey(syncCid.String())); err != nil {
+		t.Fatalf("data not in receiver store: %v", err)
 	}
 	syncncl()
+
 	err = assertLatestSyncEquals(sub, srcHost.ID(), newHead)
 	if err != nil {
 		t.Fatal(err)

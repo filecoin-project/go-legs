@@ -290,15 +290,15 @@ func (s *Subscriber) OnSyncFinished() (<-chan SyncFinished, context.CancelFunc) 
 }
 
 // Sync performs a one-off explicit sync with the given peer for a specific CID
-// and updates the latest synced link to it.
+// and updates the latest synced link to it.  Completing sync may take a
+// significant abount of time, so Sync should generally be run in its own
+// goroutine.
 //
-// The Context passed in controls the lifetime of the background sync process,
-// so make sure the context has an appropriate deadline, if any.
-//
-// A SyncFinished channel is returned to allow the caller to wait for this
-// particular sync to complete.  Any OnSyncFinished readers will also get a
-// SyncFinished when the sync succeeds, but only if syncing to the latest using
-// the default selector and a `cid.Undef`.
+// The latest synced CID is returned when this sync is complete.  Any
+// OnSyncFinished readers will also get a SyncFinished when the sync succeeds,
+// but only if syncing to the latest, using `cid.Undef`, and using the default
+// selector.  This is because when specifying a cid, it is usually for an
+// entries sync, not an advertisements sync.
 //
 // It is the responsibility of the caller to make sure the given CID appears
 // after the latest sync in order to avid re-syncing of content that may have
@@ -313,9 +313,9 @@ func (s *Subscriber) OnSyncFinished() (<-chan SyncFinished, context.CancelFunc) 
 // only specify the selection sequence itself.
 //
 // See: ExploreRecursiveWithStopNode.
-func (s *Subscriber) Sync(ctx context.Context, peerID peer.ID, c cid.Cid, sel ipld.Node, publisher multiaddr.Multiaddr) (<-chan SyncFinished, error) {
+func (s *Subscriber) Sync(ctx context.Context, peerID peer.ID, c cid.Cid, sel ipld.Node, publisher multiaddr.Multiaddr) (cid.Cid, error) {
 	if peerID == "" {
-		return nil, errors.New("empty peer id")
+		return cid.Undef, errors.New("empty peer id")
 	}
 
 	log := log.With("peer", peerID)
@@ -331,7 +331,7 @@ func (s *Subscriber) Sync(ctx context.Context, peerID peer.ID, c cid.Cid, sel ip
 			if p.Code == multiaddr.P_HTTP || p.Code == multiaddr.P_HTTPS {
 				syncer, err = s.httpSync.NewSyncer(publisher)
 				if err != nil {
-					return nil, err
+					return cid.Undef, err
 				}
 				break
 			}
@@ -351,64 +351,50 @@ func (s *Subscriber) Sync(ctx context.Context, peerID peer.ID, c cid.Cid, sel ip
 		syncer = s.dtSync.NewSyncer(peerID, s.topicName)
 	}
 
-	// Start goroutine to get latest root and handle
-	out := make(chan SyncFinished, 1)
-	go func() {
-		defer close(out)
-
-		var updateLatest bool
-		if c == cid.Undef {
-			// Query the peer for the latest CID
-			c, err = syncer.GetHead(ctx)
-			if err != nil {
-				log.Errorw("Cannot get head for sync", "err", err)
-				return
-			}
-
-			log.Debugw("Sync queried head CID", "cid", c)
-			if sel == nil {
-				// Update the latestSync only if no CID and no selector given.
-				updateLatest = true
-			}
+	var updateLatest bool
+	if c == cid.Undef {
+		// Query the peer for the latest CID
+		c, err = syncer.GetHead(ctx)
+		if err != nil {
+			return cid.Undef, fmt.Errorf("cannot query head for sync: %s", err)
 		}
 
-		if ctx.Err() != nil {
-			log.Errorw("Sync canceled", "err", ctx.Err())
-			return
-		}
-
-		var wrapSel bool
+		log.Debugw("Sync queried head CID", "cid", c)
 		if sel == nil {
-			// Fall back onto the default selector sequence if one is not
-			// given.  Note that if selector is specified it is used as is
-			// without any wrapping.
-			sel = s.dss
-			wrapSel = true
+			// Update the latestSync only if no CID and no selector given.
+			updateLatest = true
 		}
+	}
 
-		// Check for existing handler.  If none, create on if allowed.
-		hnd, err := s.getOrCreateHandler(peerID, true)
-		if err != nil {
-			log.Errorw("Cannot sync", "err", err)
-			return
-		}
+	if ctx.Err() != nil {
+		return cid.Undef, fmt.Errorf("sync canceled: %s", ctx.Err())
+	}
 
-		hnd.syncMutex.Lock()
-		defer hnd.syncMutex.Unlock()
+	var wrapSel bool
+	if sel == nil {
+		// Fall back onto the default selector sequence if one is not
+		// given.  Note that if selector is specified it is used as is
+		// without any wrapping.
+		sel = s.dss
+		wrapSel = true
+	}
 
-		err = hnd.handle(ctx, c, sel, wrapSel, updateLatest, syncer)
-		if err != nil {
-			log.Errorw("Cannot sync", "err", err)
-			return
-		}
+	// Check for existing handler.  If none, create one if allowed.
+	hnd, err := s.getOrCreateHandler(peerID, true)
+	if err != nil {
+		return cid.Undef, err
+	}
 
-		out <- SyncFinished{
-			Cid:    c,
-			PeerID: peerID,
-		}
-	}()
+	hnd.syncMutex.Lock()
+	defer hnd.syncMutex.Unlock()
 
-	return out, nil
+	err = hnd.handle(ctx, c, sel, wrapSel, updateLatest, syncer)
+	if err != nil {
+		return cid.Undef, fmt.Errorf("sync handler failed: %s", err)
+	}
+
+	log.Infow("Finished sync", "cid", c)
+	return c, nil
 }
 
 // distributeEvents reads a SyncFinished, sent by a peer handler, and copies
@@ -433,13 +419,7 @@ func (s *Subscriber) getOrCreateHandler(peerID peer.ID, force bool) (*handler, e
 	s.handlersMutex.Lock()
 	defer s.handlersMutex.Unlock()
 
-	// Check for existing handler, return if found.
-	hnd, ok := s.handlers[peerID]
-	if ok {
-		return hnd, nil
-	}
-
-	// If no handler, check callback to see if peer ID allowed.
+	// Check callback, if needed, to see if peer ID allowed.
 	if s.allowPeer != nil && !force {
 		allow, err := s.allowPeer(peerID)
 		if err != nil {
@@ -448,6 +428,12 @@ func (s *Subscriber) getOrCreateHandler(peerID peer.ID, force bool) (*handler, e
 		if !allow {
 			return nil, errSourceNotAllowed
 		}
+	}
+
+	// Check for existing handler, return if found.
+	hnd, ok := s.handlers[peerID]
+	if ok {
+		return hnd, nil
 	}
 
 	log.Infow("Creating new handler for publisher", "peer", peerID)
