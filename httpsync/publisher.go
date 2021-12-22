@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
+	"net"
 	"net/http"
 	"path"
 	"sync"
@@ -15,10 +17,13 @@ import (
 	basicnode "github.com/ipld/go-ipld-prime/node/basic"
 	ic "github.com/libp2p/go-libp2p-core/crypto"
 	"github.com/libp2p/go-libp2p-core/peer"
-	ma "github.com/multiformats/go-multiaddr"
+	"github.com/multiformats/go-multiaddr"
+	manet "github.com/multiformats/go-multiaddr/net"
 )
 
 type publisher struct {
+	addr    multiaddr.Multiaddr
+	closer  io.Closer
 	lsys    ipld.LinkSystem
 	peerID  peer.ID
 	privKey ic.PrivKey
@@ -28,13 +33,58 @@ type publisher struct {
 
 var _ http.Handler = (*publisher)(nil)
 
-// NewPublisher creates a new http publisher
-func NewPublisher(lsys ipld.LinkSystem, peerID peer.ID, privKey ic.PrivKey) *publisher {
-	return &publisher{
+// NewPublisher creates a new http publisher, listening on the specified
+// address.
+func NewPublisher(address string, lsys ipld.LinkSystem, peerID peer.ID, privKey ic.PrivKey) (*publisher, error) {
+	l, err := net.Listen("tcp", address)
+	if err != nil {
+		return nil, err
+	}
+
+	maddr, err := manet.FromNetAddr(l.Addr())
+	if err != nil {
+		l.Close()
+		return nil, err
+	}
+	proto, _ := multiaddr.NewMultiaddr("/http")
+
+	pub := &publisher{
+		addr:    multiaddr.Join(maddr, proto),
+		closer:  l,
 		lsys:    lsys,
 		peerID:  peerID,
 		privKey: privKey,
 	}
+
+	// Run service on configured port.
+	server := &http.Server{
+		Handler: pub,
+		Addr:    l.Addr().String(),
+	}
+	go server.Serve(l)
+
+	return pub, nil
+}
+
+// Address returns the address, as a multiaddress, that the publisher is
+// listening on.
+func (p *publisher) Address() multiaddr.Multiaddr {
+	return p.addr
+}
+
+func (p *publisher) UpdateRoot(ctx context.Context, c cid.Cid) error {
+	p.rl.Lock()
+	defer p.rl.Unlock()
+	p.root = c
+	return nil
+}
+
+func (p *publisher) UpdateRootWithAddrs(ctx context.Context, c cid.Cid, _ []multiaddr.Multiaddr) error {
+	return p.UpdateRoot(ctx, c)
+}
+
+func (p *publisher) Close() error {
+	return p.closer.Close()
 }
 
 func (p *publisher) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -72,19 +122,4 @@ func (p *publisher) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	_ = dagjson.Encode(item, w)
 
 	// TODO: Sign message using publisher's private key.
-}
-
-func (p *publisher) UpdateRoot(ctx context.Context, c cid.Cid) error {
-	p.rl.Lock()
-	defer p.rl.Unlock()
-	p.root = c
-	return nil
-}
-
-func (p *publisher) UpdateRootWithAddrs(ctx context.Context, c cid.Cid, _ []ma.Multiaddr) error {
-	return p.UpdateRoot(ctx, c)
-}
-
-func (p *publisher) Close() error {
-	return nil
 }
