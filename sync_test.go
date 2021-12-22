@@ -31,11 +31,11 @@ func TestLatestSyncSuccess(t *testing.T) {
 
 	topics := test.WaitForMeshWithMessage(t, testTopic, srcHost, dstHost)
 
-	lp, err := dtsync.NewPublisher(srcHost, srcStore, srcLnkS, testTopic, dtsync.Topic(topics[0]))
+	pub, err := dtsync.NewPublisher(srcHost, srcStore, srcLnkS, testTopic, dtsync.Topic(topics[0]))
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer lp.Close()
+	defer pub.Close()
 
 	sub, err := legs.NewSubscriber(dstHost, dstStore, dstLnkS, testTopic, nil, legs.Topic(topics[1]))
 	if err != nil {
@@ -49,15 +49,15 @@ func TestLatestSyncSuccess(t *testing.T) {
 	// Store the whole chain in source node
 	chainLnks := test.MkChain(srcLnkS, true)
 
-	err = newUpdateTest(lp, sub, dstStore, watcher, srcHost.ID(), chainLnks[2], false, chainLnks[2].(cidlink.Link).Cid)
+	err = newUpdateTest(pub, sub, dstStore, watcher, srcHost.ID(), chainLnks[2], false, chainLnks[2].(cidlink.Link).Cid)
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = newUpdateTest(lp, sub, dstStore, watcher, srcHost.ID(), chainLnks[1], false, chainLnks[1].(cidlink.Link).Cid)
+	err = newUpdateTest(pub, sub, dstStore, watcher, srcHost.ID(), chainLnks[1], false, chainLnks[1].(cidlink.Link).Cid)
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = newUpdateTest(lp, sub, dstStore, watcher, srcHost.ID(), chainLnks[0], false, chainLnks[0].(cidlink.Link).Cid)
+	err = newUpdateTest(pub, sub, dstStore, watcher, srcHost.ID(), chainLnks[0], false, chainLnks[0].(cidlink.Link).Cid)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -76,11 +76,11 @@ func TestSyncFn(t *testing.T) {
 
 	topics := test.WaitForMeshWithMessage(t, testTopic, srcHost, dstHost)
 
-	lp, err := dtsync.NewPublisher(srcHost, srcStore, srcLnkS, testTopic, dtsync.Topic(topics[0]))
+	pub, err := dtsync.NewPublisher(srcHost, srcStore, srcLnkS, testTopic, dtsync.Topic(topics[0]))
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer lp.Close()
+	defer pub.Close()
 
 	blocksSeenByHook := make(map[cid.Cid]struct{})
 	blockHook := func(_ peer.ID, c cid.Cid) {
@@ -103,7 +103,8 @@ func TestSyncFn(t *testing.T) {
 	watcher, cancelWatcher := sub.OnSyncFinished()
 	defer cancelWatcher()
 
-	// Try to sync with a non-existing cid to chack that sync returns with err, and SyncFinished watcher does not get event.
+	// Try to sync with a non-existing cid to chack that sync returns with err,
+	// and SyncFinished watcher does not get event.
 	cids, _ := test.RandomCids(1)
 	ctx, syncncl := context.WithTimeout(context.Background(), updateTimeout)
 	defer syncncl()
@@ -148,7 +149,7 @@ func TestSyncFn(t *testing.T) {
 
 	// Assert the latestSync is updated by explicit sync when cid and selector are unset.
 	newHead := chainLnks[0].(cidlink.Link).Cid
-	if err := lp.UpdateRoot(context.Background(), newHead); err != nil {
+	if err := pub.UpdateRoot(context.Background(), newHead); err != nil {
 		t.Fatal(err)
 	}
 
@@ -202,11 +203,11 @@ func TestPartialSync(t *testing.T) {
 
 	topics := test.WaitForMeshWithMessage(t, testTopic, srcHost, dstHost)
 
-	lp, err := dtsync.NewPublisher(srcHost, srcStore, srcLnkS, testTopic, dtsync.Topic(topics[0]))
+	pub, err := dtsync.NewPublisher(srcHost, srcStore, srcLnkS, testTopic, dtsync.Topic(topics[0]))
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer lp.Close()
+	defer pub.Close()
 	test.MkChain(srcLnkS, true)
 
 	sub, err := legs.NewSubscriber(dstHost, dstStore, dstLnkS, testTopic, nil, legs.Topic(topics[1]))
@@ -228,7 +229,7 @@ func TestPartialSync(t *testing.T) {
 	defer cncl()
 
 	// Fetching first few nodes.
-	err = newUpdateTest(lp, sub, dstStore, watcher, srcHost.ID(), chainLnks[2], false, chainLnks[2].(cidlink.Link).Cid)
+	err = newUpdateTest(pub, sub, dstStore, watcher, srcHost.ID(), chainLnks[2], false, chainLnks[2].(cidlink.Link).Cid)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -249,7 +250,7 @@ func TestPartialSync(t *testing.T) {
 	}
 
 	// Update all the chain from scratch again.
-	err = newUpdateTest(lp, sub, dstStore, watcher, srcHost.ID(), chainLnks[0], false, chainLnks[0].(cidlink.Link).Cid)
+	err = newUpdateTest(pub, sub, dstStore, watcher, srcHost.ID(), chainLnks[0], false, chainLnks[0].(cidlink.Link).Cid)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -271,11 +272,11 @@ func TestStepByStepSync(t *testing.T) {
 
 	dstLnkS := test.MkLinkSystem(dstStore)
 
-	lp, err := dtsync.NewPublisher(srcHost, srcStore, srcLnkS, testTopic, dtsync.Topic(topics[0]))
+	pub, err := dtsync.NewPublisher(srcHost, srcStore, srcLnkS, testTopic, dtsync.Topic(topics[0]))
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer lp.Close()
+	defer pub.Close()
 
 	sub, err := legs.NewSubscriber(dstHost, dstStore, dstLnkS, testTopic, nil, legs.Topic(topics[1]))
 	if err != nil {
@@ -294,11 +295,11 @@ func TestStepByStepSync(t *testing.T) {
 	test.MkChain(dstLnkS, true)
 
 	// Sync the rest of the chain
-	err = newUpdateTest(lp, sub, dstStore, watcher, srcHost.ID(), chainLnks[1], false, chainLnks[1].(cidlink.Link).Cid)
+	err = newUpdateTest(pub, sub, dstStore, watcher, srcHost.ID(), chainLnks[1], false, chainLnks[1].(cidlink.Link).Cid)
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = newUpdateTest(lp, sub, dstStore, watcher, srcHost.ID(), chainLnks[0], false, chainLnks[0].(cidlink.Link).Cid)
+	err = newUpdateTest(pub, sub, dstStore, watcher, srcHost.ID(), chainLnks[0], false, chainLnks[0].(cidlink.Link).Cid)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -309,11 +310,11 @@ func TestLatestSyncFailure(t *testing.T) {
 	dstStore := dssync.MutexWrap(datastore.NewMapDatastore())
 	srcHost := test.MkTestHost()
 	srcLnkS := test.MkLinkSystem(srcStore)
-	lp, err := dtsync.NewPublisher(srcHost, srcStore, srcLnkS, testTopic)
+	pub, err := dtsync.NewPublisher(srcHost, srcStore, srcLnkS, testTopic)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer lp.Close()
+	defer pub.Close()
 
 	chainLnks := test.MkChain(srcLnkS, true)
 
@@ -343,7 +344,7 @@ func TestLatestSyncFailure(t *testing.T) {
 	defer cncl()
 
 	t.Log("Testing sync fail when the other end does not have the data")
-	err = newUpdateTest(lp, sub, dstStore, watcher, srcHost.ID(), cidlink.Link{Cid: cid.Undef}, true, chainLnks[3].(cidlink.Link).Cid)
+	err = newUpdateTest(pub, sub, dstStore, watcher, srcHost.ID(), cidlink.Link{Cid: cid.Undef}, true, chainLnks[3].(cidlink.Link).Cid)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -365,17 +366,17 @@ func TestLatestSyncFailure(t *testing.T) {
 	defer cncl()
 
 	t.Log("Testing sync fail when not able to run the full exchange")
-	err = newUpdateTest(lp, sub, dstStore, watcher, srcHost.ID(), chainLnks[2], true, chainLnks[3].(cidlink.Link).Cid)
+	err = newUpdateTest(pub, sub, dstStore, watcher, srcHost.ID(), chainLnks[2], true, chainLnks[3].(cidlink.Link).Cid)
 	if err != nil {
 		t.Fatal(err)
 	}
 }
 
-func newUpdateTest(lp legs.Publisher, sub *legs.Subscriber, dstStore datastore.Batching, watcher <-chan legs.SyncFinished, peerID peer.ID, lnk ipld.Link, withFailure bool, expectedSync cid.Cid) error {
+func newUpdateTest(pub legs.Publisher, sub *legs.Subscriber, dstStore datastore.Batching, watcher <-chan legs.SyncFinished, peerID peer.ID, lnk ipld.Link, withFailure bool, expectedSync cid.Cid) error {
 	var err error
 	c := lnk.(cidlink.Link).Cid
 	if c != cid.Undef {
-		err = lp.UpdateRoot(context.Background(), c)
+		err = pub.UpdateRoot(context.Background(), c)
 		if err != nil {
 			return err
 		}

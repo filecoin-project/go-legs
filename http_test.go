@@ -102,7 +102,8 @@ func TestSyncFnHttp(t *testing.T) {
 	watcher, cancelWatcher := sub.OnSyncFinished()
 	defer cancelWatcher()
 
-	// Try to sync with a non-existing cid to chack that sync returns with err, and SyncFinished watcher does not get event.
+	// Try to sync with a non-existing cid to chack that sync returns with err,
+	// and SyncFinished watcher does not get event.
 	cids, _ := test.RandomCids(1)
 	ctx, syncncl := context.WithTimeout(context.Background(), time.Second)
 	defer syncncl()
@@ -117,8 +118,6 @@ func TestSyncFnHttp(t *testing.T) {
 	case <-watcher:
 		t.Fatal("watcher should not receive event if sync error")
 	}
-
-	t.Log("updating root")
 
 	// Assert the latestSync is updated by explicit sync when cid and selector are unset.
 	newHead := chainLnks[0].(cidlink.Link).Cid

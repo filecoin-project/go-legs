@@ -47,7 +47,7 @@ func initPubSub(t *testing.T, srcStore, dstStore datastore.Batching) (host.Host,
 
 	srcLnkS := test.MkLinkSystem(srcStore)
 
-	lp, err := dtsync.NewPublisher(srcHost, srcStore, srcLnkS, testTopic, dtsync.Topic(topics[0]))
+	pub, err := dtsync.NewPublisher(srcHost, srcStore, srcLnkS, testTopic, dtsync.Topic(topics[0]))
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
@@ -65,7 +65,7 @@ func initPubSub(t *testing.T, srcStore, dstStore datastore.Batching) (host.Host,
 		return nil, nil, nil, nil, err
 	}
 
-	return srcHost, dstHost, lp, sub, nil
+	return srcHost, dstHost, pub, sub, nil
 }
 
 func TestRoundTripExistingDataTransfer(t *testing.T) {
@@ -110,11 +110,11 @@ func TestRoundTripExistingDataTransfer(t *testing.T) {
 
 	topics := test.WaitForMeshWithMessage(t, testTopic, srcHost, dstHost)
 
-	lp, err := dtsync.NewPublisherFromExisting(dtManager, srcHost, testTopic, srcLnkS, dtsync.Topic(topics[0]))
+	pub, err := dtsync.NewPublisherFromExisting(dtManager, srcHost, testTopic, srcLnkS, dtsync.Topic(topics[0]))
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer lp.Close()
+	defer pub.Close()
 
 	gsNetDst := gsnet.NewFromLibp2pHost(dstHost)
 	dtNetDst := dtnetwork.NewFromLibp2pHost(dstHost)
@@ -165,7 +165,7 @@ func TestRoundTripExistingDataTransfer(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := lp.UpdateRoot(context.Background(), lnk.(cidlink.Link).Cid); err != nil {
+	if err := pub.UpdateRoot(context.Background(), lnk.(cidlink.Link).Cid); err != nil {
 		t.Fatal(err)
 	}
 
@@ -186,11 +186,11 @@ func TestAllowPeerReject(t *testing.T) {
 	// Init legs publisher and subscriber
 	srcStore := dssync.MutexWrap(datastore.NewMapDatastore())
 	dstStore := dssync.MutexWrap(datastore.NewMapDatastore())
-	_, dstHost, lp, sub, err := initPubSub(t, srcStore, dstStore)
+	_, dstHost, pub, sub, err := initPubSub(t, srcStore, dstStore)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer lp.Close()
+	defer pub.Close()
 	defer sub.Close()
 
 	// Set function to reject anything except dstHost, which is not the one
@@ -205,7 +205,7 @@ func TestAllowPeerReject(t *testing.T) {
 	c := mkLnk(t, srcStore)
 
 	// Update root with item
-	err = lp.UpdateRoot(context.Background(), c)
+	err = pub.UpdateRoot(context.Background(), c)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -223,11 +223,11 @@ func TestAllowPeerAllows(t *testing.T) {
 	// Init legs publisher and subscriber
 	srcStore := dssync.MutexWrap(datastore.NewMapDatastore())
 	dstStore := dssync.MutexWrap(datastore.NewMapDatastore())
-	_, _, lp, sub, err := initPubSub(t, srcStore, dstStore)
+	_, _, pub, sub, err := initPubSub(t, srcStore, dstStore)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer lp.Close()
+	defer pub.Close()
 	defer sub.Close()
 
 	// Set function to allow any peer.
@@ -241,7 +241,7 @@ func TestAllowPeerAllows(t *testing.T) {
 	c := mkLnk(t, srcStore)
 
 	// Update root with item
-	err = lp.UpdateRoot(context.Background(), c)
+	err = pub.UpdateRoot(context.Background(), c)
 	if err != nil {
 		t.Fatal(err)
 	}

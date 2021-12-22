@@ -25,11 +25,11 @@ func TestRoundTripSimple(t *testing.T) {
 	// Init legs publisher and subscriber
 	srcStore := dssync.MutexWrap(datastore.NewMapDatastore())
 	dstStore := dssync.MutexWrap(datastore.NewMapDatastore())
-	_, _, lp, sub, err := initPubSub(t, srcStore, dstStore)
+	_, _, pub, sub, err := initPubSub(t, srcStore, dstStore)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer lp.Close()
+	defer pub.Close()
 	defer sub.Close()
 
 	watcher, cncl := sub.OnSyncFinished()
@@ -42,7 +42,7 @@ func TestRoundTripSimple(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := lp.UpdateRoot(context.Background(), lnk.(cidlink.Link).Cid); err != nil {
+	if err := pub.UpdateRoot(context.Background(), lnk.(cidlink.Link).Cid); err != nil {
 		t.Fatal(err)
 	}
 
