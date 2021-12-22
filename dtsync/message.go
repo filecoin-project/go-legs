@@ -1,4 +1,4 @@
-package legs
+package dtsync
 
 import (
 	"bytes"
@@ -8,15 +8,15 @@ import (
 	"github.com/multiformats/go-varint"
 )
 
-type message struct {
-	cid   cid.Cid
-	addrs []multiaddr.Multiaddr
+type Message struct {
+	Cid   cid.Cid
+	Addrs []multiaddr.Multiaddr
 }
 
-func encodeMessage(m message) []byte {
+func EncodeMessage(m Message) []byte {
 	// Get size
 	var size, maxVarintLen int
-	for _, addr := range m.addrs {
+	for _, addr := range m.Addrs {
 		addrBytes := addr.Bytes()
 		varintLen := varint.UvarintSize(uint64(len(addrBytes)))
 		if varintLen > maxVarintLen {
@@ -27,11 +27,14 @@ func encodeMessage(m message) []byte {
 
 	vibuf := make([]byte, maxVarintLen)
 	var b bytes.Buffer
-	b.Grow(m.cid.ByteLen() + size)
+	b.Grow(m.Cid.ByteLen() + size)
 	// CID already contains encoded length, so no need to add length to data.
-	m.cid.WriteBytes(&b)
+	_, err := m.Cid.WriteBytes(&b)
+	if err != nil {
+		panic(err)
+	}
 
-	for _, addr := range m.addrs {
+	for _, addr := range m.Addrs {
 		addrBytes := addr.Bytes()
 		n := varint.PutUvarint(vibuf, uint64(len(addrBytes)))
 		b.Write(vibuf[:n])
@@ -41,10 +44,10 @@ func encodeMessage(m message) []byte {
 	return b.Bytes()
 }
 
-func decodeMessage(data []byte) (message, error) {
+func DecodeMessage(data []byte) (Message, error) {
 	n, c, err := cid.CidFromBytes(data)
 	if err != nil {
-		return message{}, err
+		return Message{}, err
 	}
 	data = data[n:]
 
@@ -55,21 +58,21 @@ func decodeMessage(data []byte) (message, error) {
 		val, n, err := varint.FromUvarint(data)
 		if err != nil {
 			log.Errorf("Failed to decode message: cannot read number of multiadds: %s", err)
-			return message{}, err
+			return Message{}, err
 		}
 		data = data[n:]
 
 		addr, err := multiaddr.NewMultiaddrBytes(data[:val])
 		if err != nil {
 			log.Errorf("Failed to decode message: cannot decode multiadds: %s", err)
-			return message{}, err
+			return Message{}, err
 		}
 		data = data[val:]
 		addrs = append(addrs, addr)
 	}
 
-	return message{
-		cid:   c,
-		addrs: addrs,
+	return Message{
+		Cid:   c,
+		Addrs: addrs,
 	}, nil
 }
