@@ -82,7 +82,12 @@ func TestSyncFn(t *testing.T) {
 	}
 	defer lp.Close()
 
-	sub, err := legs.NewSubscriber(dstHost, dstStore, dstLnkS, testTopic, nil, legs.Topic(topics[1]))
+	blocksSeenByHook := make(map[cid.Cid]struct{})
+	blockHook := func(_ peer.ID, c cid.Cid) {
+		blocksSeenByHook[c] = struct{}{}
+	}
+
+	sub, err := legs.NewSubscriber(dstHost, dstStore, dstLnkS, testTopic, nil, legs.Topic(topics[1]), legs.BlockHook(blockHook))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -100,7 +105,6 @@ func TestSyncFn(t *testing.T) {
 
 	// Try to sync with a non-existing cid to chack that sync returns with err, and SyncFinished watcher does not get event.
 	cids, _ := test.RandomCids(1)
-
 	ctx, syncncl := context.WithTimeout(context.Background(), updateTimeout)
 	defer syncncl()
 	syncCid, err := sub.Sync(ctx, srcHost.ID(), cids[0], nil, nil)
@@ -131,6 +135,11 @@ func TestSyncFn(t *testing.T) {
 		t.Fatalf("data not in receiver store: %v", err)
 	}
 	syncncl()
+
+	_, ok := blocksSeenByHook[lnk.(cidlink.Link).Cid]
+	if !ok {
+		t.Fatal("block hook did not see link cid")
+	}
 
 	// Assert the latestSync is not updated by explicit sync when cid is set
 	if sub.GetLatestSync(srcHost.ID()) != nil {

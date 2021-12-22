@@ -16,6 +16,7 @@ type config struct {
 
 	topic      *pubsub.Topic
 	dtManager  dt.Manager
+	blockHook  BlockHookFunc
 	httpClient *http.Client
 }
 
@@ -69,6 +70,14 @@ func DtManager(dtManager dt.Manager) Option {
 func HttpClient(client *http.Client) Option {
 	return func(c *config) error {
 		c.httpClient = client
+		return nil
+	}
+}
+
+// BlockHook adds a hook that runs when a block is received.
+func BlockHook(blockHook BlockHookFunc) Option {
+	return func(c *config) error {
+		c.blockHook = blockHook
 		return nil
 	}
 }

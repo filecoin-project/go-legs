@@ -15,6 +15,7 @@ import (
 	dssync "github.com/ipfs/go-datastore/sync"
 	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
 	"github.com/ipld/go-ipld-prime/node/basicnode"
+	"github.com/libp2p/go-libp2p-core/peer"
 	"github.com/multiformats/go-multiaddr"
 	manet "github.com/multiformats/go-multiaddr/net"
 )
@@ -23,7 +24,7 @@ func TestManualSync(t *testing.T) {
 	srcHost := test.MkTestHost()
 	srcStore := dssync.MutexWrap(datastore.NewMapDatastore())
 	srcSys := test.MkLinkSystem(srcStore)
-	pub := httpsync.NewPublisher(context.Background(), srcStore, srcSys, srcHost.ID(), nil)
+	pub := httpsync.NewPublisher(srcSys, srcHost.ID(), nil)
 	defer pub.Close()
 
 	nl, err := net.Listen("tcp", "127.0.0.1:0")
@@ -45,7 +46,13 @@ func TestManualSync(t *testing.T) {
 	dstLinkSys := test.MkLinkSystem(dstStore)
 	dstHost := test.MkTestHost()
 
-	sub, err := legs.NewSubscriber(dstHost, dstStore, dstLinkSys, testTopic, nil)
+	blocksSeenByHook := make(map[cid.Cid]struct{})
+	blockHook := func(p peer.ID, c cid.Cid) {
+		blocksSeenByHook[c] = struct{}{}
+		t.Log("http block hook got", c, "from", p)
+	}
+
+	sub, err := legs.NewSubscriber(dstHost, dstStore, dstLinkSys, testTopic, nil, legs.BlockHook(blockHook))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -69,5 +76,10 @@ func TestManualSync(t *testing.T) {
 
 	if !syncCid.Equals(rootLnk.(cidlink.Link).Cid) {
 		t.Fatalf("didn't get expected cid. expected %s, got %s", rootLnk, syncCid)
+	}
+
+	_, ok := blocksSeenByHook[syncCid]
+	if !ok {
+		t.Fatal("hook did not get", syncCid)
 	}
 }

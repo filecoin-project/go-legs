@@ -41,7 +41,10 @@ var errSourceNotAllowed = errors.New("message source not allowed")
 // from that peer are allowed rejected, respectively.  Returning an error
 // indicates that there was a problem evaluating the function, and results in
 // the messages being rejected.
-type AllowPeerFunc func(peerID peer.ID) (bool, error)
+type AllowPeerFunc func(peer.ID) (bool, error)
+
+// BlockHookFunc is the signature of a function that is called when a received.
+type BlockHookFunc func(peer.ID, cid.Cid)
 
 // Subscriber creates a single pubsub subscriber that receives messages from a
 // gossip pubsub topic, and creates a stateful message handler for each message
@@ -142,7 +145,7 @@ func NewSubscriber(host host.Host, ds datastore.Batching, lsys ipld.LinkSystem, 
 		return nil, err
 	}
 
-	dtSync, err := dtsync.NewSync(host, ds, lsys, cfg.dtManager)
+	dtSync, err := dtsync.NewSync(host, ds, lsys, cfg.dtManager, cfg.blockHook)
 	if err != nil {
 		cancelPubsub()
 		return nil, err
@@ -165,7 +168,7 @@ func NewSubscriber(host host.Host, ds datastore.Batching, lsys ipld.LinkSystem, 
 		inEvents:  make(chan SyncFinished, 1),
 
 		dtSync:   dtSync,
-		httpSync: httpsync.NewSync(lsys, cfg.httpClient),
+		httpSync: httpsync.NewSync(lsys, cfg.httpClient, cfg.blockHook),
 	}
 
 	// Start watcher to read pubsub messages.
@@ -313,7 +316,7 @@ func (s *Subscriber) OnSyncFinished() (<-chan SyncFinished, context.CancelFunc) 
 // only specify the selection sequence itself.
 //
 // See: ExploreRecursiveWithStopNode.
-func (s *Subscriber) Sync(ctx context.Context, peerID peer.ID, c cid.Cid, sel ipld.Node, publisher multiaddr.Multiaddr) (cid.Cid, error) {
+func (s *Subscriber) Sync(ctx context.Context, peerID peer.ID, c cid.Cid, sel ipld.Node, peerAddr multiaddr.Multiaddr) (cid.Cid, error) {
 	if peerID == "" {
 		return cid.Undef, errors.New("empty peer id")
 	}
@@ -325,11 +328,11 @@ func (s *Subscriber) Sync(ctx context.Context, peerID peer.ID, c cid.Cid, sel ip
 
 	log.Infow("Start sync", "cid", c)
 
-	// If publisher specified, then get URL for http sync, or add multiaddr to peerstore.
-	if publisher != nil {
-		for _, p := range publisher.Protocols() {
+	// If address specified, then get URL for http sync, or add multiaddr to peerstore.
+	if peerAddr != nil {
+		for _, p := range peerAddr.Protocols() {
 			if p.Code == multiaddr.P_HTTP || p.Code == multiaddr.P_HTTPS {
-				syncer, err = s.httpSync.NewSyncer(publisher)
+				syncer, err = s.httpSync.NewSyncer(peerAddr)
 				if err != nil {
 					return cid.Undef, err
 				}
@@ -341,7 +344,7 @@ func (s *Subscriber) Sync(ctx context.Context, peerID peer.ID, c cid.Cid, sel ip
 		if syncer == nil {
 			peerStore := s.host.Peerstore()
 			if peerStore != nil {
-				peerStore.AddAddr(peerID, publisher, s.addrTTL)
+				peerStore.AddAddr(peerID, peerAddr, s.addrTTL)
 			}
 		}
 	}
@@ -552,12 +555,11 @@ func (h *handler) handle(ctx context.Context, nextCid cid.Cid, sel ipld.Node, wr
 		sel = ExploreRecursiveWithStopNode(selector.RecursionLimitNone(), sel, h.latestSync)
 	}
 
-	log.Debugw("Starting data channel for message source", "cid", nextCid, "latest_sync", h.latestSync, "source_peer", h.peerID)
-
 	err := syncer.Sync(ctx, nextCid, sel)
 	if err != nil {
 		return err
 	}
+	log.Debugw("Sync completed", "cid", nextCid, "peer", h.peerID)
 
 	if !updateLatest {
 		return nil

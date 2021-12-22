@@ -8,10 +8,12 @@ import (
 	"github.com/filecoin-project/go-legs"
 	"github.com/filecoin-project/go-legs/dtsync"
 	"github.com/filecoin-project/go-legs/test"
+	"github.com/ipfs/go-cid"
 	"github.com/ipfs/go-datastore"
 	dssync "github.com/ipfs/go-datastore/sync"
 	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
 	basicnode "github.com/ipld/go-ipld-prime/node/basic"
+	"github.com/libp2p/go-libp2p-core/peer"
 )
 
 const (
@@ -86,7 +88,13 @@ func TestRoundTrip(t *testing.T) {
 	}
 	defer pub2.Close()
 
-	sub, err := legs.NewSubscriber(dstHost, dstStore, dstLnkS, testTopic, nil, legs.Topic(topics[2]))
+	blocksSeenByHook := make(map[cid.Cid]struct{})
+	blockHook := func(p peer.ID, c cid.Cid) {
+		blocksSeenByHook[c] = struct{}{}
+		t.Log("block hook got", c, "from", p)
+	}
+
+	sub, err := legs.NewSubscriber(dstHost, dstStore, dstLnkS, testTopic, nil, legs.Topic(topics[2]), legs.BlockHook(blockHook))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -123,6 +131,18 @@ func TestRoundTrip(t *testing.T) {
 	t.Log("Publish 2:", lnk2.(cidlink.Link).Cid)
 	waitForSync(t, "Watcher 1", dstStore, lnk2.(cidlink.Link), watcher1)
 	waitForSync(t, "Watcher 2", dstStore, lnk2.(cidlink.Link), watcher2)
+
+	if len(blocksSeenByHook) != 2 {
+		t.Fatal("expected 2 blocks seen by hook, got", len(blocksSeenByHook))
+	}
+	_, ok := blocksSeenByHook[lnk1.(cidlink.Link).Cid]
+	if !ok {
+		t.Fatal("hook did not see link1")
+	}
+	_, ok = blocksSeenByHook[lnk2.(cidlink.Link).Cid]
+	if !ok {
+		t.Fatal("hook did not see link2")
+	}
 }
 
 func waitForSync(t *testing.T, logPrefix string, store *dssync.MutexDatastore, expectedCid cidlink.Link, watcher <-chan legs.SyncFinished) {

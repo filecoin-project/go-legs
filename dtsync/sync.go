@@ -15,6 +15,7 @@ import (
 	"github.com/ipfs/go-graphsync"
 	logging "github.com/ipfs/go-log/v2"
 	"github.com/ipld/go-ipld-prime"
+	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
 	"github.com/libp2p/go-libp2p-core/host"
 	"github.com/libp2p/go-libp2p-core/peer"
 )
@@ -28,6 +29,7 @@ type Sync struct {
 	host        host.Host
 	tmpDir      string
 	unsubEvents dt.Unsubscribe
+	unregHook   graphsync.UnregisterHookFunc
 
 	// Map of CID of in-progress sync to sync done channel.
 	syncDoneChans map[cid.Cid]chan<- error
@@ -35,7 +37,7 @@ type Sync struct {
 }
 
 // Sync provides sync functionality for use with all datatransfer syncs.
-func NewSync(host host.Host, ds datastore.Batching, lsys ipld.LinkSystem, dtManager dt.Manager) (*Sync, error) {
+func NewSync(host host.Host, ds datastore.Batching, lsys ipld.LinkSystem, dtManager dt.Manager, blockHook func(peer.ID, cid.Cid)) (*Sync, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	dtManager, gs, tmpDir, err := makeDataTransfer(ctx, host, ds, lsys, dtManager)
@@ -52,20 +54,24 @@ func NewSync(host host.Host, ds datastore.Batching, lsys ipld.LinkSystem, dtMana
 		tmpDir:     tmpDir,
 	}
 
+	if blockHook != nil {
+		s.unregHook = gs.RegisterIncomingBlockHook(makeIncomingBlockHook(blockHook))
+	}
 	s.unsubEvents = dtManager.SubscribeToEvents(s.onEvent)
 	return s, nil
 }
 
-func (s *Sync) GraphSync() graphsync.GraphExchange {
-	return s.gsExchange
-}
-
-func (s *Sync) DataTransfer() dt.Manager {
-	return s.dtManager
+func makeIncomingBlockHook(blockHook func(peer.ID, cid.Cid)) graphsync.OnIncomingBlockHook {
+	return func(p peer.ID, responseData graphsync.ResponseData, blockData graphsync.BlockData, hookActions graphsync.IncomingBlockHookActions) {
+		blockHook(p, blockData.Link().(cidlink.Link).Cid)
+	}
 }
 
 func (s *Sync) Close() error {
 	s.unsubEvents()
+	if s.unregHook != nil {
+		s.unregHook()
+	}
 
 	var err, errs error
 	// If tmpDir is non-empty, that means this Sync started the dtManager and

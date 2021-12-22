@@ -20,6 +20,7 @@ import (
 	basicnode "github.com/ipld/go-ipld-prime/node/basic"
 	"github.com/ipld/go-ipld-prime/traversal"
 	"github.com/ipld/go-ipld-prime/traversal/selector"
+	"github.com/libp2p/go-libp2p-core/peer"
 	"github.com/multiformats/go-multiaddr"
 )
 
@@ -29,25 +30,27 @@ var log = logging.Logger("go-legs-httpsync")
 
 // Sync provides sync functionality for use with all http syncs.
 type Sync struct {
-	client *http.Client
-	lsys   ipld.LinkSystem
+	client    *http.Client
+	lsys      ipld.LinkSystem
+	blockHook func(peer.ID, cid.Cid)
 }
 
-func NewSync(lsys ipld.LinkSystem, client *http.Client) *Sync {
+func NewSync(lsys ipld.LinkSystem, client *http.Client, blockHook func(peer.ID, cid.Cid)) *Sync {
 	if client == nil {
 		client = &http.Client{
 			Timeout: defaultHttpTimeout,
 		}
 	}
 	return &Sync{
-		client: client,
-		lsys:   lsys,
+		client:    client,
+		lsys:      lsys,
+		blockHook: blockHook,
 	}
 }
 
 // NewSyncer creates a new Syncer to use for a single sync operation against a peer.
-func (s *Sync) NewSyncer(publisher multiaddr.Multiaddr) (*Syncer, error) {
-	rootURL, err := maurl.ToURL(publisher)
+func (s *Sync) NewSyncer(peerAddr multiaddr.Multiaddr) (*Syncer, error) {
+	rootURL, err := maurl.ToURL(peerAddr)
 	if err != nil {
 		return nil, err
 	}
@@ -65,6 +68,7 @@ func (s *Sync) Close() {
 type Syncer struct {
 	sync    *Sync
 	rootURL url.URL
+	peerID  peer.ID
 }
 
 func (s *Syncer) GetHead(ctx context.Context) (cid.Cid, error) {
@@ -193,7 +197,11 @@ func (s *Syncer) fetchBlock(ctx context.Context, c cid.Cid) error {
 		err = committer(cidlink.Link{Cid: c})
 		if err != nil {
 			log.Errorw("Failed to commit ")
+			return err
 		}
-		return err
+		if s.sync.blockHook != nil {
+			s.sync.blockHook(s.peerID, c)
+		}
+		return nil
 	})
 }
