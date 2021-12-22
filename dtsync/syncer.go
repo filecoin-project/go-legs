@@ -24,6 +24,8 @@ func (s *Syncer) GetHead(ctx context.Context) (cid.Cid, error) {
 func (s *Syncer) Sync(ctx context.Context, nextCid cid.Cid, sel ipld.Node) error {
 	syncDone := s.sync.notifyOnSyncDone(nextCid)
 
+	log.Debugw("Starting data channel for message source", "cid", nextCid, "source_peer", s.peerID)
+
 	v := Voucher{&nextCid}
 	_, err := s.sync.dtManager.OpenPullDataChannel(ctx, s.peerID, &v, nextCid, sel)
 	if err != nil {

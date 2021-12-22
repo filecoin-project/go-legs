@@ -50,13 +50,13 @@ func NewPublisher(host host.Host, ds datastore.Batching, lsys ipld.LinkSystem, t
 			cancel()
 			return nil, err
 		}
-	} else {
-		cancel = func() {}
 	}
 
 	dtManager, _, tmpDir, err := makeDataTransfer(context.Background(), host, ds, lsys, nil)
 	if err != nil {
-		cancel()
+		if cancel != nil {
+			cancel()
+		}
 		return nil, err
 	}
 
@@ -103,13 +103,13 @@ func NewPublisherFromExisting(dtManager dt.Manager, host host.Host, topic string
 			cancel()
 			return nil, err
 		}
-	} else {
-		cancel = func() {}
 	}
 
 	err = configureDataTransferForLegs(context.Background(), dtManager, lsys)
 	if err != nil {
-		cancel()
+		if cancel != nil {
+			cancel()
+		}
 		return nil, err
 	}
 	headPublisher := head.NewPublisher()
@@ -123,18 +123,18 @@ func NewPublisherFromExisting(dtManager dt.Manager, host host.Host, topic string
 	}, nil
 }
 
-func (lp *publisher) UpdateRoot(ctx context.Context, c cid.Cid) error {
-	return lp.UpdateRootWithAddrs(ctx, c, lp.host.Addrs())
+func (p *publisher) UpdateRoot(ctx context.Context, c cid.Cid) error {
+	return p.UpdateRootWithAddrs(ctx, c, p.host.Addrs())
 }
 
-func (lp *publisher) UpdateRootWithAddrs(ctx context.Context, c cid.Cid, addrs []ma.Multiaddr) error {
+func (p *publisher) UpdateRootWithAddrs(ctx context.Context, c cid.Cid, addrs []ma.Multiaddr) error {
 	if c == cid.Undef {
 		return errors.New("cannot update to an undefined cid")
 	}
 
 	log.Debugf("Publishing CID and addresses in pubsub channel: %s", c)
 	var errs error
-	err := lp.headPublisher.UpdateRoot(ctx, c)
+	err := p.headPublisher.UpdateRoot(ctx, c)
 	if err != nil {
 		errs = multierror.Append(errs, err)
 	}
@@ -142,46 +142,48 @@ func (lp *publisher) UpdateRootWithAddrs(ctx context.Context, c cid.Cid, addrs [
 		Cid:   c,
 		Addrs: addrs,
 	}
-	err = lp.topic.Publish(ctx, EncodeMessage(msg))
+	err = p.topic.Publish(ctx, EncodeMessage(msg))
 	if err != nil {
 		errs = multierror.Append(errs, err)
 	}
 	return errs
 }
 
-func (lp *publisher) Close() error {
+func (p *publisher) Close() error {
 	var errs error
-	lp.closeOnce.Do(func() {
-		err := lp.headPublisher.Close()
+	p.closeOnce.Do(func() {
+		err := p.headPublisher.Close()
 		if err != nil {
 			errs = multierror.Append(errs, err)
 		}
 
 		// If tmpDir is non-empty, that means the publisher started the dtManager and
 		// it is ok to stop is and clean up the tmpDir.
-		if lp.tmpDir != "" {
+		if p.tmpDir != "" {
 			ctx, cancel := context.WithTimeout(context.Background(), shutdownTime)
 			defer cancel()
 
-			err = lp.dtManager.Stop(ctx)
+			err = p.dtManager.Stop(ctx)
 			if err != nil {
 				log.Errorf("Failed to stop datatransfer manager: %s", err)
 				errs = multierror.Append(errs, err)
 			}
-			if err = os.RemoveAll(lp.tmpDir); err != nil {
+			if err = os.RemoveAll(p.tmpDir); err != nil {
 				log.Errorf("Failed to remove temp dir: %s", err)
 				errs = multierror.Append(errs, err)
 			}
 		}
 
-		t := time.AfterFunc(shutdownTime, lp.cancelPubSub)
-		if err = lp.topic.Close(); err != nil {
+		t := time.AfterFunc(shutdownTime, p.cancelPubSub)
+		if err = p.topic.Close(); err != nil {
 			log.Errorf("Failed to close pubsub topic: %s", err)
 			errs = multierror.Append(errs, err)
 		}
 
 		t.Stop()
-		lp.cancelPubSub()
+		if p.cancelPubSub != nil {
+			p.cancelPubSub()
+		}
 	})
 	return errs
 }

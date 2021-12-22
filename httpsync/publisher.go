@@ -9,7 +9,6 @@ import (
 	"sync"
 
 	"github.com/ipfs/go-cid"
-	"github.com/ipfs/go-datastore"
 	"github.com/ipld/go-ipld-prime"
 	"github.com/ipld/go-ipld-prime/codec/dagjson"
 	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
@@ -30,7 +29,7 @@ type publisher struct {
 var _ http.Handler = (*publisher)(nil)
 
 // NewPublisher creates a new http publisher
-func NewPublisher(ctx context.Context, ds datastore.Batching, lsys ipld.LinkSystem, peerID peer.ID, privKey ic.PrivKey) *publisher {
+func NewPublisher(lsys ipld.LinkSystem, peerID peer.ID, privKey ic.PrivKey) *publisher {
 	return &publisher{
 		lsys:    lsys,
 		peerID:  peerID,
