@@ -88,6 +88,7 @@ type Subscriber struct {
 	cancelps context.CancelFunc
 	// closeOnde ensures that the Close only happens once.
 	closeOnce sync.Once
+	watchDone chan struct{}
 
 	dtSync   *dtsync.Sync
 	httpSync *httpsync.Sync
@@ -162,6 +163,7 @@ func NewSubscriber(host host.Host, ds datastore.Batching, lsys ipld.LinkSystem, 
 		topicName: cfg.topic.String(),
 		closing:   make(chan struct{}),
 		cancelps:  cancelPubsub,
+		watchDone: make(chan struct{}),
 
 		allowPeer: cfg.allowPeer,
 		handlers:  make(map[peer.ID]*handler),
@@ -231,7 +233,9 @@ func (s *Subscriber) Close() error {
 }
 
 func (s *Subscriber) doClose() error {
+	// Cancel pubsub and Wait for pubsub watcher to exit.
 	s.psub.Cancel()
+	<-s.watchDone
 
 	var err, errs error
 	if err = s.dtSync.Close(); err != nil {
@@ -457,6 +461,8 @@ func (s *Subscriber) getOrCreateHandler(peerID peer.ID, force bool) (*handler, e
 // consulted to determine if the peer's messages are allowed.  If allowed, a
 // new handler is created.  Otherwise, the message is ignored.
 func (s *Subscriber) watch(ctx context.Context) {
+	watchWG := new(sync.WaitGroup)
+
 	for {
 		msg, err := s.psub.Next(ctx)
 		if err != nil {
@@ -467,7 +473,7 @@ func (s *Subscriber) watch(ctx context.Context) {
 				log.Errorf("Error reading from pubsub: %s", err)
 				// TODO: restart subscription.
 			}
-			return
+			break
 		}
 
 		srcPeer, err := peer.IDFromBytes(msg.From)
@@ -506,26 +512,29 @@ func (s *Subscriber) watch(ctx context.Context) {
 
 		// Start new goroutine to handle this message instead of having
 		// persistent goroutine for each peer.
-		hnd.handleAsync(ctx, m.Cid, s.dss)
+		hnd.handleAsync(ctx, m.Cid, s.dss, watchWG)
 	}
+
+	watchWG.Wait()
+	close(s.watchDone)
 }
 
 // handleAsync starts a goroutine to process the latest message received over
 // pubsub.
-func (h *handler) handleAsync(ctx context.Context, nextCid cid.Cid, ss ipld.Node) {
-	// Remove any previous message and replace it with the most recent.
+func (h *handler) handleAsync(ctx context.Context, nextCid cid.Cid, ss ipld.Node, watchWG *sync.WaitGroup) {
+	watchWG.Add(1)
+	// Remove any previous message and replace it with the most recent.  Only
+	// process the most recent message regardless of how many arrive while
+	// waiting for a previous sync.
 	select {
 	case prevCid := <-h.msgChan:
 		log.Infow("Penging update replaced by new", "previous_cid", prevCid, "new_cid", nextCid)
 	default:
 	}
-
-	// Put new message on channel.  This is necessary so that if multiple
-	// messages arrive while this handler is already syncing, the messages are
-	// handled in order, regardless of goroutine scheduling.
 	h.msgChan <- nextCid
 
 	go func() {
+		defer watchWG.Done()
 		// Wait for this handler to become available.
 		h.syncMutex.Lock()
 		defer h.syncMutex.Unlock()
