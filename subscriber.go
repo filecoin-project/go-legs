@@ -108,9 +108,6 @@ type SyncFinished struct {
 // handler holds state that is specific to a peer
 type handler struct {
 	subscriber *Subscriber
-	// distEvents is used to communicate a SyncFinished event back to the
-	// Subscriber for distribution to OnSyncFinished readers.
-	distEvents chan<- SyncFinished
 	latestSync ipld.Link
 	msgChan    chan cid.Cid
 	// peerID is the ID of the peer this handler is responsible for.
@@ -448,7 +445,6 @@ func (s *Subscriber) getOrCreateHandler(peerID peer.ID, force bool) (*handler, e
 		subscriber: s,
 		msgChan:    make(chan cid.Cid, 1),
 		peerID:     peerID,
-		distEvents: s.inEvents,
 	}
 	s.handlers[peerID] = hnd
 
@@ -583,7 +579,7 @@ func (h *handler) handle(ctx context.Context, nextCid cid.Cid, sel ipld.Node, wr
 
 	// Tell the Subscriber to distribute SyncFinished to all notification
 	// destinations.
-	h.distEvents <- SyncFinished{Cid: nextCid, PeerID: h.peerID}
+	h.subscriber.inEvents <- SyncFinished{Cid: nextCid, PeerID: h.peerID}
 
 	return nil
 }
