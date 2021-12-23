@@ -1,15 +1,12 @@
 package dtsync
 
 import (
-	"context"
 	"errors"
 	"fmt"
-	"os"
 	"strings"
 	"sync"
 
 	dt "github.com/filecoin-project/go-data-transfer"
-	"github.com/hashicorp/go-multierror"
 	"github.com/ipfs/go-cid"
 	"github.com/ipfs/go-datastore"
 	"github.com/ipfs/go-graphsync"
@@ -23,11 +20,10 @@ import (
 var log = logging.Logger("go-legs-dtsync")
 
 type Sync struct {
-	cancel      context.CancelFunc
 	dtManager   dt.Manager
+	dtClose     dtCloseFunc
 	gsExchange  graphsync.GraphExchange
 	host        host.Host
-	tmpDir      string
 	unsubEvents dt.Unsubscribe
 	unregHook   graphsync.UnregisterHookFunc
 
@@ -38,20 +34,16 @@ type Sync struct {
 
 // Sync provides sync functionality for use with all datatransfer syncs.
 func NewSync(host host.Host, ds datastore.Batching, lsys ipld.LinkSystem, dtManager dt.Manager, blockHook func(peer.ID, cid.Cid)) (*Sync, error) {
-	ctx, cancel := context.WithCancel(context.Background())
-
-	dtManager, gs, tmpDir, err := makeDataTransfer(ctx, host, ds, lsys, dtManager)
+	dtManager, gs, dtClose, err := makeDataTransfer(host, ds, lsys, dtManager)
 	if err != nil {
-		cancel()
 		return nil, err
 	}
 
 	s := &Sync{
-		cancel:     cancel,
 		dtManager:  dtManager,
+		dtClose:    dtClose,
 		gsExchange: gs,
 		host:       host,
-		tmpDir:     tmpDir,
 	}
 
 	if blockHook != nil {
@@ -73,20 +65,7 @@ func (s *Sync) Close() error {
 		s.unregHook()
 	}
 
-	var err, errs error
-	// If tmpDir is non-empty, that means this Sync started the dtManager and
-	// it is ok to stop it and clean up the tmpDir.
-	if s.tmpDir != "" {
-		err = s.dtManager.Stop(context.Background())
-		if err != nil {
-			log.Errorf("Failed to stop datatransfer manager: %s", err)
-			errs = multierror.Append(errs, err)
-		}
-		if err = os.RemoveAll(s.tmpDir); err != nil {
-			log.Errorf("Failed to remove temp dir: %s", err)
-			errs = multierror.Append(errs, err)
-		}
-	}
+	err := s.dtClose()
 
 	// Dismiss any handlers waiting completion of sync.
 	s.syncDoneMutex.Lock()
@@ -99,8 +78,7 @@ func (s *Sync) Close() error {
 	s.syncDoneChans = nil
 	s.syncDoneMutex.Unlock()
 
-	s.cancel()
-	return errs
+	return err
 }
 
 // NewSyncer creates a new Syncer to use for a single sync operation against a peer.

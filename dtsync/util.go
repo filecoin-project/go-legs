@@ -3,11 +3,13 @@ package dtsync
 import (
 	"context"
 	"io/ioutil"
+	"os"
 
 	dt "github.com/filecoin-project/go-data-transfer"
 	datatransfer "github.com/filecoin-project/go-data-transfer/impl"
 	dtnetwork "github.com/filecoin-project/go-data-transfer/network"
 	gstransport "github.com/filecoin-project/go-data-transfer/transport/graphsync"
+	"github.com/hashicorp/go-multierror"
 	"github.com/ipfs/go-datastore"
 	"github.com/ipfs/go-graphsync"
 	gsimpl "github.com/ipfs/go-graphsync/impl"
@@ -15,6 +17,8 @@ import (
 	"github.com/ipld/go-ipld-prime"
 	"github.com/libp2p/go-libp2p-core/host"
 )
+
+type dtCloseFunc func() error
 
 // configureDataTransferForLegs configures an existing data transfer instance to serve go-legs requests
 // from given linksystem (publisher only)
@@ -57,7 +61,7 @@ func (lsc legStorageConfigration) configureTransport(chid dt.ChannelID, voucher 
 	}
 }
 
-func makeDataTransfer(ctx context.Context, host host.Host, ds datastore.Batching, lsys ipld.LinkSystem, dtManager dt.Manager) (dt.Manager, graphsync.GraphExchange, string, error) {
+func makeDataTransfer(host host.Host, ds datastore.Batching, lsys ipld.LinkSystem, dtManager dt.Manager) (dt.Manager, graphsync.GraphExchange, dtCloseFunc, error) {
 	var (
 		gs     graphsync.GraphExchange
 		err    error
@@ -79,13 +83,13 @@ func makeDataTransfer(ctx context.Context, host host.Host, ds datastore.Batching
 		tmpDir, err = ioutil.TempDir("", "go-legs")
 		if err != nil {
 			log.Errorf("Failed to create temp dir for datatransfer: %s", err)
-			return nil, nil, "", err
+			return nil, nil, nil, err
 		}
 		log.Debugf("Created datatransfer temp dir at path: %s", tmpDir)
 		dtManager, err = datatransfer.NewDataTransfer(ds, tmpDir, dtNet, tp)
 		if err != nil {
 			log.Errorf("Failed to instantiate datatransfer: %s", err)
-			return nil, nil, "", err
+			return nil, nil, nil, err
 		}
 	}
 
@@ -94,32 +98,54 @@ func makeDataTransfer(ctx context.Context, host host.Host, ds datastore.Batching
 	val := &legsValidator{}
 	if err := dtManager.RegisterVoucherType(v, val); err != nil {
 		log.Errorf("Failed to register legs validator voucher type: %s", err)
-		return nil, nil, "", err
+		return nil, nil, nil, err
 	}
 	if err = dtManager.RegisterVoucherResultType(lvr); err != nil {
 		log.Errorf("Failed to register legs voucher result: %s", err)
-		return nil, nil, "", err
+		return nil, nil, nil, err
 	}
 
-	if tmpDir != "" {
-		// Tell datatransfer to notify when ready.
-		dtReady := make(chan error)
-		dtManager.OnReady(func(e error) {
-			dtReady <- e
-		})
+	// If tmpDir is empty string, that means that dtManager was provided and
+	// was started elsewhere. So, nothing to do to stop and cleanup dtManager.
+	if tmpDir == "" {
+		closeFunc := func() error { return nil }
+		return dtManager, gs, closeFunc, nil
+	}
 
-		// Start datatransfer.
-		if err = dtManager.Start(ctx); err != nil {
-			log.Errorf("Failed to start datatransfer: %s", err)
-			return nil, nil, "", err
-		}
+	// Tell datatransfer to notify when ready.
+	dtReady := make(chan error)
+	dtManager.OnReady(func(e error) {
+		dtReady <- e
+	})
 
-		// Wait for datatrnasfer to be ready.
-		err = <-dtReady
+	// Start datatransfer.  The context passed in allows start to be canceled
+	// if fsm migration takes too long.  Not handling timeout for
+	// dtManager.Start(), so pass context.Background().
+	if err = dtManager.Start(context.Background()); err != nil {
+		log.Errorf("Failed to start datatransfer: %s", err)
+		return nil, nil, nil, err
+	}
+
+	// Wait for datatrnasfer to be ready.
+	err = <-dtReady
+	if err != nil {
+		return nil, nil, nil, err
+	}
+
+	closeFunc := func() error {
+		var err, errs error
+		err = dtManager.Stop(context.Background())
 		if err != nil {
-			return nil, nil, "", err
+			log.Errorf("Failed to stop datatransfer manager: %s", err)
+			errs = multierror.Append(errs, err)
 		}
+		if err = os.RemoveAll(tmpDir); err != nil {
+			log.Errorf("Failed to remove temp dir: %s", err)
+			errs = multierror.Append(errs, err)
+		}
+
+		return errs
 	}
 
-	return dtManager, gs, tmpDir, nil
+	return dtManager, gs, closeFunc, nil
 }

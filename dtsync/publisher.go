@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"net/http"
-	"os"
 	"sync"
 	"time"
 
@@ -24,9 +23,9 @@ type publisher struct {
 	cancelPubSub  context.CancelFunc
 	closeOnce     sync.Once
 	dtManager     dt.Manager
+	dtClose       dtCloseFunc
 	headPublisher *head.Publisher
 	host          host.Host
-	tmpDir        string
 	topic         *pubsub.Topic
 }
 
@@ -52,7 +51,7 @@ func NewPublisher(host host.Host, ds datastore.Batching, lsys ipld.LinkSystem, t
 		}
 	}
 
-	dtManager, _, tmpDir, err := makeDataTransfer(context.Background(), host, ds, lsys, nil)
+	dtManager, _, dtClose, err := makeDataTransfer(host, ds, lsys, nil)
 	if err != nil {
 		if cancel != nil {
 			cancel()
@@ -66,9 +65,9 @@ func NewPublisher(host host.Host, ds datastore.Batching, lsys ipld.LinkSystem, t
 	return &publisher{
 		cancelPubSub:  cancel,
 		dtManager:     dtManager,
+		dtClose:       dtClose,
 		headPublisher: headPublisher,
 		host:          host,
-		tmpDir:        tmpDir,
 		topic:         t,
 	}, nil
 }
@@ -157,19 +156,9 @@ func (p *publisher) Close() error {
 			errs = multierror.Append(errs, err)
 		}
 
-		// If tmpDir is non-empty, that means the publisher started the dtManager and
-		// it is ok to stop is and clean up the tmpDir.
-		if p.tmpDir != "" {
-			ctx, cancel := context.WithTimeout(context.Background(), shutdownTime)
-			defer cancel()
-
-			err = p.dtManager.Stop(ctx)
+		if p.dtClose != nil {
+			err = p.dtClose()
 			if err != nil {
-				log.Errorf("Failed to stop datatransfer manager: %s", err)
-				errs = multierror.Append(errs, err)
-			}
-			if err = os.RemoveAll(p.tmpDir); err != nil {
-				log.Errorf("Failed to remove temp dir: %s", err)
 				errs = multierror.Append(errs, err)
 			}
 		}
