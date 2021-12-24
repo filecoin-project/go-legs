@@ -36,7 +36,7 @@ func configureDataTransferForLegs(ctx context.Context, dtManager dt.Manager, lsy
 		return err
 	}
 	if err := dtManager.RegisterTransportConfigurer(v, lsc.configureTransport); err != nil {
-		log.Errorf("Failed to register datatrasfer TransportConfigurer: %s", err)
+		log.Errorf("Failed to register datatransfer TransportConfigurer: %s", err)
 		return err
 	}
 	return nil
@@ -120,7 +120,7 @@ func makeDataTransfer(host host.Host, ds datastore.Batching, lsys ipld.LinkSyste
 		return nil, nil, nil, err
 	}
 
-	// Wait for datatrnasfer to be ready.
+	// Wait for datatransfer to be ready.
 	err = <-dtReady
 	if err != nil {
 		return nil, nil, nil, err

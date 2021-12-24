@@ -10,17 +10,20 @@ import (
 	"github.com/libp2p/go-libp2p-core/peer"
 )
 
+// Syncer handles a single sync with a provider.
 type Syncer struct {
 	peerID    peer.ID
 	sync      *Sync
 	topicName string
 }
 
+// GetHead queries a provider for the latest CID.
 func (s *Syncer) GetHead(ctx context.Context) (cid.Cid, error) {
-	// Query the peer for the latest CID
 	return head.QueryRootCid(ctx, s.sync.host, s.topicName, s.peerID)
 }
 
+// Sync opens a datatransfer data channel and uses the selector to pull data
+// from the provider.
 func (s *Syncer) Sync(ctx context.Context, nextCid cid.Cid, sel ipld.Node) error {
 	syncDone := s.sync.notifyOnSyncDone(nextCid)
 

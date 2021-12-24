@@ -55,22 +55,25 @@ func watch(notifications <-chan legs.SyncFinished) {
 
 To shutdown a `Subscriber`, call its `Close()` method.
 
-A `Subscriber` can be created with a `AllowPeer` function.  This function determines if the `Subscriber` accepts or rejects messages from a publisher, when a message is received from a new publisher with whom a sync has not already been done.
-
-The `Subscriber` keeps track of the latest head for each publisher that it has synced. This avoids exchanging the whole DAG from scratch in every update and instead downloads only the part that has not been synced. This value is not persisted as part of the library. If you want to start a `Subscriber` which has already partially synced with a provider you can use:
+A `Subscriber` can be created with a function that determines if the `Subscriber` accepts or rejects messages from a publisher.  Use the `AllowPeer` option to specify the function.
 ```golang
-sub, err := legs.NewSubscriber(dstHost, dstStore, dstLnkS, "/legs/topic", allowPeer)
+sub, err := legs.NewSubscriber(dstHost, dstStore, dstLnkS, "/legs/topic", nil, legs.AllowPeer(allowPeer))
+```
+
+The `Subscriber` keeps track of the latest head for each publisher that it has synced. This avoids exchanging the whole DAG from scratch in every update and instead downloads only the part that has not been synced. This value is not persisted as part of the library. If you want to start a `Subscriber` which has already partially synced with a provider you can use the `SetLatestSync` method:
+```golang
+sub, err := legs.NewSubscriber(dstHost, dstStore, dstLnkS, "/legs/topic", nil)
 if err != nil {
     panic(err)
 }
 // Set up partially synced publishers
-if err = brk.SetLatestSync(peerID1, lastSync1) ; err != nil {
+if err = sub.SetLatestSync(peerID1, lastSync1) ; err != nil {
     panic(err)
 }
-if err = brk.SetLatestSync(peerID2, lastSync2) ; err != nil {
+if err = sub.SetLatestSync(peerID2, lastSync2) ; err != nil {
     panic(err)
 }
-if err = brk.SetLatestSync(peerID3, lastSync3) ; err != nil {
+if err = sub.SetLatestSync(peerID3, lastSync3) ; err != nil {
     panic(err)
 }
 ```

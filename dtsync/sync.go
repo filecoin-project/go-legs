@@ -72,7 +72,7 @@ func makeIncomingBlockHook(blockHook func(peer.ID, cid.Cid)) graphsync.OnIncomin
 	}
 }
 
-// Close ungeristers datatransfer event notification. If this Sync owns the
+// Close unregisters datatransfer event notification. If this Sync owns the
 // datatransfer.Manager then the Manager is stopped.
 func (s *Sync) Close() error {
 	s.unsubEvents()

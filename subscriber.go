@@ -318,7 +318,7 @@ func (s *Subscriber) OnSyncFinished() (<-chan SyncFinished, context.CancelFunc) 
 // after the latest sync in order to avid re-syncing of content that may have
 // previously been synced.
 //
-// The selector sequence, selSec, can optionally be specified to customize the
+// The selector sequence, sel, can optionally be specified to customize the
 // selection sequence during traversal.  If unspecified, the default selector
 // sequence is used.
 //
