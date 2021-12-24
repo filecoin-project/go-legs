@@ -1,15 +1,12 @@
 package dtsync
 
 import (
-	"context"
 	"errors"
 	"fmt"
-	"os"
 	"strings"
 	"sync"
 
 	dt "github.com/filecoin-project/go-data-transfer"
-	"github.com/hashicorp/go-multierror"
 	"github.com/ipfs/go-cid"
 	"github.com/ipfs/go-datastore"
 	"github.com/ipfs/go-graphsync"
@@ -22,12 +19,11 @@ import (
 
 var log = logging.Logger("go-legs-dtsync")
 
+// Sync provides sync functionality for use with all datatransfer syncs.
 type Sync struct {
-	cancel      context.CancelFunc
 	dtManager   dt.Manager
-	gsExchange  graphsync.GraphExchange
+	dtClose     dtCloseFunc
 	host        host.Host
-	tmpDir      string
 	unsubEvents dt.Unsubscribe
 	unregHook   graphsync.UnregisterHookFunc
 
@@ -36,27 +32,36 @@ type Sync struct {
 	syncDoneMutex sync.Mutex
 }
 
-// Sync provides sync functionality for use with all datatransfer syncs.
-func NewSync(host host.Host, ds datastore.Batching, lsys ipld.LinkSystem, dtManager dt.Manager, blockHook func(peer.ID, cid.Cid)) (*Sync, error) {
-	ctx, cancel := context.WithCancel(context.Background())
+// NewSyncWithDT creates a new Sync with a datatransfer.Manager provided by the
+// caller.
+func NewSyncWithDT(host host.Host, dtManager dt.Manager) (*Sync, error) {
+	registerVoucher(dtManager)
+	s := &Sync{
+		host:      host,
+		dtManager: dtManager,
+	}
 
-	dtManager, gs, tmpDir, err := makeDataTransfer(ctx, host, ds, lsys, dtManager)
+	s.unsubEvents = dtManager.SubscribeToEvents(s.onEvent)
+	return s, nil
+}
+
+// NewSync creates a new Sync with its own datatransfer.Manager.
+func NewSync(host host.Host, ds datastore.Batching, lsys ipld.LinkSystem, blockHook func(peer.ID, cid.Cid)) (*Sync, error) {
+	dtManager, gs, dtClose, err := makeDataTransfer(host, ds, lsys)
 	if err != nil {
-		cancel()
 		return nil, err
 	}
 
 	s := &Sync{
-		cancel:     cancel,
-		dtManager:  dtManager,
-		gsExchange: gs,
-		host:       host,
-		tmpDir:     tmpDir,
+		host:      host,
+		dtManager: dtManager,
+		dtClose:   dtClose,
 	}
 
 	if blockHook != nil {
 		s.unregHook = gs.RegisterIncomingBlockHook(makeIncomingBlockHook(blockHook))
 	}
+
 	s.unsubEvents = dtManager.SubscribeToEvents(s.onEvent)
 	return s, nil
 }
@@ -67,25 +72,17 @@ func makeIncomingBlockHook(blockHook func(peer.ID, cid.Cid)) graphsync.OnIncomin
 	}
 }
 
+// Close unregisters datatransfer event notification. If this Sync owns the
+// datatransfer.Manager then the Manager is stopped.
 func (s *Sync) Close() error {
 	s.unsubEvents()
 	if s.unregHook != nil {
 		s.unregHook()
 	}
 
-	var err, errs error
-	// If tmpDir is non-empty, that means this Sync started the dtManager and
-	// it is ok to stop it and clean up the tmpDir.
-	if s.tmpDir != "" {
-		err = s.dtManager.Stop(context.Background())
-		if err != nil {
-			log.Errorf("Failed to stop datatransfer manager: %s", err)
-			errs = multierror.Append(errs, err)
-		}
-		if err = os.RemoveAll(s.tmpDir); err != nil {
-			log.Errorf("Failed to remove temp dir: %s", err)
-			errs = multierror.Append(errs, err)
-		}
+	var err error
+	if s.dtClose != nil {
+		err = s.dtClose()
 	}
 
 	// Dismiss any handlers waiting completion of sync.
@@ -99,8 +96,7 @@ func (s *Sync) Close() error {
 	s.syncDoneChans = nil
 	s.syncDoneMutex.Unlock()
 
-	s.cancel()
-	return errs
+	return err
 }
 
 // NewSyncer creates a new Syncer to use for a single sync operation against a peer.

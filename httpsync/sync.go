@@ -177,7 +177,7 @@ func (s *Syncer) fetch(ctx context.Context, rsrc string, cb func(io.Reader) erro
 	return cb(resp.Body)
 }
 
-// fetchBlock fetches an item into the datastore at c if not locally avilable.
+// fetchBlock fetches an item into the datastore at c if not locally available.
 func (s *Syncer) fetchBlock(ctx context.Context, c cid.Cid) error {
 	n, err := s.sync.lsys.Load(ipld.LinkContext{}, cidlink.Link{Cid: c}, basicnode.Prototype.Any)
 	// node is already present.

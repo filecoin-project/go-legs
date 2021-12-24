@@ -62,7 +62,6 @@ type Subscriber struct {
 	// ExploreRecursiveWithStopNode.
 	dss  ipld.Node
 	host host.Host
-	lsys ipld.LinkSystem
 
 	addrTTL   time.Duration
 	psub      *pubsub.Subscription
@@ -86,8 +85,10 @@ type Subscriber struct {
 	closing chan struct{}
 	// cancelps cancels pubsub.
 	cancelps context.CancelFunc
-	// closeOnde ensures that the Close only happens once.
+	// closeOnce ensures that the Close only happens once.
 	closeOnce sync.Once
+	// watchDone signals that the pubsub watch function exited.
+	watchDone chan struct{}
 
 	dtSync   *dtsync.Sync
 	httpSync *httpsync.Sync
@@ -107,9 +108,6 @@ type SyncFinished struct {
 // handler holds state that is specific to a peer
 type handler struct {
 	subscriber *Subscriber
-	// distEvents is used to communicate a SyncFinished event back to the
-	// Subscriber for distribution to OnSyncFinished readers.
-	distEvents chan<- SyncFinished
 	latestSync ipld.Link
 	msgChan    chan cid.Cid
 	// peerID is the ID of the peer this handler is responsible for.
@@ -145,7 +143,18 @@ func NewSubscriber(host host.Host, ds datastore.Batching, lsys ipld.LinkSystem, 
 		return nil, err
 	}
 
-	dtSync, err := dtsync.NewSync(host, ds, lsys, cfg.dtManager, cfg.blockHook)
+	var dtSync *dtsync.Sync
+	if cfg.dtManager != nil {
+		if ds != nil {
+			log.Warn("Datastore cannot be used with DtManager option")
+		}
+		if cfg.blockHook != nil {
+			log.Warn("BlockHook option cannot be used with DtManager option")
+		}
+		dtSync, err = dtsync.NewSyncWithDT(host, cfg.dtManager)
+	} else {
+		dtSync, err = dtsync.NewSync(host, ds, lsys, cfg.blockHook)
+	}
 	if err != nil {
 		cancelPubsub()
 		return nil, err
@@ -154,7 +163,6 @@ func NewSubscriber(host host.Host, ds datastore.Batching, lsys ipld.LinkSystem, 
 	s := &Subscriber{
 		dss:  dss,
 		host: host,
-		lsys: lsys,
 
 		addrTTL:   cfg.addrTTL,
 		psub:      psub,
@@ -162,6 +170,7 @@ func NewSubscriber(host host.Host, ds datastore.Batching, lsys ipld.LinkSystem, 
 		topicName: cfg.topic.String(),
 		closing:   make(chan struct{}),
 		cancelps:  cancelPubsub,
+		watchDone: make(chan struct{}),
 
 		allowPeer: cfg.allowPeer,
 		handlers:  make(map[peer.ID]*handler),
@@ -231,7 +240,9 @@ func (s *Subscriber) Close() error {
 }
 
 func (s *Subscriber) doClose() error {
+	// Cancel pubsub and Wait for pubsub watcher to exit.
 	s.psub.Cancel()
+	<-s.watchDone
 
 	var err, errs error
 	if err = s.dtSync.Close(); err != nil {
@@ -294,20 +305,20 @@ func (s *Subscriber) OnSyncFinished() (<-chan SyncFinished, context.CancelFunc) 
 
 // Sync performs a one-off explicit sync with the given peer for a specific CID
 // and updates the latest synced link to it.  Completing sync may take a
-// significant abount of time, so Sync should generally be run in its own
+// significant about of time, so Sync should generally be run in its own
 // goroutine.
 //
 // The latest synced CID is returned when this sync is complete.  Any
 // OnSyncFinished readers will also get a SyncFinished when the sync succeeds,
 // but only if syncing to the latest, using `cid.Undef`, and using the default
-// selector.  This is because when specifying a cid, it is usually for an
+// selector.  This is because when specifying a CID, it is usually for an
 // entries sync, not an advertisements sync.
 //
 // It is the responsibility of the caller to make sure the given CID appears
 // after the latest sync in order to avid re-syncing of content that may have
 // previously been synced.
 //
-// The selector sequence, selSec, can optionally be specified to customize the
+// The selector sequence, sel, can optionally be specified to customize the
 // selection sequence during traversal.  If unspecified, the default selector
 // sequence is used.
 //
@@ -328,7 +339,7 @@ func (s *Subscriber) Sync(ctx context.Context, peerID peer.ID, c cid.Cid, sel ip
 
 	log.Infow("Start sync", "cid", c)
 
-	// If address specified, then get URL for http sync, or add multiaddr to peerstore.
+	// If address specified, then get URL for HTTP sync, or add multiaddr to peerstore.
 	if peerAddr != nil {
 		for _, p := range peerAddr.Protocols() {
 			if p.Code == multiaddr.P_HTTP || p.Code == multiaddr.P_HTTPS {
@@ -340,7 +351,7 @@ func (s *Subscriber) Sync(ctx context.Context, peerID peer.ID, c cid.Cid, sel ip
 			}
 		}
 
-		// Not http, so add multiaddr to peerstore.
+		// Not HTTP, so add multiaddr to peerstore.
 		if syncer == nil {
 			peerStore := s.host.Peerstore()
 			if peerStore != nil {
@@ -444,7 +455,6 @@ func (s *Subscriber) getOrCreateHandler(peerID peer.ID, force bool) (*handler, e
 		subscriber: s,
 		msgChan:    make(chan cid.Cid, 1),
 		peerID:     peerID,
-		distEvents: s.inEvents,
 	}
 	s.handlers[peerID] = hnd
 
@@ -457,6 +467,8 @@ func (s *Subscriber) getOrCreateHandler(peerID peer.ID, force bool) (*handler, e
 // consulted to determine if the peer's messages are allowed.  If allowed, a
 // new handler is created.  Otherwise, the message is ignored.
 func (s *Subscriber) watch(ctx context.Context) {
+	watchWG := new(sync.WaitGroup)
+
 	for {
 		msg, err := s.psub.Next(ctx)
 		if err != nil {
@@ -467,7 +479,7 @@ func (s *Subscriber) watch(ctx context.Context) {
 				log.Errorf("Error reading from pubsub: %s", err)
 				// TODO: restart subscription.
 			}
-			return
+			break
 		}
 
 		srcPeer, err := peer.IDFromBytes(msg.From)
@@ -506,26 +518,29 @@ func (s *Subscriber) watch(ctx context.Context) {
 
 		// Start new goroutine to handle this message instead of having
 		// persistent goroutine for each peer.
-		hnd.handleAsync(ctx, m.Cid, s.dss)
+		hnd.handleAsync(ctx, m.Cid, s.dss, watchWG)
 	}
+
+	watchWG.Wait()
+	close(s.watchDone)
 }
 
 // handleAsync starts a goroutine to process the latest message received over
 // pubsub.
-func (h *handler) handleAsync(ctx context.Context, nextCid cid.Cid, ss ipld.Node) {
-	// Remove any previous message and replace it with the most recent.
+func (h *handler) handleAsync(ctx context.Context, nextCid cid.Cid, ss ipld.Node, watchWG *sync.WaitGroup) {
+	watchWG.Add(1)
+	// Remove any previous message and replace it with the most recent.  Only
+	// process the most recent message regardless of how many arrive while
+	// waiting for a previous sync.
 	select {
 	case prevCid := <-h.msgChan:
-		log.Infow("Penging update replaced by new", "previous_cid", prevCid, "new_cid", nextCid)
+		log.Infow("Pending update replaced by new", "previous_cid", prevCid, "new_cid", nextCid)
 	default:
 	}
-
-	// Put new message on channel.  This is necessary so that if multiple
-	// messages arrive while this handler is already syncing, the messages are
-	// handled in order, regardless of goroutine scheduling.
 	h.msgChan <- nextCid
 
 	go func() {
+		defer watchWG.Done()
 		// Wait for this handler to become available.
 		h.syncMutex.Lock()
 		defer h.syncMutex.Unlock()
@@ -566,15 +581,16 @@ func (h *handler) handle(ctx context.Context, nextCid cid.Cid, sel ipld.Node, wr
 	}
 
 	// Update latest head seen.
+	//
 	// NOTE: This is not persisted anywhere. Is the top-level user's
-	// responsibility to persist if needed to initialize a
-	// partiallySynced subscriber.
+	// responsibility to persist if needed to initialize a partially-synced
+	// subscriber.
 	h.latestSync = cidlink.Link{Cid: nextCid}
 	log.Infow("Updating latest sync", "sync_cid", nextCid, "peer", h.peerID)
 
 	// Tell the Subscriber to distribute SyncFinished to all notification
 	// destinations.
-	h.distEvents <- SyncFinished{Cid: nextCid, PeerID: h.peerID}
+	h.subscriber.inEvents <- SyncFinished{Cid: nextCid, PeerID: h.peerID}
 
 	return nil
 }

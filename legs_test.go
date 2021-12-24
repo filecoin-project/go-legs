@@ -146,7 +146,11 @@ func TestRoundTripExistingDataTransfer(t *testing.T) {
 		return true, nil
 	}
 
-	sub, err := legs.NewSubscriber(dstHost, dstStore, dstLnkS, testTopic, nil, legs.Topic(topics[1]), legs.DtManager(dtManagerDst), legs.AllowPeer(allowAll), legs.HttpClient(http.DefaultClient), legs.AddrTTL(time.Hour))
+	blockHook := func(p peer.ID, c cid.Cid) {
+		t.Fatal("blockHook should not be called with passed-in datatransfer manager")
+	}
+
+	sub, err := legs.NewSubscriber(dstHost, dstStore, dstLnkS, testTopic, nil, legs.Topic(topics[1]), legs.DtManager(dtManagerDst), legs.AllowPeer(allowAll), legs.HttpClient(http.DefaultClient), legs.AddrTTL(time.Hour), legs.BlockHook(blockHook))
 	if err != nil {
 		t.Fatal(err)
 	}
