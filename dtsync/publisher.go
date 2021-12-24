@@ -51,7 +51,7 @@ func NewPublisher(host host.Host, ds datastore.Batching, lsys ipld.LinkSystem, t
 		}
 	}
 
-	dtManager, _, dtClose, err := makeDataTransfer(host, ds, lsys, nil)
+	dtManager, _, dtClose, err := makeDataTransfer(host, ds, lsys)
 	if err != nil {
 		if cancel != nil {
 			cancel()

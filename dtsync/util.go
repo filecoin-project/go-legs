@@ -61,56 +61,50 @@ func (lsc legStorageConfigration) configureTransport(chid dt.ChannelID, voucher 
 	}
 }
 
-func makeDataTransfer(host host.Host, ds datastore.Batching, lsys ipld.LinkSystem, dtManager dt.Manager) (dt.Manager, graphsync.GraphExchange, dtCloseFunc, error) {
-	var (
-		gs     graphsync.GraphExchange
-		err    error
-		tmpDir string
-	)
-	if dtManager == nil {
-		gsNet := gsnet.NewFromLibp2pHost(host)
-		gs = gsimpl.New(context.Background(), gsNet, lsys)
-
-		dtNet := dtnetwork.NewFromLibp2pHost(host)
-		tp := gstransport.NewTransport(host.ID(), gs, dtNet)
-
-		// DataTransfer channels use this file to track cidlist of exchanges
-		// NOTE: It needs to be initialized for the datatransfer not to fail, but
-		// it has no other use outside the cidlist, so I don't think it should be
-		// exposed publicly. It's only used for the life of a data transfer.
-		// In the future, once an empty directory is accepted as input, it
-		// this may be removed.
-		tmpDir, err = ioutil.TempDir("", "go-legs")
-		if err != nil {
-			log.Errorf("Failed to create temp dir for datatransfer: %s", err)
-			return nil, nil, nil, err
-		}
-		log.Debugf("Created datatransfer temp dir at path: %s", tmpDir)
-		dtManager, err = datatransfer.NewDataTransfer(ds, tmpDir, dtNet, tp)
-		if err != nil {
-			log.Errorf("Failed to instantiate datatransfer: %s", err)
-			return nil, nil, nil, err
-		}
-	}
-
+func registerVoucher(dtManager dt.Manager) error {
 	v := &Voucher{}
 	lvr := &VoucherResult{}
 	val := &legsValidator{}
-	if err := dtManager.RegisterVoucherType(v, val); err != nil {
+	err := dtManager.RegisterVoucherType(v, val)
+	if err != nil {
 		log.Errorf("Failed to register legs validator voucher type: %s", err)
-		return nil, nil, nil, err
+		return err
 	}
 	if err = dtManager.RegisterVoucherResultType(lvr); err != nil {
 		log.Errorf("Failed to register legs voucher result: %s", err)
+		return err
+	}
+
+	return nil
+}
+
+func makeDataTransfer(host host.Host, ds datastore.Batching, lsys ipld.LinkSystem) (dt.Manager, graphsync.GraphExchange, dtCloseFunc, error) {
+	gsNet := gsnet.NewFromLibp2pHost(host)
+	gs := gsimpl.New(context.Background(), gsNet, lsys)
+
+	dtNet := dtnetwork.NewFromLibp2pHost(host)
+	tp := gstransport.NewTransport(host.ID(), gs, dtNet)
+
+	// DataTransfer channels use this file to track cidlist of exchanges NOTE:
+	// It needs to be initialized for the datatransfer not to fail, but it has
+	// no other use outside the cidlist, so I don't think it should be exposed
+	// publicly. It's only used for the life of a data transfer.  In the
+	// future, once an empty directory is accepted as input, it this may be
+	// removed.
+	tmpDir, err := ioutil.TempDir("", "go-legs")
+	if err != nil {
+		log.Errorf("Failed to create temp dir for datatransfer: %s", err)
+		return nil, nil, nil, err
+	}
+	log.Debugf("Created datatransfer temp dir at path: %s", tmpDir)
+
+	dtManager, err := datatransfer.NewDataTransfer(ds, tmpDir, dtNet, tp)
+	if err != nil {
+		log.Errorf("Failed to instantiate datatransfer: %s", err)
 		return nil, nil, nil, err
 	}
 
-	// If tmpDir is empty string, that means that dtManager was provided and
-	// was started elsewhere. So, nothing to do to stop and cleanup dtManager.
-	if tmpDir == "" {
-		closeFunc := func() error { return nil }
-		return dtManager, gs, closeFunc, nil
-	}
+	registerVoucher(dtManager)
 
 	// Tell datatransfer to notify when ready.
 	dtReady := make(chan error)
@@ -118,9 +112,9 @@ func makeDataTransfer(host host.Host, ds datastore.Batching, lsys ipld.LinkSyste
 		dtReady <- e
 	})
 
-	// Start datatransfer.  The context passed in allows start to be canceled
-	// if fsm migration takes too long.  Not handling timeout for
-	// dtManager.Start(), so pass context.Background().
+	// Start datatransfer.  The context passed in allows Start to be canceled
+	// if fsm migration takes too long.  Timeout for dtManager.Start() is not
+	// handled here, so pass context.Background().
 	if err = dtManager.Start(context.Background()); err != nil {
 		log.Errorf("Failed to start datatransfer: %s", err)
 		return nil, nil, nil, err

@@ -62,7 +62,6 @@ type Subscriber struct {
 	// ExploreRecursiveWithStopNode.
 	dss  ipld.Node
 	host host.Host
-	lsys ipld.LinkSystem
 
 	addrTTL   time.Duration
 	psub      *pubsub.Subscription
@@ -86,8 +85,9 @@ type Subscriber struct {
 	closing chan struct{}
 	// cancelps cancels pubsub.
 	cancelps context.CancelFunc
-	// closeOnde ensures that the Close only happens once.
+	// closeOnce ensures that the Close only happens once.
 	closeOnce sync.Once
+	// watchDone signals that the pubsub watch function exited.
 	watchDone chan struct{}
 
 	dtSync   *dtsync.Sync
@@ -143,7 +143,18 @@ func NewSubscriber(host host.Host, ds datastore.Batching, lsys ipld.LinkSystem, 
 		return nil, err
 	}
 
-	dtSync, err := dtsync.NewSync(host, ds, lsys, cfg.dtManager, cfg.blockHook)
+	var dtSync *dtsync.Sync
+	if cfg.dtManager != nil {
+		if ds != nil {
+			log.Warn("Datastore cannot be used with DtManager option")
+		}
+		if cfg.blockHook != nil {
+			log.Warn("BlockHook option cannot be used with DtManager option")
+		}
+		dtSync, err = dtsync.NewSyncWithDT(host, cfg.dtManager)
+	} else {
+		dtSync, err = dtsync.NewSync(host, ds, lsys, cfg.blockHook)
+	}
 	if err != nil {
 		cancelPubsub()
 		return nil, err
@@ -152,7 +163,6 @@ func NewSubscriber(host host.Host, ds datastore.Batching, lsys ipld.LinkSystem, 
 	s := &Subscriber{
 		dss:  dss,
 		host: host,
-		lsys: lsys,
 
 		addrTTL:   cfg.addrTTL,
 		psub:      psub,
@@ -295,13 +305,13 @@ func (s *Subscriber) OnSyncFinished() (<-chan SyncFinished, context.CancelFunc) 
 
 // Sync performs a one-off explicit sync with the given peer for a specific CID
 // and updates the latest synced link to it.  Completing sync may take a
-// significant abount of time, so Sync should generally be run in its own
+// significant about of time, so Sync should generally be run in its own
 // goroutine.
 //
 // The latest synced CID is returned when this sync is complete.  Any
 // OnSyncFinished readers will also get a SyncFinished when the sync succeeds,
 // but only if syncing to the latest, using `cid.Undef`, and using the default
-// selector.  This is because when specifying a cid, it is usually for an
+// selector.  This is because when specifying a CID, it is usually for an
 // entries sync, not an advertisements sync.
 //
 // It is the responsibility of the caller to make sure the given CID appears
@@ -329,7 +339,7 @@ func (s *Subscriber) Sync(ctx context.Context, peerID peer.ID, c cid.Cid, sel ip
 
 	log.Infow("Start sync", "cid", c)
 
-	// If address specified, then get URL for http sync, or add multiaddr to peerstore.
+	// If address specified, then get URL for HTTP sync, or add multiaddr to peerstore.
 	if peerAddr != nil {
 		for _, p := range peerAddr.Protocols() {
 			if p.Code == multiaddr.P_HTTP || p.Code == multiaddr.P_HTTPS {
@@ -341,7 +351,7 @@ func (s *Subscriber) Sync(ctx context.Context, peerID peer.ID, c cid.Cid, sel ip
 			}
 		}
 
-		// Not http, so add multiaddr to peerstore.
+		// Not HTTP, so add multiaddr to peerstore.
 		if syncer == nil {
 			peerStore := s.host.Peerstore()
 			if peerStore != nil {
@@ -524,7 +534,7 @@ func (h *handler) handleAsync(ctx context.Context, nextCid cid.Cid, ss ipld.Node
 	// waiting for a previous sync.
 	select {
 	case prevCid := <-h.msgChan:
-		log.Infow("Penging update replaced by new", "previous_cid", prevCid, "new_cid", nextCid)
+		log.Infow("Pending update replaced by new", "previous_cid", prevCid, "new_cid", nextCid)
 	default:
 	}
 	h.msgChan <- nextCid
@@ -571,9 +581,10 @@ func (h *handler) handle(ctx context.Context, nextCid cid.Cid, sel ipld.Node, wr
 	}
 
 	// Update latest head seen.
+	//
 	// NOTE: This is not persisted anywhere. Is the top-level user's
-	// responsibility to persist if needed to initialize a
-	// partiallySynced subscriber.
+	// responsibility to persist if needed to initialize a partially-synced
+	// subscriber.
 	h.latestSync = cidlink.Link{Cid: nextCid}
 	log.Infow("Updating latest sync", "sync_cid", nextCid, "peer", h.peerID)
 

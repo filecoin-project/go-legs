@@ -19,10 +19,10 @@ import (
 
 var log = logging.Logger("go-legs-dtsync")
 
+// Sync provides sync functionality for use with all datatransfer syncs.
 type Sync struct {
 	dtManager   dt.Manager
 	dtClose     dtCloseFunc
-	gsExchange  graphsync.GraphExchange
 	host        host.Host
 	unsubEvents dt.Unsubscribe
 	unregHook   graphsync.UnregisterHookFunc
@@ -32,23 +32,36 @@ type Sync struct {
 	syncDoneMutex sync.Mutex
 }
 
-// Sync provides sync functionality for use with all datatransfer syncs.
-func NewSync(host host.Host, ds datastore.Batching, lsys ipld.LinkSystem, dtManager dt.Manager, blockHook func(peer.ID, cid.Cid)) (*Sync, error) {
-	dtManager, gs, dtClose, err := makeDataTransfer(host, ds, lsys, dtManager)
+// NewSyncWithDT creates a new Sync with a datatransfer.Manager provided by the
+// caller.
+func NewSyncWithDT(host host.Host, dtManager dt.Manager) (*Sync, error) {
+	registerVoucher(dtManager)
+	s := &Sync{
+		host:      host,
+		dtManager: dtManager,
+	}
+
+	s.unsubEvents = dtManager.SubscribeToEvents(s.onEvent)
+	return s, nil
+}
+
+// NewSync creates a new Sync with its own datatransfer.Manager.
+func NewSync(host host.Host, ds datastore.Batching, lsys ipld.LinkSystem, blockHook func(peer.ID, cid.Cid)) (*Sync, error) {
+	dtManager, gs, dtClose, err := makeDataTransfer(host, ds, lsys)
 	if err != nil {
 		return nil, err
 	}
 
 	s := &Sync{
-		dtManager:  dtManager,
-		dtClose:    dtClose,
-		gsExchange: gs,
-		host:       host,
+		host:      host,
+		dtManager: dtManager,
+		dtClose:   dtClose,
 	}
 
 	if blockHook != nil {
 		s.unregHook = gs.RegisterIncomingBlockHook(makeIncomingBlockHook(blockHook))
 	}
+
 	s.unsubEvents = dtManager.SubscribeToEvents(s.onEvent)
 	return s, nil
 }
@@ -59,13 +72,18 @@ func makeIncomingBlockHook(blockHook func(peer.ID, cid.Cid)) graphsync.OnIncomin
 	}
 }
 
+// Close ungeristers datatransfer event notification. If this Sync owns the
+// datatransfer.Manager then the Manager is stopped.
 func (s *Sync) Close() error {
 	s.unsubEvents()
 	if s.unregHook != nil {
 		s.unregHook()
 	}
 
-	err := s.dtClose()
+	var err error
+	if s.dtClose != nil {
+		err = s.dtClose()
+	}
 
 	// Dismiss any handlers waiting completion of sync.
 	s.syncDoneMutex.Lock()
