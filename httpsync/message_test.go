@@ -59,6 +59,6 @@ func TestRoundTripHeadMsgWithIncludedPubKey(t *testing.T) {
 	}
 
 	if !includedPubKey.Equals(pubKey) {
-		t.Fatal("CidStr mismatch. Failed round trip")
+		t.Fatal("pubkey mismatch. Failed round trip")
 	}
 }
