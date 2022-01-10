@@ -75,11 +75,11 @@ type Syncer struct {
 }
 
 func (s *Syncer) GetHead(ctx context.Context) (cid.Cid, error) {
-	var headMsg HeadMsg
+	var head cid.Cid
 	var pubKey ic.PubKey
 	err := s.fetch(ctx, "head", func(msg io.Reader) error {
 		var err error
-		pubKey, headMsg, err = OpenHeadMsgEnvelopeWithIncludedPubKey(msg)
+		pubKey, head, err = OpenSignedHeadWithIncludedPubKey(msg)
 		return err
 	})
 
@@ -96,7 +96,7 @@ func (s *Syncer) GetHead(ctx context.Context) (cid.Cid, error) {
 		return cid.Undef, errHeadFromUnexpectedPeer
 	}
 
-	return cid.Decode(headMsg.CidStr)
+	return head, nil
 }
 
 func (s *Syncer) Sync(ctx context.Context, nextCid cid.Cid, sel ipld.Node) error {

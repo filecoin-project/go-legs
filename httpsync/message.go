@@ -1,38 +1,53 @@
 package httpsync
 
 import (
-	"encoding/json"
+	"bytes"
 	"errors"
 	"io"
 
+	"github.com/ipfs/go-cid"
+	"github.com/ipld/go-ipld-prime/codec/dagjson"
+	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
+	"github.com/ipld/go-ipld-prime/node/bindnode"
+	"github.com/ipld/go-ipld-prime/schema"
 	ic "github.com/libp2p/go-libp2p-core/crypto"
 )
 
-// HeadMsg represents the head cid from the src.
-type HeadMsg struct {
-	CidStr string
+var typeSystem *schema.TypeSystem = createTypeSystem()
+
+func createTypeSystem() *schema.TypeSystem {
+	ts := schema.TypeSystem{}
+	ts.Init()
+	ts.Accumulate(schema.SpawnBytes("Bytes"))
+	ts.Accumulate(schema.SpawnLink("Link"))
+	ts.Accumulate(schema.SpawnStruct("SignedHead",
+		[]schema.StructField{
+			schema.SpawnStructField("Head", "Link", false, false),
+			schema.SpawnStructField("Sig", "Bytes", false, false),
+			schema.SpawnStructField("PubKey", "Bytes", false, false),
+		},
+		schema.SpawnStructRepresentationMap(nil),
+	))
+
+	return &ts
 }
 
-// SignedHeadMsgEnvelope is the signed envelope of a HeadMsg. It includes the
+func SignedHeadSchema() schema.Type {
+	return typeSystem.TypeByName("SignedHead")
+}
+
+// signedHead is the signed envelope of the head CID. It includes the
 // public key of the signer so the receiver can verify it and convert it to a
 // peer id. Note, the receiver is not required to use the provided public key.
-// Also note the signature is over the whole marshalled headmsg instead of just
-// a cidStr. This protects us from forgetting to sign something in the future if
-// we add to HeadMsg.
-type SignedHeadMsgEnvelope struct {
-	HeadMsg []byte
-	Sig     []byte
-	PubKey  []byte
+type signedHead struct {
+	Head   cidlink.Link
+	Sig    []byte
+	PubKey []byte
 }
 
-// SignedEnvelope returns the signed and marshalled version of the HeadMsg.
-func (m *HeadMsg) SignedEnvelope(privKey ic.PrivKey) ([]byte, error) {
-	headMsgBytes, err := json.Marshal(m)
-	if err != nil {
-		return nil, err
-	}
-
-	sig, err := privKey.Sign(headMsgBytes)
+// NewSignedEnvelope returns a new encoded SignedHead
+func NewEncodedSignedHead(cid cid.Cid, privKey ic.PrivKey) ([]byte, error) {
+	sig, err := privKey.Sign(cid.Bytes())
 	if err != nil {
 		return nil, err
 	}
@@ -42,55 +57,68 @@ func (m *HeadMsg) SignedEnvelope(privKey ic.PrivKey) ([]byte, error) {
 		return nil, err
 	}
 
-	return json.Marshal(SignedHeadMsgEnvelope{
-		HeadMsg: headMsgBytes,
-		Sig:     sig,
-		PubKey:  pubKeyBytes,
-	})
-}
-
-// OpenHeadMsgEnvelope returns the HeadMsg from the signed envelope given a
-// public key.
-func OpenHeadMsgEnvelope(pubKey ic.PubKey, signedHeadMsgEnvelope io.Reader) (HeadMsg, error) {
-	var envelop SignedHeadMsgEnvelope
-	err := json.NewDecoder(signedHeadMsgEnvelope).Decode(&envelop)
-	if err != nil {
-		return HeadMsg{}, err
+	envelop := &signedHead{
+		Head:   cidlink.Link{Cid: cid},
+		Sig:    sig,
+		PubKey: pubKeyBytes,
 	}
-
-	return openHeadMsgEnvelope(pubKey, envelop)
+	node := bindnode.Wrap(envelop, SignedHeadSchema())
+	var buf bytes.Buffer
+	err = dagjson.Encode(node.Representation(), &buf)
+	if err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
 }
 
-// OpenHeadMsgEnvelopeWithIncludedPubKey verifies the signature with the
-// included public key, then returns the public key and HeadMsg. The caller can
-// use this public key to derive the signer's peer id.
-func OpenHeadMsgEnvelopeWithIncludedPubKey(signedHeadMsgEnvelope io.Reader) (ic.PubKey, HeadMsg, error) {
-	var envelop SignedHeadMsgEnvelope
-	err := json.NewDecoder(signedHeadMsgEnvelope).Decode(&envelop)
+// OpenSignedHead returns the cid from the encoded signed head given a public key
+func OpenSignedHead(pubKey ic.PubKey, SignedHead io.Reader) (cid.Cid, error) {
+	envelop, err := decodeEnvelope(SignedHead)
 	if err != nil {
-		return nil, HeadMsg{}, err
+		return cid.Undef, err
+	}
+	return openSignedHead(pubKey, *envelop)
+}
+
+// OpenSignedHeadWithIncludedPubKey verifies the signature with the
+// included public key, then returns the public key and cid. The caller can
+// use this public key to derive the signer's peer id.
+func OpenSignedHeadWithIncludedPubKey(SignedHead io.Reader) (ic.PubKey, cid.Cid, error) {
+	envelop, err := decodeEnvelope(SignedHead)
+	if err != nil {
+		return nil, cid.Undef, err
 	}
 
 	pubKey, err := ic.UnmarshalPublicKey(envelop.PubKey)
 	if err != nil {
-		return nil, HeadMsg{}, err
+		return nil, cid.Undef, err
 	}
 
-	msg, err := openHeadMsgEnvelope(pubKey, envelop)
-	return pubKey, msg, err
+	cid, err := openSignedHead(pubKey, *envelop)
+	return pubKey, cid, err
 }
 
-func openHeadMsgEnvelope(pubKey ic.PubKey, envelop SignedHeadMsgEnvelope) (HeadMsg, error) {
-	ok, err := pubKey.Verify(envelop.HeadMsg, envelop.Sig)
+func decodeEnvelope(SignedHeadReader io.Reader) (*signedHead, error) {
+	var envelop *signedHead
+	proto := bindnode.Prototype((*signedHead)(nil), SignedHeadSchema())
+	builder := proto.NewBuilder()
+	err := dagjson.Decode(builder, SignedHeadReader)
 	if err != nil {
-		return HeadMsg{}, err
+		return envelop, err
+	}
+	envelop = bindnode.Unwrap(builder.Build()).(*signedHead)
+	return envelop, nil
+}
+
+func openSignedHead(pubKey ic.PubKey, envelop signedHead) (cid.Cid, error) {
+	ok, err := pubKey.Verify(envelop.Head.Bytes(), envelop.Sig)
+	if err != nil {
+		return cid.Undef, err
 	}
 
 	if !ok {
-		return HeadMsg{}, errors.New("invalid signature")
+		return cid.Undef, errors.New("invalid signature")
 	}
 
-	var headMsg HeadMsg
-	err = json.Unmarshal(envelop.HeadMsg, &headMsg)
-	return headMsg, err
+	return envelop.Head.Cid, err
 }
