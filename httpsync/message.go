@@ -22,9 +22,9 @@ func createTypeSystem() *schema.TypeSystem {
 	ts.Accumulate(schema.SpawnLink("Link"))
 	ts.Accumulate(schema.SpawnStruct("SignedHead",
 		[]schema.StructField{
-			schema.SpawnStructField("Head", "Link", false, false),
-			schema.SpawnStructField("Sig", "Bytes", false, false),
-			schema.SpawnStructField("PubKey", "Bytes", false, false),
+			schema.SpawnStructField("head", "Link", false, false),
+			schema.SpawnStructField("sig", "Bytes", false, false),
+			schema.SpawnStructField("pubkey", "Bytes", false, false),
 		},
 		schema.SpawnStructRepresentationMap(nil),
 	))
@@ -42,7 +42,7 @@ func SignedHeadSchema() schema.Type {
 type signedHead struct {
 	Head   cidlink.Link
 	Sig    []byte
-	PubKey []byte
+	Pubkey []byte
 }
 
 // NewSignedEnvelope returns a new encoded SignedHead
@@ -60,7 +60,7 @@ func NewEncodedSignedHead(cid cid.Cid, privKey ic.PrivKey) ([]byte, error) {
 	envelop := &signedHead{
 		Head:   cidlink.Link{Cid: cid},
 		Sig:    sig,
-		PubKey: pubKeyBytes,
+		Pubkey: pubKeyBytes,
 	}
 	node := bindnode.Wrap(envelop, SignedHeadSchema())
 	var buf bytes.Buffer
@@ -89,7 +89,7 @@ func OpenSignedHeadWithIncludedPubKey(SignedHead io.Reader) (ic.PubKey, cid.Cid,
 		return nil, cid.Undef, err
 	}
 
-	pubKey, err := ic.UnmarshalPublicKey(envelop.PubKey)
+	pubKey, err := ic.UnmarshalPublicKey(envelop.Pubkey)
 	if err != nil {
 		return nil, cid.Undef, err
 	}
