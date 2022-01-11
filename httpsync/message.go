@@ -45,7 +45,7 @@ type signedHead struct {
 	Pubkey []byte
 }
 
-// newEncodedSignedEnvelope returns a new encoded SignedHead
+// newEncodedSignedHead returns a new encoded SignedHead
 func newEncodedSignedHead(cid cid.Cid, privKey ic.PrivKey) ([]byte, error) {
 	sig, err := privKey.Sign(cid.Bytes())
 	if err != nil {
