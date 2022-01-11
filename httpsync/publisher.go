@@ -36,7 +36,7 @@ var _ http.Handler = (*publisher)(nil)
 // address.
 func NewPublisher(address string, lsys ipld.LinkSystem, peerID peer.ID, privKey ic.PrivKey) (*publisher, error) {
 	if privKey == nil {
-		return nil, errors.New("private key is nil. Can't sign head requests")
+		return nil, errors.New("private key required to sign head requests")
 	}
 
 	l, err := net.Listen("tcp", address)
