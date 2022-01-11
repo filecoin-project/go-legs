@@ -2,7 +2,6 @@ package httpsync
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"io"
 	"net"
@@ -36,6 +35,10 @@ var _ http.Handler = (*publisher)(nil)
 // NewPublisher creates a new http publisher, listening on the specified
 // address.
 func NewPublisher(address string, lsys ipld.LinkSystem, peerID peer.ID, privKey ic.PrivKey) (*publisher, error) {
+	if privKey == nil {
+		return nil, errors.New("private key required to sign head requests")
+	}
+
 	l, err := net.Listen("tcp", address)
 	if err != nil {
 		return nil, err
@@ -93,12 +96,13 @@ func (p *publisher) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		// serve the
 		p.rl.RLock()
 		defer p.rl.RUnlock()
-		out, err := json.Marshal(p.root.String())
+
+		marshalledMsg, err := newEncodedSignedHead(p.root, p.privKey)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
+			http.Error(w, "Failed to encode", http.StatusInternalServerError)
 			log.Errorw("Failed to serve root", "err", err)
 		} else {
-			_, _ = w.Write(out)
+			_, _ = w.Write(marshalledMsg)
 		}
 		return
 	}

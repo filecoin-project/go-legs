@@ -2,7 +2,6 @@ package httpsync
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -20,6 +19,7 @@ import (
 	basicnode "github.com/ipld/go-ipld-prime/node/basic"
 	"github.com/ipld/go-ipld-prime/traversal"
 	"github.com/ipld/go-ipld-prime/traversal/selector"
+	ic "github.com/libp2p/go-libp2p-core/crypto"
 	"github.com/libp2p/go-libp2p-core/peer"
 	"github.com/multiformats/go-multiaddr"
 )
@@ -49,7 +49,7 @@ func NewSync(lsys ipld.LinkSystem, client *http.Client, blockHook func(peer.ID, 
 }
 
 // NewSyncer creates a new Syncer to use for a single sync operation against a peer.
-func (s *Sync) NewSyncer(peerAddr multiaddr.Multiaddr) (*Syncer, error) {
+func (s *Sync) NewSyncer(peerID peer.ID, peerAddr multiaddr.Multiaddr) (*Syncer, error) {
 	rootURL, err := maurl.ToURL(peerAddr)
 	if err != nil {
 		return nil, err
@@ -58,12 +58,15 @@ func (s *Sync) NewSyncer(peerAddr multiaddr.Multiaddr) (*Syncer, error) {
 	return &Syncer{
 		sync:    s,
 		rootURL: *rootURL,
+		peerID:  peerID,
 	}, nil
 }
 
 func (s *Sync) Close() {
 	s.client.CloseIdleConnections()
 }
+
+var errHeadFromUnexpectedPeer = errors.New("found head signed from an unexpected peer")
 
 type Syncer struct {
 	sync    *Sync
@@ -72,15 +75,28 @@ type Syncer struct {
 }
 
 func (s *Syncer) GetHead(ctx context.Context) (cid.Cid, error) {
-	var cidStr string
+	var head cid.Cid
+	var pubKey ic.PubKey
 	err := s.fetch(ctx, "head", func(msg io.Reader) error {
-		return json.NewDecoder(msg).Decode(&cidStr)
+		var err error
+		pubKey, head, err = openSignedHeadWithIncludedPubKey(msg)
+		return err
 	})
+
 	if err != nil {
 		return cid.Undef, err
 	}
 
-	return cid.Decode(cidStr)
+	peerIDFromSig, err := peer.IDFromPublicKey(pubKey)
+	if err != nil {
+		return cid.Undef, err
+	}
+
+	if peerIDFromSig != s.peerID {
+		return cid.Undef, errHeadFromUnexpectedPeer
+	}
+
+	return head, nil
 }
 
 func (s *Syncer) Sync(ctx context.Context, nextCid cid.Cid, sel ipld.Node) error {

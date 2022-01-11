@@ -343,7 +343,7 @@ func (s *Subscriber) Sync(ctx context.Context, peerID peer.ID, c cid.Cid, sel ip
 	if peerAddr != nil {
 		for _, p := range peerAddr.Protocols() {
 			if p.Code == multiaddr.P_HTTP || p.Code == multiaddr.P_HTTPS {
-				syncer, err = s.httpSync.NewSyncer(peerAddr)
+				syncer, err = s.httpSync.NewSyncer(peerID, peerAddr)
 				if err != nil {
 					return cid.Undef, err
 				}
