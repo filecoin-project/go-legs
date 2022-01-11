@@ -97,7 +97,7 @@ func (p *publisher) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		p.rl.RLock()
 		defer p.rl.RUnlock()
 
-		marshalledMsg, err := NewEncodedSignedHead(p.root, p.privKey)
+		marshalledMsg, err := newEncodedSignedHead(p.root, p.privKey)
 		if err != nil {
 			http.Error(w, "Failed to encode", http.StatusInternalServerError)
 			log.Errorw("Failed to serve root", "err", err)

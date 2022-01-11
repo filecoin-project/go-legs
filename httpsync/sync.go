@@ -79,7 +79,7 @@ func (s *Syncer) GetHead(ctx context.Context) (cid.Cid, error) {
 	var pubKey ic.PubKey
 	err := s.fetch(ctx, "head", func(msg io.Reader) error {
 		var err error
-		pubKey, head, err = OpenSignedHeadWithIncludedPubKey(msg)
+		pubKey, head, err = openSignedHeadWithIncludedPubKey(msg)
 		return err
 	})
 

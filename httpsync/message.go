@@ -45,8 +45,8 @@ type signedHead struct {
 	Pubkey []byte
 }
 
-// NewSignedEnvelope returns a new encoded SignedHead
-func NewEncodedSignedHead(cid cid.Cid, privKey ic.PrivKey) ([]byte, error) {
+// newEncodedSignedEnvelope returns a new encoded SignedHead
+func newEncodedSignedHead(cid cid.Cid, privKey ic.PrivKey) ([]byte, error) {
 	sig, err := privKey.Sign(cid.Bytes())
 	if err != nil {
 		return nil, err
@@ -71,19 +71,19 @@ func NewEncodedSignedHead(cid cid.Cid, privKey ic.PrivKey) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-// OpenSignedHead returns the cid from the encoded signed head given a public key
-func OpenSignedHead(pubKey ic.PubKey, SignedHead io.Reader) (cid.Cid, error) {
+// openSignedHead returns the cid from the encoded signed head given a public key
+func openSignedHead(pubKey ic.PubKey, SignedHead io.Reader) (cid.Cid, error) {
 	envelop, err := decodeEnvelope(SignedHead)
 	if err != nil {
 		return cid.Undef, err
 	}
-	return openSignedHead(pubKey, *envelop)
+	return openSignedHeadEnvelop(pubKey, *envelop)
 }
 
-// OpenSignedHeadWithIncludedPubKey verifies the signature with the
+// openSignedHeadWithIncludedPubKey verifies the signature with the
 // included public key, then returns the public key and cid. The caller can
 // use this public key to derive the signer's peer id.
-func OpenSignedHeadWithIncludedPubKey(SignedHead io.Reader) (ic.PubKey, cid.Cid, error) {
+func openSignedHeadWithIncludedPubKey(SignedHead io.Reader) (ic.PubKey, cid.Cid, error) {
 	envelop, err := decodeEnvelope(SignedHead)
 	if err != nil {
 		return nil, cid.Undef, err
@@ -94,7 +94,7 @@ func OpenSignedHeadWithIncludedPubKey(SignedHead io.Reader) (ic.PubKey, cid.Cid,
 		return nil, cid.Undef, err
 	}
 
-	cid, err := openSignedHead(pubKey, *envelop)
+	cid, err := openSignedHeadEnvelop(pubKey, *envelop)
 	return pubKey, cid, err
 }
 
@@ -110,7 +110,7 @@ func decodeEnvelope(SignedHeadReader io.Reader) (*signedHead, error) {
 	return envelop, nil
 }
 
-func openSignedHead(pubKey ic.PubKey, envelop signedHead) (cid.Cid, error) {
+func openSignedHeadEnvelop(pubKey ic.PubKey, envelop signedHead) (cid.Cid, error) {
 	ok, err := pubKey.Verify(envelop.Head.Bytes(), envelop.Sig)
 	if err != nil {
 		return cid.Undef, err
