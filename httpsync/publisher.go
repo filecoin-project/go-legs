@@ -35,6 +35,10 @@ var _ http.Handler = (*publisher)(nil)
 // NewPublisher creates a new http publisher, listening on the specified
 // address.
 func NewPublisher(address string, lsys ipld.LinkSystem, peerID peer.ID, privKey ic.PrivKey) (*publisher, error) {
+	if privKey == nil {
+		return nil, errors.New("private key is nil. Can't sign head requests")
+	}
+
 	l, err := net.Listen("tcp", address)
 	if err != nil {
 		return nil, err
@@ -93,19 +97,13 @@ func (p *publisher) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		p.rl.RLock()
 		defer p.rl.RUnlock()
 
-		if p.privKey == nil {
-			http.Error(w, "Server not initialized", http.StatusInternalServerError)
-			log.Errorw("Failed to load private key to sign head request")
-			return
-		}
-
 		marshalledMsg, err := NewEncodedSignedHead(p.root, p.privKey)
 		if err != nil {
 			http.Error(w, "Failed to encode", http.StatusInternalServerError)
 			log.Errorw("Failed to serve root", "err", err)
+		} else {
+			_, _ = w.Write(marshalledMsg)
 		}
-
-		_, _ = w.Write(marshalledMsg)
 		return
 	}
 	// interpret `ask` as a CID to serve.
