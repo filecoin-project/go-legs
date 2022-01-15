@@ -2,8 +2,6 @@ package dtsync
 
 import (
 	"context"
-	"io/ioutil"
-	"os"
 
 	dt "github.com/filecoin-project/go-data-transfer"
 	datatransfer "github.com/filecoin-project/go-data-transfer/impl"
@@ -83,22 +81,9 @@ func makeDataTransfer(host host.Host, ds datastore.Batching, lsys ipld.LinkSyste
 	gs := gsimpl.New(context.Background(), gsNet, lsys)
 
 	dtNet := dtnetwork.NewFromLibp2pHost(host)
-	tp := gstransport.NewTransport(host.ID(), gs, dtNet)
+	tp := gstransport.NewTransport(host.ID(), gs)
 
-	// DataTransfer channels use this file to track cidlist of exchanges NOTE:
-	// It needs to be initialized for the datatransfer not to fail, but it has
-	// no other use outside the cidlist, so I don't think it should be exposed
-	// publicly. It's only used for the life of a data transfer.  In the
-	// future, once an empty directory is accepted as input, it this may be
-	// removed.
-	tmpDir, err := ioutil.TempDir("", "go-legs")
-	if err != nil {
-		log.Errorf("Failed to create temp dir for datatransfer: %s", err)
-		return nil, nil, nil, err
-	}
-	log.Debugf("Created datatransfer temp dir at path: %s", tmpDir)
-
-	dtManager, err := datatransfer.NewDataTransfer(ds, tmpDir, dtNet, tp)
+	dtManager, err := datatransfer.NewDataTransfer(ds, dtNet, tp)
 	if err != nil {
 		log.Errorf("Failed to instantiate datatransfer: %s", err)
 		return nil, nil, nil, err
@@ -133,11 +118,6 @@ func makeDataTransfer(host host.Host, ds datastore.Batching, lsys ipld.LinkSyste
 			log.Errorf("Failed to stop datatransfer manager: %s", err)
 			errs = multierror.Append(errs, err)
 		}
-		if err = os.RemoveAll(tmpDir); err != nil {
-			log.Errorf("Failed to remove temp dir: %s", err)
-			errs = multierror.Append(errs, err)
-		}
-
 		return errs
 	}
 

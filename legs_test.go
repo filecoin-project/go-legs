@@ -2,7 +2,6 @@ package legs_test
 
 import (
 	"context"
-	"io/ioutil"
 	"log"
 	"net/http"
 	"os"
@@ -78,21 +77,9 @@ func TestRoundTripExistingDataTransfer(t *testing.T) {
 	gsNet := gsnet.NewFromLibp2pHost(srcHost)
 	dtNet := dtnetwork.NewFromLibp2pHost(srcHost)
 	gs := gsimpl.New(context.Background(), gsNet, fakeLsys)
-	tp := gstransport.NewTransport(srcHost.ID(), gs, dtNet)
+	tp := gstransport.NewTransport(srcHost.ID(), gs)
 
-	// DataTransfer channels use this file to track cidlist of exchanges
-	// NOTE: It needs to be initialized for the datatransfer not to fail, but
-	// it has no other use outside the cidlist, so I don't think it should be
-	// exposed publicly. It's only used for the life of a data transfer.
-	// In the future, once an empty directory is accepted as input, it
-	// this may be removed.
-	tmpDir, err := ioutil.TempDir("", "go-legs")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.RemoveAll(tmpDir)
-
-	dtManager, err := dt.NewDataTransfer(srcStore, tmpDir, dtNet, tp)
+	dtManager, err := dt.NewDataTransfer(srcStore, dtNet, tp)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -119,20 +106,9 @@ func TestRoundTripExistingDataTransfer(t *testing.T) {
 	gsNetDst := gsnet.NewFromLibp2pHost(dstHost)
 	dtNetDst := dtnetwork.NewFromLibp2pHost(dstHost)
 	gsDst := gsimpl.New(context.Background(), gsNetDst, dstLnkS)
-	tpDst := gstransport.NewTransport(dstHost.ID(), gsDst, dtNetDst)
+	tpDst := gstransport.NewTransport(dstHost.ID(), gsDst)
 
-	// DataTransfer channels use this file to track cidlist of exchanges
-	// NOTE: It needs to be initialized for the datatransfer not to fail, but
-	// it has no other use outside the cidlist, so I don't think it should be
-	// exposed publicly. It's only used for the life of a data transfer.
-	// In the future, once an empty directory is accepted as input, it
-	// this may be removed.
-	tmpDirDst, err := ioutil.TempDir("", "go-legs")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.RemoveAll(tmpDirDst)
-	dtManagerDst, err := dt.NewDataTransfer(dstStore, tmpDirDst, dtNetDst, tpDst)
+	dtManagerDst, err := dt.NewDataTransfer(dstStore, dtNetDst, tpDst)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -180,7 +156,7 @@ func TestRoundTripExistingDataTransfer(t *testing.T) {
 		if !downstream.Cid.Equals(lnk.(cidlink.Link).Cid) {
 			t.Fatalf("sync'd cid unexpected %s vs %s", downstream.Cid, lnk)
 		}
-		if _, err := dstStore.Get(datastore.NewKey(downstream.Cid.String())); err != nil {
+		if _, err := dstStore.Get(context.Background(), datastore.NewKey(downstream.Cid.String())); err != nil {
 			t.Fatalf("data not in receiver store: %v", err)
 		}
 	}

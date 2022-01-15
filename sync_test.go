@@ -132,7 +132,7 @@ func TestSyncFn(t *testing.T) {
 	if !syncCid.Equals(lnk.(cidlink.Link).Cid) {
 		t.Fatalf("sync'd cid unexpected %s vs %s", syncCid, lnk)
 	}
-	if _, err := dstStore.Get(datastore.NewKey(syncCid.String())); err != nil {
+	if _, err := dstStore.Get(context.Background(), datastore.NewKey(syncCid.String())); err != nil {
 		t.Fatalf("data not in receiver store: %v", err)
 	}
 	syncncl()
@@ -175,7 +175,7 @@ func TestSyncFn(t *testing.T) {
 	if !syncCid.Equals(newHead) {
 		t.Fatalf("sync'd cid unexpected %s vs %s", syncCid, lnk)
 	}
-	if _, err := dstStore.Get(datastore.NewKey(syncCid.String())); err != nil {
+	if _, err := dstStore.Get(context.Background(), datastore.NewKey(syncCid.String())); err != nil {
 		t.Fatalf("data not in receiver store: %v", err)
 	}
 	syncncl()
@@ -235,7 +235,7 @@ func TestPartialSync(t *testing.T) {
 	}
 
 	// Check that first nodes hadn't been synced
-	if _, err := dstStore.Get(datastore.NewKey(chainLnks[3].(cidlink.Link).Cid.String())); err != datastore.ErrNotFound {
+	if _, err := dstStore.Get(context.Background(), datastore.NewKey(chainLnks[3].(cidlink.Link).Cid.String())); err != datastore.ErrNotFound {
 		t.Fatalf("data should not be in receiver store: %v", err)
 	}
 
@@ -256,7 +256,7 @@ func TestPartialSync(t *testing.T) {
 	}
 
 	// Check if the node we pass through was retrieved
-	if _, err := dstStore.Get(datastore.NewKey(chainLnks[1].(cidlink.Link).Cid.String())); err != datastore.ErrNotFound {
+	if _, err := dstStore.Get(context.Background(), datastore.NewKey(chainLnks[1].(cidlink.Link).Cid.String())); err != datastore.ErrNotFound {
 		t.Fatalf("data should not be in receiver store: %v", err)
 	}
 }
@@ -403,7 +403,7 @@ func newUpdateTest(pub legs.Publisher, sub *legs.Subscriber, dstStore datastore.
 			if !downstream.Cid.Equals(c) {
 				return fmt.Errorf("sync returned unexpected cid %s, expected %s", downstream.Cid, c)
 			}
-			if _, err = dstStore.Get(datastore.NewKey(downstream.Cid.String())); err != nil {
+			if _, err = dstStore.Get(context.Background(), datastore.NewKey(downstream.Cid.String())); err != nil {
 				return fmt.Errorf("data not in receiver store: %s", err)
 			}
 		}

@@ -26,7 +26,7 @@ var srcHost host.Host
 func ExamplePublisher() {
 	// Init legs publisher and subscriber
 	srcStore := dssync.MutexWrap(datastore.NewMapDatastore())
-	srcHost, _ = libp2p.New(context.Background())
+	srcHost, _ = libp2p.New()
 	srcLnkS := makeLinkSystem(srcStore)
 
 	pub, err := dtsync.NewPublisher(srcHost, srcStore, srcLnkS, testTopic)
@@ -59,7 +59,7 @@ func ExamplePublisher() {
 }
 
 func ExampleSubscriber() {
-	dstHost, _ := libp2p.New(context.Background())
+	dstHost, _ := libp2p.New()
 
 	dstStore := dssync.MutexWrap(datastore.NewMapDatastore())
 	dstLnkSys := makeLinkSystem(dstStore)
@@ -92,17 +92,17 @@ func ExampleSubscriber() {
 
 func makeLinkSystem(ds datastore.Batching) ipld.LinkSystem {
 	lsys := cidlink.DefaultLinkSystem()
-	lsys.StorageReadOpener = func(_ ipld.LinkContext, lnk ipld.Link) (io.Reader, error) {
-		val, err := ds.Get(datastore.NewKey(lnk.String()))
+	lsys.StorageReadOpener = func(lctx ipld.LinkContext, lnk ipld.Link) (io.Reader, error) {
+		val, err := ds.Get(lctx.Ctx, datastore.NewKey(lnk.String()))
 		if err != nil {
 			return nil, err
 		}
 		return bytes.NewBuffer(val), nil
 	}
-	lsys.StorageWriteOpener = func(_ ipld.LinkContext) (io.Writer, ipld.BlockWriteCommitter, error) {
+	lsys.StorageWriteOpener = func(lctx ipld.LinkContext) (io.Writer, ipld.BlockWriteCommitter, error) {
 		buf := bytes.NewBuffer(nil)
 		return buf, func(lnk ipld.Link) error {
-			return ds.Put(datastore.NewKey(lnk.String()), buf.Bytes())
+			return ds.Put(lctx.Ctx, datastore.NewKey(lnk.String()), buf.Bytes())
 		}, nil
 	}
 	return lsys

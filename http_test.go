@@ -203,7 +203,7 @@ func TestSyncFnHttp(t *testing.T) {
 	if !syncCid.Equals(lnk.(cidlink.Link).Cid) {
 		t.Fatalf("sync'd cid unexpected %s vs %s", syncCid, lnk)
 	}
-	if _, err := te.dstStore.Get(datastore.NewKey(syncCid.String())); err != nil {
+	if _, err := te.dstStore.Get(context.Background(), datastore.NewKey(syncCid.String())); err != nil {
 		t.Fatalf("data not in receiver store: %v", err)
 	}
 	syncncl()
@@ -230,7 +230,7 @@ func TestSyncFnHttp(t *testing.T) {
 	if !syncCid.Equals(newHead) {
 		t.Fatalf("sync'd cid unexpected %s vs %s", syncCid, lnk)
 	}
-	if _, err := te.dstStore.Get(datastore.NewKey(syncCid.String())); err != nil {
+	if _, err := te.dstStore.Get(context.Background(), datastore.NewKey(syncCid.String())); err != nil {
 		t.Fatalf("data not in receiver store: %v", err)
 	}
 	syncncl()
