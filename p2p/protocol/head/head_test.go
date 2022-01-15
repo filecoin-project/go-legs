@@ -17,11 +17,8 @@ import (
 )
 
 func TestFetchLatestHead(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	publisher, _ := libp2p.New(context.Background())
-	client, _ := libp2p.New(context.Background())
+	publisher, _ := libp2p.New()
+	client, _ := libp2p.New()
 
 	// Provide multiaddrs to connect to
 	client.Peerstore().AddAddrs(publisher.ID(), publisher.Addrs(), time.Hour)
@@ -35,6 +32,9 @@ func TestFetchLatestHead(t *testing.T) {
 	p := head.NewPublisher()
 	go p.Serve(publisher, "test")
 	defer p.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
 	c, err := head.QueryRootCid(ctx, client, "test", publisher.ID())
 	if err != nil && c != cid.Undef {

@@ -189,16 +189,16 @@ func RandomCids(n int) ([]cid.Cid, error) {
 func MkLinkSystem(ds datastore.Batching) ipld.LinkSystem {
 	lsys := cidlink.DefaultLinkSystem()
 	lsys.StorageReadOpener = func(_ ipld.LinkContext, lnk ipld.Link) (io.Reader, error) {
-		val, err := ds.Get(datastore.NewKey(lnk.String()))
+		val, err := ds.Get(context.Background(), datastore.NewKey(lnk.String()))
 		if err != nil {
 			return nil, err
 		}
 		return bytes.NewBuffer(val), nil
 	}
-	lsys.StorageWriteOpener = func(_ ipld.LinkContext) (io.Writer, ipld.BlockWriteCommitter, error) {
+	lsys.StorageWriteOpener = func(lctx ipld.LinkContext) (io.Writer, ipld.BlockWriteCommitter, error) {
 		buf := bytes.NewBuffer(nil)
 		return buf, func(lnk ipld.Link) error {
-			return ds.Put(datastore.NewKey(lnk.String()), buf.Bytes())
+			return ds.Put(lctx.Ctx, datastore.NewKey(lnk.String()), buf.Bytes())
 		}, nil
 	}
 	return lsys
@@ -219,7 +219,7 @@ func Store(srcStore datastore.Batching, n ipld.Node) (ipld.Link, error) {
 }
 
 func MkTestHost(options ...libp2p.Option) host.Host {
-	h, _ := libp2p.New(context.Background(), options...)
+	h, _ := libp2p.New(options...)
 	return h
 }
 
