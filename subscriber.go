@@ -305,8 +305,13 @@ func (s *Subscriber) OnSyncFinished() (<-chan SyncFinished, context.CancelFunc) 
 
 // Sync performs a one-off explicit sync with the given peer for a specific CID
 // and updates the latest synced link to it.  Completing sync may take a
-// significant about of time, so Sync should generally be run in its own
+// significant amount of time, so Sync should generally be run in its own
 // goroutine.
+//
+// If given cid.Undef, the latest root CID is queried from the peer directly
+// and used instead. Note that in an event where there is no latest root, i.e.
+// querying the latest CID returns cid.Undef, this function returns cid.Undef
+// with nil error.
 //
 // The latest synced CID is returned when this sync is complete.  Any
 // OnSyncFinished readers will also get a SyncFinished when the sync succeeds,
@@ -371,6 +376,12 @@ func (s *Subscriber) Sync(ctx context.Context, peerID peer.ID, c cid.Cid, sel ip
 		c, err = syncer.GetHead(ctx)
 		if err != nil {
 			return cid.Undef, fmt.Errorf("cannot query head for sync: %s", err)
+		}
+
+		// Check if there is a latest CID.
+		if c == cid.Undef {
+			// There is no head; nothing to sync.
+			return cid.Undef, nil
 		}
 
 		log.Debugw("Sync queried head CID", "cid", c)
