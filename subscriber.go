@@ -337,12 +337,10 @@ func (s *Subscriber) Sync(ctx context.Context, peerID peer.ID, nextCid cid.Cid, 
 		return cid.Undef, errors.New("empty peer id")
 	}
 
-	log := log.With("peer", peerID, "cid", nextCid)
+	log := log.With("peer", peerID)
 
 	var err error
 	var syncer Syncer
-
-	log.Infow("Start sync")
 
 	// If address specified, then get URL for HTTP sync, or add multiaddr to peerstore.
 	if peerAddr != nil {
@@ -350,7 +348,8 @@ func (s *Subscriber) Sync(ctx context.Context, peerID peer.ID, nextCid cid.Cid, 
 			if p.Code == multiaddr.P_HTTP || p.Code == multiaddr.P_HTTPS {
 				syncer, err = s.httpSync.NewSyncer(peerID, peerAddr)
 				if err != nil {
-					return cid.Undef, err
+					log.Error("Cannot create HTTP sync handler", "err", err)
+					return cid.Undef, errors.New("cannot sync over http")
 				}
 				break
 			}
@@ -381,16 +380,19 @@ func (s *Subscriber) Sync(ctx context.Context, peerID peer.ID, nextCid cid.Cid, 
 		// Check if there is a latest CID.
 		if nextCid == cid.Undef {
 			// There is no head; nothing to sync.
-			log.Infow("No head to sync")
+			log.Info("No head to sync")
 			return cid.Undef, nil
 		}
 
-		log.Info("Sync queried head CID")
+		log.Info("Sync queried head CID", "cid", nextCid)
 		if sel == nil {
 			// Update the latestSync only if no CID and no selector given.
 			updateLatest = true
 		}
 	}
+	log = log.With("cid", nextCid)
+
+	log.Info("Start sync")
 
 	if ctx.Err() != nil {
 		return cid.Undef, fmt.Errorf("sync canceled: %s", ctx.Err())
