@@ -332,17 +332,17 @@ func (s *Subscriber) OnSyncFinished() (<-chan SyncFinished, context.CancelFunc) 
 // only specify the selection sequence itself.
 //
 // See: ExploreRecursiveWithStopNode.
-func (s *Subscriber) Sync(ctx context.Context, peerID peer.ID, c cid.Cid, sel ipld.Node, peerAddr multiaddr.Multiaddr) (cid.Cid, error) {
+func (s *Subscriber) Sync(ctx context.Context, peerID peer.ID, nextCid cid.Cid, sel ipld.Node, peerAddr multiaddr.Multiaddr) (cid.Cid, error) {
 	if peerID == "" {
 		return cid.Undef, errors.New("empty peer id")
 	}
 
-	log := log.With("peer", peerID)
+	log := log.With("peer", peerID, "cid", nextCid)
 
 	var err error
 	var syncer Syncer
 
-	log.Infow("Start sync", "cid", c)
+	log.Infow("Start sync")
 
 	// If address specified, then get URL for HTTP sync, or add multiaddr to peerstore.
 	if peerAddr != nil {
@@ -371,20 +371,21 @@ func (s *Subscriber) Sync(ctx context.Context, peerID peer.ID, c cid.Cid, sel ip
 	}
 
 	var updateLatest bool
-	if c == cid.Undef {
+	if nextCid == cid.Undef {
 		// Query the peer for the latest CID
-		c, err = syncer.GetHead(ctx)
+		nextCid, err = syncer.GetHead(ctx)
 		if err != nil {
 			return cid.Undef, fmt.Errorf("cannot query head for sync: %s", err)
 		}
 
 		// Check if there is a latest CID.
-		if c == cid.Undef {
+		if nextCid == cid.Undef {
 			// There is no head; nothing to sync.
+			log.Infow("No head to sync")
 			return cid.Undef, nil
 		}
 
-		log.Debugw("Sync queried head CID", "cid", c)
+		log.Info("Sync queried head CID")
 		if sel == nil {
 			// Update the latestSync only if no CID and no selector given.
 			updateLatest = true
@@ -413,13 +414,13 @@ func (s *Subscriber) Sync(ctx context.Context, peerID peer.ID, c cid.Cid, sel ip
 	hnd.syncMutex.Lock()
 	defer hnd.syncMutex.Unlock()
 
-	err = hnd.handle(ctx, c, sel, wrapSel, updateLatest, syncer)
+	err = hnd.handle(ctx, nextCid, sel, wrapSel, updateLatest, syncer)
 	if err != nil {
 		return cid.Undef, fmt.Errorf("sync handler failed: %s", err)
 	}
 
-	log.Infow("Finished sync", "cid", c)
-	return c, nil
+	log.Infow("Finished sync")
+	return nextCid, nil
 }
 
 // distributeEvents reads a SyncFinished, sent by a peer handler, and copies
