@@ -25,14 +25,14 @@ func (s *Syncer) GetHead(ctx context.Context) (cid.Cid, error) {
 // Sync opens a datatransfer data channel and uses the selector to pull data
 // from the provider.
 func (s *Syncer) Sync(ctx context.Context, nextCid cid.Cid, sel ipld.Node) error {
-	syncDone := s.sync.notifyOnSyncDone(nextCid)
+	syncDone := s.sync.notifyOnSyncDone(inProgressSyncKey{nextCid, s.peerID})
 
 	log.Debugw("Starting data channel for message source", "cid", nextCid, "source_peer", s.peerID)
 
 	v := Voucher{&nextCid}
 	_, err := s.sync.dtManager.OpenPullDataChannel(ctx, s.peerID, &v, nextCid, sel)
 	if err != nil {
-		s.sync.signalSyncDone(nextCid, nil)
+		s.sync.signalSyncDone(inProgressSyncKey{nextCid, s.peerID}, nil)
 		return fmt.Errorf("cannot open data channel: %s", err)
 	}
 

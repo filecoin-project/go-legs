@@ -3,6 +3,7 @@ package legs_test
 import (
 	"context"
 	"math/rand"
+	"sync"
 	"testing"
 	"testing/quick"
 	"time"
@@ -18,6 +19,7 @@ import (
 	"github.com/ipld/go-ipld-prime/linking"
 	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
 	basicnode "github.com/ipld/go-ipld-prime/node/basic"
+	"github.com/libp2p/go-libp2p-core/host"
 	"github.com/libp2p/go-libp2p-core/peer"
 	"github.com/multiformats/go-multicodec"
 )
@@ -26,6 +28,98 @@ const (
 	testTopic     = "/legs/testtopic"
 	updateTimeout = 1 * time.Second
 )
+
+type pubMeta struct {
+	pub legs.Publisher
+	h   host.Host
+}
+
+func TestConcurrentSync(t *testing.T) {
+	err := quick.Check(func(ll llBuilder, publisherCount uint8) bool {
+		return t.Run("Quickcheck", func(t *testing.T) {
+			if publisherCount == 0 {
+				// Empty case
+				return
+			}
+
+			var publishers []pubMeta
+
+			// limit to at most 10 concurrent publishers
+			publisherCount := int(publisherCount)%10 + 1
+
+			for i := 0; i < publisherCount; i++ {
+				ds := dssync.MutexWrap(datastore.NewMapDatastore())
+				pubHost := test.MkTestHost()
+				lsys := test.MkLinkSystem(ds)
+				pub, err := dtsync.NewPublisher(pubHost, ds, lsys, testTopic)
+				if err != nil {
+					t.Fatal(err)
+				}
+				publishers = append(publishers, pubMeta{pub, pubHost})
+
+				head := ll.Build(t, lsys)
+				if head == nil {
+					// We built an empty list. So nothing to test.
+					return
+				}
+
+				err = pub.UpdateRoot(context.Background(), head.(cidlink.Link).Cid)
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			subDS := dssync.MutexWrap(datastore.NewMapDatastore())
+			subLsys := test.MkLinkSystem(subDS)
+			subHost := test.MkTestHost()
+
+			calledTimes := 0
+			sub, err := legs.NewSubscriber(subHost, subDS, subLsys, testTopic, nil, legs.BlockHook(func(i peer.ID, c cid.Cid) {
+				calledTimes++
+			}))
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			wg := sync.WaitGroup{}
+			// Now sync again. We shouldn't call the hook.
+			for _, pub := range publishers {
+				wg.Add(1)
+
+				go func(pub pubMeta) {
+					defer wg.Done()
+					_, err = sub.Sync(context.Background(), pub.h.ID(), cid.Undef, nil, pub.h.Addrs()[0])
+					if err != nil {
+						panic("sync failed")
+					}
+				}(pub)
+
+			}
+
+			doneChan := make(chan struct{})
+
+			go func() {
+				wg.Wait()
+				close(doneChan)
+			}()
+
+			select {
+			case <-time.After(5 * time.Second):
+				t.Fatal("Failed to sync")
+			case <-doneChan:
+			}
+
+			if calledTimes != int(ll.Length)*publisherCount {
+				t.Fatalf("Didn't call block hook for each publisher. Expected %v saw %v", int(ll.Length)*publisherCount, calledTimes)
+			}
+		})
+	}, &quick.Config{
+		MaxCount: 3,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
 
 func TestSync(t *testing.T) {
 	err := quick.Check(func(ll llBuilder) bool {
@@ -86,7 +180,6 @@ func TestSync(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-
 }
 
 func TestRoundTripSimple(t *testing.T) {
