@@ -90,8 +90,9 @@ type Subscriber struct {
 	// watchDone signals that the pubsub watch function exited.
 	watchDone chan struct{}
 
-	dtSync   *dtsync.Sync
-	httpSync *httpsync.Sync
+	dtSync       *dtsync.Sync
+	httpSync     *httpsync.Sync
+	syncRecLimit selector.RecursionLimit
 }
 
 // SyncFinished notifies an OnSyncFinished reader that a specified peer
@@ -176,8 +177,9 @@ func NewSubscriber(host host.Host, ds datastore.Batching, lsys ipld.LinkSystem, 
 		handlers:  make(map[peer.ID]*handler),
 		inEvents:  make(chan SyncFinished, 1),
 
-		dtSync:   dtSync,
-		httpSync: httpsync.NewSync(lsys, cfg.httpClient, cfg.blockHook),
+		dtSync:       dtSync,
+		httpSync:     httpsync.NewSync(lsys, cfg.httpClient, cfg.blockHook),
+		syncRecLimit: cfg.syncRecLimit,
 	}
 
 	// Start watcher to read pubsub messages.
@@ -581,7 +583,7 @@ func (h *handler) handleAsync(ctx context.Context, nextCid cid.Cid, ss ipld.Node
 // is locked.
 func (h *handler) handle(ctx context.Context, nextCid cid.Cid, sel ipld.Node, wrapSel, updateLatest bool, syncer Syncer) error {
 	if wrapSel {
-		sel = ExploreRecursiveWithStopNode(selector.RecursionLimitNone(), sel, h.latestSync)
+		sel = ExploreRecursiveWithStopNode(h.subscriber.syncRecLimit, sel, h.latestSync)
 	}
 
 	err := syncer.Sync(ctx, nextCid, sel)

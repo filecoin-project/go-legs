@@ -6,6 +6,7 @@ import (
 	"time"
 
 	dt "github.com/filecoin-project/go-data-transfer"
+	"github.com/ipld/go-ipld-prime/traversal/selector"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 )
 
@@ -18,6 +19,8 @@ type config struct {
 	dtManager  dt.Manager
 	blockHook  BlockHookFunc
 	httpClient *http.Client
+
+	syncRecLimit selector.RecursionLimit
 }
 
 type Option func(*config) error
@@ -78,6 +81,15 @@ func HttpClient(client *http.Client) Option {
 func BlockHook(blockHook BlockHookFunc) Option {
 	return func(c *config) error {
 		c.blockHook = blockHook
+		return nil
+	}
+}
+
+// SyncRecursionLimit sets the recursion limit of the background syncing process.
+// Defaults to selector.RecursionLimitNone if not specified.
+func SyncRecursionLimit(limit selector.RecursionLimit) Option {
+	return func(c *config) error {
+		c.syncRecLimit = limit
 		return nil
 	}
 }
