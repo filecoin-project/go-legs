@@ -2,7 +2,9 @@ package legs_test
 
 import (
 	"context"
+	"math/rand"
 	"testing"
+	"testing/quick"
 	"time"
 
 	"github.com/filecoin-project/go-legs"
@@ -11,15 +13,81 @@ import (
 	"github.com/ipfs/go-cid"
 	"github.com/ipfs/go-datastore"
 	dssync "github.com/ipfs/go-datastore/sync"
+	"github.com/ipld/go-ipld-prime"
+	"github.com/ipld/go-ipld-prime/datamodel"
+	"github.com/ipld/go-ipld-prime/linking"
 	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
 	basicnode "github.com/ipld/go-ipld-prime/node/basic"
 	"github.com/libp2p/go-libp2p-core/peer"
+	"github.com/multiformats/go-multicodec"
 )
 
 const (
 	testTopic     = "/legs/testtopic"
 	updateTimeout = 1 * time.Second
 )
+
+func TestSync(t *testing.T) {
+	err := quick.Check(func(ll llBuilder) bool {
+		return t.Run("Quickcheck", func(t *testing.T) {
+			ds := dssync.MutexWrap(datastore.NewMapDatastore())
+			pubHost := test.MkTestHost()
+			lsys := test.MkLinkSystem(ds)
+			pub, err := dtsync.NewPublisher(pubHost, ds, lsys, testTopic)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			head := ll.Build(t, lsys)
+			if head == nil {
+				// We built an empty list. So nothing to test.
+				return
+			}
+
+			err = pub.UpdateRoot(context.Background(), head.(cidlink.Link).Cid)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			subDS := dssync.MutexWrap(datastore.NewMapDatastore())
+			subLsys := test.MkLinkSystem(ds)
+			subHost := test.MkTestHost()
+
+			calledTimes := 0
+			sub, err := legs.NewSubscriber(subHost, subDS, subLsys, testTopic, nil, legs.BlockHook(func(i peer.ID, c cid.Cid) {
+				calledTimes++
+			}))
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			// Now sync again. We shouldn't call the hook.
+			_, err = sub.Sync(context.Background(), pubHost.ID(), cid.Undef, nil, pubHost.Addrs()[0])
+			if err != nil {
+				t.Fatal(err)
+			}
+			calledTimesFirstSync := calledTimes
+			latestSync := sub.GetLatestSync(pubHost.ID())
+			if latestSync != head {
+				t.Fatalf("Subscriber did not persist latest sync")
+			}
+			_, err = sub.Sync(context.Background(), pubHost.ID(), cid.Undef, nil, pubHost.Addrs()[0])
+			if err != nil {
+				t.Fatal(err)
+			}
+			if calledTimesFirstSync != calledTimes {
+				t.Fatalf("Subscriber called the block hook multiple times for the same sync. Expected %d, got %d", calledTimesFirstSync, calledTimes)
+			}
+
+		})
+	}, &quick.Config{
+		MaxCount: 10,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+}
 
 func TestRoundTripSimple(t *testing.T) {
 	// Init legs publisher and subscriber
@@ -203,4 +271,67 @@ func TestCloseSubscriber(t *testing.T) {
 	case <-time.After(updateTimeout):
 		t.Fatal("OnSyncFinished cancel func did not return after Close")
 	}
+}
+
+type llBuilder struct {
+	Length uint8
+	Seed   int64
+}
+
+func (b llBuilder) Build(t *testing.T, lsys ipld.LinkSystem) datamodel.Link {
+	var linkproto = cidlink.LinkPrototype{
+		Prefix: cid.Prefix{
+			Version:  1,
+			Codec:    uint64(multicodec.DagJson),
+			MhType:   uint64(multicodec.Sha2_256),
+			MhLength: 16,
+		},
+	}
+
+	rng := rand.New(rand.NewSource(b.Seed))
+	var prev datamodel.Link
+	for i := 0; i < int(b.Length); i++ {
+		p := basicnode.Prototype.Map
+		b := p.NewBuilder()
+		ma, err := b.BeginMap(2)
+		if err != nil {
+			t.Fatal(err)
+		}
+		eb, err := ma.AssembleEntry("Value")
+		if err != nil {
+			t.Fatal(err)
+		}
+		err = eb.AssignInt(int64(rng.Intn(100)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		eb, err = ma.AssembleEntry("Next")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if prev != nil {
+			err = eb.AssignLink(prev)
+			if err != nil {
+				t.Fatal(err)
+			}
+		} else {
+			err = eb.AssignNull()
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
+		err = ma.Finish()
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		n := b.Build()
+
+		prev, err = lsys.Store(linking.LinkContext{}, linkproto, n)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	return prev
 }

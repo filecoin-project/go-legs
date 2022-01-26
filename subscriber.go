@@ -583,6 +583,16 @@ func (h *handler) handleAsync(ctx context.Context, nextCid cid.Cid, ss ipld.Node
 // is locked.
 func (h *handler) handle(ctx context.Context, nextCid cid.Cid, sel ipld.Node, wrapSel, updateLatest bool, syncer Syncer) error {
 	if wrapSel {
+		// Note this branch is nested under wrapSel because wrapSel adds the
+		// semantics that we stop when we hit the `h.latestSync` node. This is a
+		// special case where we are starting at the stop node so we can just
+		// return.
+		if h.latestSync != nil && h.latestSync.(cidlink.Link).Cid == nextCid {
+			// Nothing to do. We've already synced to this cid because we have it as h.latestSync.
+			log.Debugw("Already synced.", "cid", nextCid, "peer", h.peerID)
+			return nil
+		}
+
 		sel = ExploreRecursiveWithStopNode(h.subscriber.syncRecLimit, sel, h.latestSync)
 	}
 
