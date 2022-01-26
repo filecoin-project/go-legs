@@ -39,6 +39,11 @@ func TestSync(t *testing.T) {
 			}
 
 			head := ll.Build(t, lsys)
+			if head == nil {
+				// We built an empty list. So nothing to test.
+				return
+			}
+
 			err = pub.UpdateRoot(context.Background(), head.(cidlink.Link).Cid)
 			if err != nil {
 				t.Fatal(err)
