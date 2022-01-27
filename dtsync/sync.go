@@ -160,9 +160,9 @@ func (s *Sync) onEvent(event dt.Event, channelState dt.ChannelState) {
 		return
 	case dt.FinishTransfer:
 		// Tell the waiting handler that the sync has finished.
-	case dt.Cancel, dt.RequestCancelled:
+	case dt.Cancel, dt.RequestCancelled, dt.RequestTimedOut, dt.SendDataError, dt.ReceiveDataError, dt.Disconnected:
 		// The request was canceled; inform waiting handler.
-		err = errors.New(event.Message)
+		err = fmt.Errorf("%s: %s", dt.Events[event.Code], event.Message)
 	case dt.Error:
 		// Communicate the error back to the waiting handler.
 		if strings.HasSuffix(event.Message, "content not found") {
