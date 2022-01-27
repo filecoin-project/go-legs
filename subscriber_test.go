@@ -4,6 +4,7 @@ import (
 	"context"
 	"math/rand"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"testing/quick"
 	"time"
@@ -73,9 +74,9 @@ func TestConcurrentSync(t *testing.T) {
 			subLsys := test.MkLinkSystem(subDS)
 			subHost := test.MkTestHost()
 
-			calledTimes := 0
+			var calledTimes int64
 			sub, err := legs.NewSubscriber(subHost, subDS, subLsys, testTopic, nil, legs.BlockHook(func(i peer.ID, c cid.Cid) {
-				calledTimes++
+				atomic.AddInt64(&calledTimes, 1)
 			}))
 			if err != nil {
 				t.Fatal(err)
@@ -88,7 +89,7 @@ func TestConcurrentSync(t *testing.T) {
 
 				go func(pub pubMeta) {
 					defer wg.Done()
-					_, err = sub.Sync(context.Background(), pub.h.ID(), cid.Undef, nil, pub.h.Addrs()[0])
+					_, err := sub.Sync(context.Background(), pub.h.ID(), cid.Undef, nil, pub.h.Addrs()[0])
 					if err != nil {
 						panic("sync failed")
 					}
@@ -109,8 +110,8 @@ func TestConcurrentSync(t *testing.T) {
 			case <-doneChan:
 			}
 
-			if calledTimes != int(ll.Length)*publisherCount {
-				t.Fatalf("Didn't call block hook for each publisher. Expected %v saw %v", int(ll.Length)*publisherCount, calledTimes)
+			if atomic.LoadInt64(&calledTimes) != int64(ll.Length)*int64(publisherCount) {
+				t.Fatalf("Didn't call block hook for each publisher. Expected %d saw %d", int(ll.Length)*publisherCount, calledTimes)
 			}
 		})
 	}, &quick.Config{
