@@ -19,6 +19,11 @@ import (
 
 var log = logging.Logger("go-legs-dtsync")
 
+type inProgressSyncKey struct {
+	c    cid.Cid
+	peer peer.ID
+}
+
 // Sync provides sync functionality for use with all datatransfer syncs.
 type Sync struct {
 	dtManager   dt.Manager
@@ -28,7 +33,7 @@ type Sync struct {
 	unregHook   graphsync.UnregisterHookFunc
 
 	// Map of CID of in-progress sync to sync done channel.
-	syncDoneChans map[cid.Cid]chan<- error
+	syncDoneChans map[inProgressSyncKey]chan<- error
 	syncDoneMutex sync.Mutex
 }
 
@@ -109,34 +114,34 @@ func (s *Sync) NewSyncer(peerID peer.ID, topicName string) *Syncer {
 }
 
 // notifyOnSyncDone returns a channel that sync done notification is sent on.
-func (s *Sync) notifyOnSyncDone(c cid.Cid) <-chan error {
+func (s *Sync) notifyOnSyncDone(k inProgressSyncKey) <-chan error {
 	syncDone := make(chan error, 1)
 
 	s.syncDoneMutex.Lock()
 	defer s.syncDoneMutex.Unlock()
 
 	if s.syncDoneChans == nil {
-		s.syncDoneChans = make(map[cid.Cid]chan<- error)
+		s.syncDoneChans = make(map[inProgressSyncKey]chan<- error)
 	}
-	s.syncDoneChans[c] = syncDone
+	s.syncDoneChans[k] = syncDone
 
 	return syncDone
 }
 
 // signalSyncDone removes and closes the channel when the pending sync has
 // completed.  Returns true if a channel was found.
-func (s *Sync) signalSyncDone(c cid.Cid, err error) bool {
+func (s *Sync) signalSyncDone(k inProgressSyncKey, err error) bool {
 	s.syncDoneMutex.Lock()
 	defer s.syncDoneMutex.Unlock()
 
-	syncDone, ok := s.syncDoneChans[c]
+	syncDone, ok := s.syncDoneChans[k]
 	if !ok {
 		return false
 	}
 	if len(s.syncDoneChans) == 1 {
 		s.syncDoneChans = nil
 	} else {
-		delete(s.syncDoneChans, c)
+		delete(s.syncDoneChans, k)
 	}
 
 	if err != nil {
@@ -173,7 +178,7 @@ func (s *Sync) onEvent(event dt.Event, channelState dt.ChannelState) {
 	// It is not necessary to return the channelState CID, since we already
 	// know it is the correct on since it was used to look up this syncDone
 	// channel.
-	if !s.signalSyncDone(channelState.BaseCID(), err) {
+	if !s.signalSyncDone(inProgressSyncKey{channelState.BaseCID(), channelState.OtherPeer()}, err) {
 		// No channel to return error on, so log it here.
 		if err != nil {
 			log.Error(err.Error())
