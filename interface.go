@@ -10,7 +10,9 @@ import (
 
 // Publisher is an interface for updating the published dag.
 type Publisher interface {
-	// Publishes an update for the DAG in the pubsub channel.
+	// SetRoot sets the root CID without publishing it.
+	SetRoot(context.Context, cid.Cid) error
+	// UpdateRoot sets the root CID and publishes its update in the pubsub channel.
 	UpdateRoot(context.Context, cid.Cid) error
 	// Publishes an update for the DAG in the pubsub channel using custom multiaddrs.
 	UpdateRootWithAddrs(context.Context, cid.Cid, []ma.Multiaddr) error

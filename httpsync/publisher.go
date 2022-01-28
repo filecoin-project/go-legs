@@ -75,11 +75,15 @@ func (p *publisher) Address() multiaddr.Multiaddr {
 	return p.addr
 }
 
-func (p *publisher) UpdateRoot(ctx context.Context, c cid.Cid) error {
+func (p *publisher) SetRoot(ctx context.Context, c cid.Cid) error {
 	p.rl.Lock()
 	defer p.rl.Unlock()
 	p.root = c
 	return nil
+}
+
+func (p *publisher) UpdateRoot(ctx context.Context, c cid.Cid) error {
+	return p.SetRoot(ctx, c)
 }
 
 func (p *publisher) UpdateRootWithAddrs(ctx context.Context, c cid.Cid, _ []multiaddr.Multiaddr) error {

@@ -122,30 +122,29 @@ func NewPublisherFromExisting(dtManager dt.Manager, host host.Host, topic string
 	}, nil
 }
 
+func (p *publisher) SetRoot(ctx context.Context, c cid.Cid) error {
+	if c == cid.Undef {
+		return errors.New("cannot update to an undefined cid")
+	}
+	log.Debugf("Setting root CID: %s", c)
+	return p.headPublisher.UpdateRoot(ctx, c)
+}
+
 func (p *publisher) UpdateRoot(ctx context.Context, c cid.Cid) error {
 	return p.UpdateRootWithAddrs(ctx, c, p.host.Addrs())
 }
 
 func (p *publisher) UpdateRootWithAddrs(ctx context.Context, c cid.Cid, addrs []ma.Multiaddr) error {
-	if c == cid.Undef {
-		return errors.New("cannot update to an undefined cid")
-	}
-
-	log.Debugf("Publishing CID and addresses in pubsub channel: %s", c)
-	var errs error
-	err := p.headPublisher.UpdateRoot(ctx, c)
+	err := p.SetRoot(ctx, c)
 	if err != nil {
-		errs = multierror.Append(errs, err)
+		return err
 	}
+	log.Debugf("Publishing CID and addresses in pubsub channel: %s", c)
 	msg := Message{
 		Cid:   c,
 		Addrs: addrs,
 	}
-	err = p.topic.Publish(ctx, EncodeMessage(msg))
-	if err != nil {
-		errs = multierror.Append(errs, err)
-	}
-	return errs
+	return p.topic.Publish(ctx, EncodeMessage(msg))
 }
 
 func (p *publisher) Close() error {
