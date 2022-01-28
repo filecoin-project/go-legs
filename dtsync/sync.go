@@ -163,14 +163,14 @@ func (s *Sync) onEvent(event dt.Event, channelState dt.ChannelState) {
 		err = fmt.Errorf("datatransfer cancelled")
 		log.Warnw(err.Error(), "cid", channelState.BaseCID(), "peer", channelState.OtherPeer(), "message", channelState.Message())
 	case dt.Failed:
+		// Communicate the error back to the waiting handler.
 		err = errors.New("datatransfer failed")
 		msg := channelState.Message()
+		log.Errorw(err.Error(), "cid", channelState.BaseCID(), "peer", channelState.OtherPeer(), "message", msg)
+
 		if strings.HasSuffix(msg, "content not found") {
 			err = errors.New(err.Error() + ": content not found")
 		}
-
-		// Communicate the error back to the waiting handler.
-		log.Errorw(err.Error(), "cid", channelState.BaseCID(), "peer", channelState.OtherPeer(), "message", msg)
 	default:
 		// Ignore non-terminal channel states.
 		return
