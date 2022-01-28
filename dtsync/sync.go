@@ -96,6 +96,7 @@ func (s *Sync) Close() error {
 		log.Warnf("Closing datatransfer sync with %d syncs in progress", len(s.syncDoneChans))
 	}
 	for _, ch := range s.syncDoneChans {
+		ch <- errors.New("sync closed")
 		close(ch)
 	}
 	s.syncDoneChans = nil
