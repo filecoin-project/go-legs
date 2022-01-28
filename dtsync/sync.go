@@ -154,22 +154,26 @@ func (s *Sync) signalSyncDone(k inProgressSyncKey, err error) bool {
 // onEvent is called by the datatransfer manager to send events.
 func (s *Sync) onEvent(event dt.Event, channelState dt.ChannelState) {
 	var err error
-	switch event.Code {
-	default:
-		// Ignore unrecognized event type.
-		return
-	case dt.FinishTransfer:
-		// Tell the waiting handler that the sync has finished.
-	case dt.Cancel, dt.RequestCancelled:
+	switch channelState.Status() {
+	case dt.Completed:
+		// Tell the waiting handler that the sync has finished successfully.
+		log.Infow("datatransfer completed successfully", "cid", channelState.BaseCID(), "peer", channelState.OtherPeer())
+	case dt.Cancelled:
 		// The request was canceled; inform waiting handler.
-		err = errors.New(event.Message)
-	case dt.Error:
+		err = fmt.Errorf("datatransfer cancelled")
+		log.Warnw(err.Error(), "cid", channelState.BaseCID(), "peer", channelState.OtherPeer(), "message", channelState.Message())
+	case dt.Failed:
 		// Communicate the error back to the waiting handler.
-		if strings.HasSuffix(event.Message, "content not found") {
-			err = errors.New("datatransfer error: content not found")
-		} else {
-			err = fmt.Errorf("datatransfer error: %s", event.Message)
+		err = errors.New("datatransfer failed")
+		msg := channelState.Message()
+		log.Errorw(err.Error(), "cid", channelState.BaseCID(), "peer", channelState.OtherPeer(), "message", msg)
+
+		if strings.HasSuffix(msg, "content not found") {
+			err = errors.New(err.Error() + ": content not found")
 		}
+	default:
+		// Ignore non-terminal channel states.
+		return
 	}
 
 	// Send the FinishTransfer signal to the handler.  This will allow its
@@ -179,10 +183,6 @@ func (s *Sync) onEvent(event dt.Event, channelState dt.ChannelState) {
 	// know it is the correct on since it was used to look up this syncDone
 	// channel.
 	if !s.signalSyncDone(inProgressSyncKey{channelState.BaseCID(), channelState.OtherPeer()}, err) {
-		// No channel to return error on, so log it here.
-		if err != nil {
-			log.Error(err.Error())
-		}
 		log.Errorw("Could not find channel for completed transfer notice", "cid", channelState.BaseCID())
 		return
 	}

@@ -24,7 +24,7 @@ import (
 )
 
 const (
-	waitForMeshTimeout = 5 * time.Second
+	waitForMeshTimeout = 10 * time.Second
 	publishTimeout     = 100 * time.Millisecond
 )
 
