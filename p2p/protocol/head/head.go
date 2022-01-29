@@ -2,6 +2,7 @@ package head
 
 import (
 	"context"
+	"fmt"
 	logging "github.com/ipfs/go-log/v2"
 	"io/ioutil"
 	"net"
@@ -43,7 +44,7 @@ func (p *Publisher) Serve(host host.Host, topic string) error {
 	pid := deriveProtocolID(topic)
 	l, err := gostream.Listen(host, pid)
 	if err != nil {
-		log.Errorf("Failed to listen to gostream on host %s with prpotocol ID %s", host.ID(), pid)
+		log.Errorw("Failed to listen to gostream with protocol", "host", host.ID(), "protocolID", pid)
 		return err
 	}
 	log.Infow("Serving gostream", "host", host.ID(), "protocolID", pid)
@@ -70,8 +71,7 @@ func QueryRootCid(ctx context.Context, host host.Host, topic string, peer peer.I
 
 	cidStr, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
-		log.Errorf("Failed to fully read response body: %s", err)
-		return cid.Undef, err
+		return cid.Undef, fmt.Errorf("cannot fully read response body: %w", err)
 	}
 	if len(cidStr) == 0 {
 		log.Debug("No head is set; returning cid.Undef")
@@ -81,11 +81,11 @@ func QueryRootCid(ctx context.Context, host host.Host, topic string, peer peer.I
 	cs := string(cidStr)
 	decode, err := cid.Decode(cs)
 	if err != nil {
-		log.Errorf("Failed to decode CID %s: %s", cs, err)
-	} else {
-		log.Debugf("Sucessfully queried latest head %s", decode)
+		return cid.Undef, fmt.Errorf("failed to decode CID %s: %s", cs, err)
 	}
-	return decode, err
+
+	log.Debugw("Sucessfully queried latest head", "head", decode)
+	return decode, nil
 }
 
 func (p *Publisher) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -109,7 +109,7 @@ func (p *Publisher) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	_, err := w.Write(out)
 	if err != nil {
-		log.Errorf("Failed to write response: %s", err)
+		log.Errorw("Failed to write response", "err", err)
 	}
 }
 

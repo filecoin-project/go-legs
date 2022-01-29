@@ -254,7 +254,7 @@ func (s *Subscriber) doClose() error {
 	// If Subscriber owns the pubsub topic, then close it.
 	if s.topic != nil {
 		if err = s.topic.Close(); err != nil {
-			log.Errorf("Failed to close pubsub topic: %s", err)
+			log.Errorw("Failed to close pubsub topic", "err", err)
 			errs = multierror.Append(errs, err)
 		}
 	}
@@ -350,8 +350,7 @@ func (s *Subscriber) Sync(ctx context.Context, peerID peer.ID, nextCid cid.Cid, 
 			if p.Code == multiaddr.P_HTTP || p.Code == multiaddr.P_HTTPS {
 				syncer, err = s.httpSync.NewSyncer(peerID, peerAddr)
 				if err != nil {
-					log.Error("Cannot create HTTP sync handler", "err", err)
-					return cid.Undef, errors.New("cannot sync over http")
+					return cid.Undef, fmt.Errorf("cannot create http sync handler: %s", err)
 				}
 				break
 			}
@@ -386,7 +385,7 @@ func (s *Subscriber) Sync(ctx context.Context, peerID peer.ID, nextCid cid.Cid, 
 			return cid.Undef, nil
 		}
 
-		log.Info("Sync queried head CID", "cid", nextCid)
+		log.Infow("Sync queried head CID", "cid", nextCid)
 		if sel == nil {
 			// Update the latestSync only if no CID and no selector given.
 			updateLatest = true
@@ -423,7 +422,6 @@ func (s *Subscriber) Sync(ctx context.Context, peerID peer.ID, nextCid cid.Cid, 
 		return cid.Undef, fmt.Errorf("sync handler failed: %s", err)
 	}
 
-	log.Infow("Finished sync")
 	return nextCid, nil
 }
 
@@ -492,7 +490,7 @@ func (s *Subscriber) watch(ctx context.Context) {
 				// This is a normal result of shutting down the Subscriber.
 				log.Debug("Canceled watching pubsub subscription")
 			} else {
-				log.Errorf("Error reading from pubsub: %s", err)
+				log.Errorw("Error reading from pubsub", "err", err)
 				// TODO: restart subscription.
 			}
 			break
@@ -516,7 +514,7 @@ func (s *Subscriber) watch(ctx context.Context) {
 		// Decode CID and originator addresses from message.
 		m, err := dtsync.DecodeMessage(msg.Data)
 		if err != nil {
-			log.Errorf("Could not decode pubsub message: %s", err)
+			log.Errorw("Could not decode pubsub message", "err", err)
 			continue
 		}
 
@@ -582,6 +580,8 @@ func (h *handler) handleAsync(ctx context.Context, nextCid cid.Cid, ss ipld.Node
 // The caller is responsible for ensuring that this is called while h.syncMutex
 // is locked.
 func (h *handler) handle(ctx context.Context, nextCid cid.Cid, sel ipld.Node, wrapSel, updateLatest bool, syncer Syncer) error {
+	log := log.With("cid", nextCid, "peer", h.peerID)
+
 	if wrapSel {
 		// Note this branch is nested under wrapSel because wrapSel adds the
 		// semantics that we stop when we hit the `h.latestSync` node. This is a
@@ -589,7 +589,7 @@ func (h *handler) handle(ctx context.Context, nextCid cid.Cid, sel ipld.Node, wr
 		// return.
 		if h.latestSync != nil && h.latestSync.(cidlink.Link).Cid == nextCid {
 			// Nothing to do. We've already synced to this cid because we have it as h.latestSync.
-			log.Debugw("Already synced.", "cid", nextCid, "peer", h.peerID)
+			log.Infow("Already synced")
 			return nil
 		}
 
@@ -600,7 +600,7 @@ func (h *handler) handle(ctx context.Context, nextCid cid.Cid, sel ipld.Node, wr
 	if err != nil {
 		return err
 	}
-	log.Debugw("Sync completed", "cid", nextCid, "peer", h.peerID)
+	log.Infow("Sync completed")
 
 	if !updateLatest {
 		return nil
@@ -612,7 +612,7 @@ func (h *handler) handle(ctx context.Context, nextCid cid.Cid, sel ipld.Node, wr
 	// responsibility to persist if needed to initialize a partially-synced
 	// subscriber.
 	h.latestSync = cidlink.Link{Cid: nextCid}
-	log.Infow("Updating latest sync", "sync_cid", nextCid, "peer", h.peerID)
+	log.Infow("Updating latest sync")
 
 	// Tell the Subscriber to distribute SyncFinished to all notification
 	// destinations.

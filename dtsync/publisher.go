@@ -3,6 +3,7 @@ package dtsync
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"sync"
 	"time"
@@ -74,12 +75,12 @@ func NewPublisher(host host.Host, ds datastore.Batching, lsys ipld.LinkSystem, t
 
 func startHeadPublisher(host host.Host, topic string, headPublisher *head.Publisher) {
 	go func() {
-		log.Infof("Starting head publisher on peer ID %s for topic %s", host.ID(), topic)
+		log.Infow("Starting head publisher for topic", "topic", topic, "host", host.ID())
 		err := headPublisher.Serve(host, topic)
 		if err != http.ErrServerClosed {
-			log.Errorf("Error head publisher stopped serving on peer ID %s for topic %s: %s", host.ID(), topic, err)
+			log.Errorw("Head publisher stopped serving on topic on host", "topic", topic, "host", host.ID(), "err", err)
 		}
-		log.Infof("Stopped head publisher on peer ID %s for topic %s", host.ID(), topic)
+		log.Infow("Stopped head publisher", "host", host.ID(), "topic", topic)
 	}()
 }
 
@@ -109,7 +110,7 @@ func NewPublisherFromExisting(dtManager dt.Manager, host host.Host, topic string
 		if cancel != nil {
 			cancel()
 		}
-		return nil, err
+		return nil, fmt.Errorf("cannot configure datatransfer: %s", err)
 	}
 	headPublisher := head.NewPublisher()
 	startHeadPublisher(host, topic, headPublisher)
@@ -164,7 +165,7 @@ func (p *publisher) Close() error {
 
 		t := time.AfterFunc(shutdownTime, p.cancelPubSub)
 		if err = p.topic.Close(); err != nil {
-			log.Errorf("Failed to close pubsub topic: %s", err)
+			log.Errorw("Failed to close pubsub topic", "err", err)
 			errs = multierror.Append(errs, err)
 		}
 
