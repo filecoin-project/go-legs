@@ -2,6 +2,7 @@ package dtsync
 
 import (
 	"context"
+	"fmt"
 
 	dt "github.com/filecoin-project/go-data-transfer"
 	datatransfer "github.com/filecoin-project/go-data-transfer/impl"
@@ -26,16 +27,13 @@ func configureDataTransferForLegs(ctx context.Context, dtManager dt.Manager, lsy
 	val := &legsValidator{}
 	lsc := legStorageConfigration{lsys}
 	if err := dtManager.RegisterVoucherType(v, val); err != nil {
-		log.Errorf("Failed to register legs voucher validator type: %s", err)
-		return err
+		return fmt.Errorf("failed to register legs voucher validator type: %w", err)
 	}
 	if err := dtManager.RegisterVoucherResultType(lvr); err != nil {
-		log.Errorf("Failed to register legs voucher result type: %s", err)
-		return err
+		return fmt.Errorf("failed to register legs voucher result type: %w", err)
 	}
 	if err := dtManager.RegisterTransportConfigurer(v, lsc.configureTransport); err != nil {
-		log.Errorf("Failed to register datatransfer TransportConfigurer: %s", err)
-		return err
+		return fmt.Errorf("failed to register datatransfer TransportConfigurer: %w", err)
 	}
 	return nil
 }
@@ -55,7 +53,7 @@ func (lsc legStorageConfigration) configureTransport(chid dt.ChannelID, voucher 
 	}
 	err := storeConfigurableTransport.UseStore(chid, lsc.linkSystem)
 	if err != nil {
-		log.Errorf("attempting to configure data store: %s", err)
+		log.Errorw("Failed to configure trasnport to use data store", "err", err)
 	}
 }
 
@@ -65,12 +63,10 @@ func registerVoucher(dtManager dt.Manager) error {
 	val := &legsValidator{}
 	err := dtManager.RegisterVoucherType(v, val)
 	if err != nil {
-		log.Errorf("Failed to register legs validator voucher type: %s", err)
-		return err
+		return fmt.Errorf("failed to register legs validator voucher type: %w", err)
 	}
 	if err = dtManager.RegisterVoucherResultType(lvr); err != nil {
-		log.Errorf("Failed to register legs voucher result: %s", err)
-		return err
+		return fmt.Errorf("failed to register legs voucher result: %w", err)
 	}
 
 	return nil
@@ -85,11 +81,13 @@ func makeDataTransfer(host host.Host, ds datastore.Batching, lsys ipld.LinkSyste
 
 	dtManager, err := datatransfer.NewDataTransfer(ds, dtNet, tp)
 	if err != nil {
-		log.Errorf("Failed to instantiate datatransfer: %s", err)
-		return nil, nil, nil, err
+		return nil, nil, nil, fmt.Errorf("failed to instantiate datatransfer: %w", err)
 	}
 
-	registerVoucher(dtManager)
+	err = registerVoucher(dtManager)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("failed to register voucher: %w", err)
+	}
 
 	// Tell datatransfer to notify when ready.
 	dtReady := make(chan error)
@@ -101,8 +99,7 @@ func makeDataTransfer(host host.Host, ds datastore.Batching, lsys ipld.LinkSyste
 	// if fsm migration takes too long.  Timeout for dtManager.Start() is not
 	// handled here, so pass context.Background().
 	if err = dtManager.Start(context.Background()); err != nil {
-		log.Errorf("Failed to start datatransfer: %s", err)
-		return nil, nil, nil, err
+		return nil, nil, nil, fmt.Errorf("failed to start datatransfer: %w", err)
 	}
 
 	// Wait for datatransfer to be ready.
@@ -115,7 +112,7 @@ func makeDataTransfer(host host.Host, ds datastore.Batching, lsys ipld.LinkSyste
 		var err, errs error
 		err = dtManager.Stop(context.Background())
 		if err != nil {
-			log.Errorf("Failed to stop datatransfer manager: %s", err)
+			log.Errorw("Failed to stop datatransfer manager", "err", err)
 			errs = multierror.Append(errs, err)
 		}
 		return errs

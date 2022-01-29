@@ -33,7 +33,7 @@ func (s *Syncer) Sync(ctx context.Context, nextCid cid.Cid, sel ipld.Node) error
 	_, err := s.sync.dtManager.OpenPullDataChannel(ctx, s.peerID, &v, nextCid, sel)
 	if err != nil {
 		s.sync.signalSyncDone(inProgressSyncKey{nextCid, s.peerID}, nil)
-		return fmt.Errorf("cannot open data channel: %s", err)
+		return fmt.Errorf("cannot open data channel: %w", err)
 	}
 
 	// Wait for transfer finished signal.

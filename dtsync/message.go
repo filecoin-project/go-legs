@@ -2,6 +2,7 @@ package dtsync
 
 import (
 	"bytes"
+	"fmt"
 
 	"github.com/ipfs/go-cid"
 	"github.com/multiformats/go-multiaddr"
@@ -57,15 +58,13 @@ func DecodeMessage(data []byte) (Message, error) {
 	for len(data) != 0 {
 		val, n, err := varint.FromUvarint(data)
 		if err != nil {
-			log.Errorf("Failed to decode message: cannot read number of multiadds: %s", err)
-			return Message{}, err
+			return Message{}, fmt.Errorf("cannot read number of multiadds: %w", err)
 		}
 		data = data[n:]
 
 		addr, err := multiaddr.NewMultiaddrBytes(data[:val])
 		if err != nil {
-			log.Errorf("Failed to decode message: cannot decode multiadds: %s", err)
-			return Message{}, err
+			return Message{}, fmt.Errorf("cannot decode multiadds: %w", err)
 		}
 		data = data[val:]
 		addrs = append(addrs, addr)
