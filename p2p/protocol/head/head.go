@@ -81,7 +81,7 @@ func QueryRootCid(ctx context.Context, host host.Host, topic string, peer peer.I
 	cs := string(cidStr)
 	decode, err := cid.Decode(cs)
 	if err != nil {
-		return cid.Undef, fmt.Errorf("failed to decode CID %s: %s", cs, err)
+		return cid.Undef, fmt.Errorf("failed to decode CID %s: %w", cs, err)
 	}
 
 	log.Debugw("Sucessfully queried latest head", "head", decode)

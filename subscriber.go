@@ -350,7 +350,7 @@ func (s *Subscriber) Sync(ctx context.Context, peerID peer.ID, nextCid cid.Cid, 
 			if p.Code == multiaddr.P_HTTP || p.Code == multiaddr.P_HTTPS {
 				syncer, err = s.httpSync.NewSyncer(peerID, peerAddr)
 				if err != nil {
-					return cid.Undef, fmt.Errorf("cannot create http sync handler: %s", err)
+					return cid.Undef, fmt.Errorf("cannot create http sync handler: %w", err)
 				}
 				break
 			}
@@ -375,7 +375,7 @@ func (s *Subscriber) Sync(ctx context.Context, peerID peer.ID, nextCid cid.Cid, 
 		// Query the peer for the latest CID
 		nextCid, err = syncer.GetHead(ctx)
 		if err != nil {
-			return cid.Undef, fmt.Errorf("cannot query head for sync: %s", err)
+			return cid.Undef, fmt.Errorf("cannot query head for sync: %w", err)
 		}
 
 		// Check if there is a latest CID.
@@ -396,7 +396,7 @@ func (s *Subscriber) Sync(ctx context.Context, peerID peer.ID, nextCid cid.Cid, 
 	log.Info("Start sync")
 
 	if ctx.Err() != nil {
-		return cid.Undef, fmt.Errorf("sync canceled: %s", ctx.Err())
+		return cid.Undef, fmt.Errorf("sync canceled: %w", ctx.Err())
 	}
 
 	var wrapSel bool
@@ -419,7 +419,7 @@ func (s *Subscriber) Sync(ctx context.Context, peerID peer.ID, nextCid cid.Cid, 
 
 	err = hnd.handle(ctx, nextCid, sel, wrapSel, updateLatest, syncer)
 	if err != nil {
-		return cid.Undef, fmt.Errorf("sync handler failed: %s", err)
+		return cid.Undef, fmt.Errorf("sync handler failed: %w", err)
 	}
 
 	return nextCid, nil

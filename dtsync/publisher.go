@@ -110,7 +110,7 @@ func NewPublisherFromExisting(dtManager dt.Manager, host host.Host, topic string
 		if cancel != nil {
 			cancel()
 		}
-		return nil, fmt.Errorf("cannot configure datatransfer: %s", err)
+		return nil, fmt.Errorf("cannot configure datatransfer: %w", err)
 	}
 	headPublisher := head.NewPublisher()
 	startHeadPublisher(host, topic, headPublisher)

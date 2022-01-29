@@ -27,13 +27,13 @@ func configureDataTransferForLegs(ctx context.Context, dtManager dt.Manager, lsy
 	val := &legsValidator{}
 	lsc := legStorageConfigration{lsys}
 	if err := dtManager.RegisterVoucherType(v, val); err != nil {
-		return fmt.Errorf("failed to register legs voucher validator type: %s", err)
+		return fmt.Errorf("failed to register legs voucher validator type: %w", err)
 	}
 	if err := dtManager.RegisterVoucherResultType(lvr); err != nil {
-		return fmt.Errorf("failed to register legs voucher result type: %s", err)
+		return fmt.Errorf("failed to register legs voucher result type: %w", err)
 	}
 	if err := dtManager.RegisterTransportConfigurer(v, lsc.configureTransport); err != nil {
-		return fmt.Errorf("failed to register datatransfer TransportConfigurer: %s", err)
+		return fmt.Errorf("failed to register datatransfer TransportConfigurer: %w", err)
 	}
 	return nil
 }
@@ -63,10 +63,10 @@ func registerVoucher(dtManager dt.Manager) error {
 	val := &legsValidator{}
 	err := dtManager.RegisterVoucherType(v, val)
 	if err != nil {
-		return fmt.Errorf("failed to register legs validator voucher type: %s", err)
+		return fmt.Errorf("failed to register legs validator voucher type: %w", err)
 	}
 	if err = dtManager.RegisterVoucherResultType(lvr); err != nil {
-		return fmt.Errorf("failed to register legs voucher result: %s", err)
+		return fmt.Errorf("failed to register legs voucher result: %w", err)
 	}
 
 	return nil
@@ -81,12 +81,12 @@ func makeDataTransfer(host host.Host, ds datastore.Batching, lsys ipld.LinkSyste
 
 	dtManager, err := datatransfer.NewDataTransfer(ds, dtNet, tp)
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("failed to instantiate datatransfer: %s", err)
+		return nil, nil, nil, fmt.Errorf("failed to instantiate datatransfer: %w", err)
 	}
 
 	err = registerVoucher(dtManager)
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("failed to register voucher: %s", err)
+		return nil, nil, nil, fmt.Errorf("failed to register voucher: %w", err)
 	}
 
 	// Tell datatransfer to notify when ready.
@@ -99,7 +99,7 @@ func makeDataTransfer(host host.Host, ds datastore.Batching, lsys ipld.LinkSyste
 	// if fsm migration takes too long.  Timeout for dtManager.Start() is not
 	// handled here, so pass context.Background().
 	if err = dtManager.Start(context.Background()); err != nil {
-		return nil, nil, nil, fmt.Errorf("failed to start datatransfer: %s", err)
+		return nil, nil, nil, fmt.Errorf("failed to start datatransfer: %w", err)
 	}
 
 	// Wait for datatransfer to be ready.
