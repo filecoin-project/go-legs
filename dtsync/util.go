@@ -30,10 +30,10 @@ func configureDataTransferForLegs(ctx context.Context, dtManager dt.Manager, lsy
 		return fmt.Errorf("failed to register legs voucher validator type: %s", err)
 	}
 	if err := dtManager.RegisterVoucherResultType(lvr); err != nil {
-		return fmt.Errorf("Failed to register legs voucher result type: %s", err)
+		return fmt.Errorf("failed to register legs voucher result type: %s", err)
 	}
 	if err := dtManager.RegisterTransportConfigurer(v, lsc.configureTransport); err != nil {
-		return fmt.Errorf("Failed to register datatransfer TransportConfigurer: %s", err)
+		return fmt.Errorf("failed to register datatransfer TransportConfigurer: %s", err)
 	}
 	return nil
 }
