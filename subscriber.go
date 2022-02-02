@@ -72,6 +72,11 @@ type Subscriber struct {
 	handlers      map[peer.ID]*handler
 	handlersMutex sync.Mutex
 
+	// A map of block hooks to call for a specific peer id, instead of the general
+	// block hook func.
+	scopedBlockHook      map[peer.ID]BlockHookFunc
+	scopedBlockHookMutex *sync.RWMutex
+
 	// inEvents is used to send a SyncFinished from a peer handler to the
 	// distributeEvents goroutine.
 	inEvents chan SyncFinished
@@ -117,6 +122,23 @@ type handler struct {
 	syncMutex sync.Mutex
 }
 
+// wrapBlockHook wraps a possibly nil block hook func to allow a for dispatching
+// to a blockhook func that is scoped within a .Sync call.
+func wrapBlockHook(generalBlockHook BlockHookFunc) (*sync.RWMutex, map[peer.ID]BlockHookFunc, BlockHookFunc) {
+	var scopedBlockHookMutex sync.RWMutex
+	scopedBlockHook := make(map[peer.ID]BlockHookFunc)
+	return &scopedBlockHookMutex, scopedBlockHook, func(peerID peer.ID, cid cid.Cid) {
+		scopedBlockHookMutex.RLock()
+		f, ok := scopedBlockHook[peerID]
+		scopedBlockHookMutex.RUnlock()
+		if ok {
+			f(peerID, cid)
+		} else if generalBlockHook != nil {
+			generalBlockHook(peerID, cid)
+		}
+	}
+}
+
 // NewSubscriber creates a new Subscriber that process pubsub messages.
 func NewSubscriber(host host.Host, ds datastore.Batching, lsys ipld.LinkSystem, topic string, dss ipld.Node, options ...Option) (*Subscriber, error) {
 	cfg := config{
@@ -144,6 +166,8 @@ func NewSubscriber(host host.Host, ds datastore.Batching, lsys ipld.LinkSystem, 
 		return nil, err
 	}
 
+	scopedBlockHookMutex, scopedBlockHook, blockHook := wrapBlockHook(cfg.blockHook)
+
 	var dtSync *dtsync.Sync
 	if cfg.dtManager != nil {
 		if ds != nil {
@@ -154,7 +178,7 @@ func NewSubscriber(host host.Host, ds datastore.Batching, lsys ipld.LinkSystem, 
 		}
 		dtSync, err = dtsync.NewSyncWithDT(host, cfg.dtManager)
 	} else {
-		dtSync, err = dtsync.NewSync(host, ds, lsys, cfg.blockHook)
+		dtSync, err = dtsync.NewSync(host, ds, lsys, blockHook)
 	}
 	if err != nil {
 		cancelPubsub()
@@ -178,8 +202,11 @@ func NewSubscriber(host host.Host, ds datastore.Batching, lsys ipld.LinkSystem, 
 		inEvents:  make(chan SyncFinished, 1),
 
 		dtSync:       dtSync,
-		httpSync:     httpsync.NewSync(lsys, cfg.httpClient, cfg.blockHook),
+		httpSync:     httpsync.NewSync(lsys, cfg.httpClient, blockHook),
 		syncRecLimit: cfg.syncRecLimit,
+
+		scopedBlockHookMutex: scopedBlockHookMutex,
+		scopedBlockHook:      scopedBlockHook,
 	}
 
 	// Start watcher to read pubsub messages.
@@ -335,6 +362,10 @@ func (s *Subscriber) OnSyncFinished() (<-chan SyncFinished, context.CancelFunc) 
 //
 // See: ExploreRecursiveWithStopNode.
 func (s *Subscriber) Sync(ctx context.Context, peerID peer.ID, nextCid cid.Cid, sel ipld.Node, peerAddr multiaddr.Multiaddr) (cid.Cid, error) {
+	return s.SyncWithHook(ctx, peerID, nextCid, sel, peerAddr, nil)
+}
+
+func (s *Subscriber) SyncWithHook(ctx context.Context, peerID peer.ID, nextCid cid.Cid, sel ipld.Node, peerAddr multiaddr.Multiaddr, hook BlockHookFunc) (cid.Cid, error) {
 	if peerID == "" {
 		return cid.Undef, errors.New("empty peer id")
 	}
@@ -416,6 +447,20 @@ func (s *Subscriber) Sync(ctx context.Context, peerID peer.ID, nextCid cid.Cid, 
 
 	hnd.syncMutex.Lock()
 	defer hnd.syncMutex.Unlock()
+
+	if hook != nil {
+		s.scopedBlockHookMutex.Lock()
+		s.scopedBlockHook[peerID] = hook
+		s.scopedBlockHookMutex.Unlock()
+		defer func() {
+			s.scopedBlockHookMutex.Lock()
+			if s.scopedBlockHook == nil {
+				s.scopedBlockHook = make(map[peer.ID]BlockHookFunc)
+			}
+			delete(s.scopedBlockHook, peerID)
+			s.scopedBlockHookMutex.Unlock()
+		}()
+	}
 
 	err = hnd.handle(ctx, nextCid, sel, wrapSel, updateLatest, syncer)
 	if err != nil {
