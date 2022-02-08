@@ -64,15 +64,19 @@ func NewPublisher(host host.Host, ds datastore.Batching, lsys ipld.LinkSystem, t
 	headPublisher := head.NewPublisher()
 	startHeadPublisher(host, topic, headPublisher)
 
-	return &publisher{
+	p := &publisher{
 		cancelPubSub:  cancel,
 		dtManager:     dtManager,
 		dtClose:       dtClose,
 		headPublisher: headPublisher,
 		host:          host,
-		minerID:       []byte(cfg.minerID),
 		topic:         t,
-	}, nil
+	}
+
+	if cfg.minerID != "" {
+		p.minerID = []byte(cfg.minerID)
+	}
+	return p, nil
 }
 
 func startHeadPublisher(host host.Host, topic string, headPublisher *head.Publisher) {
@@ -117,13 +121,17 @@ func NewPublisherFromExisting(dtManager dt.Manager, host host.Host, topic string
 	headPublisher := head.NewPublisher()
 	startHeadPublisher(host, topic, headPublisher)
 
-	return &publisher{
+	p := &publisher{
 		cancelPubSub:  cancel,
 		headPublisher: headPublisher,
 		host:          host,
-		minerID:       []byte(cfg.minerID),
 		topic:         t,
-	}, nil
+	}
+
+	if cfg.minerID != "" {
+		p.minerID = []byte(cfg.minerID)
+	}
+	return p, nil
 }
 
 func (p *publisher) SetRoot(ctx context.Context, c cid.Cid) error {
