@@ -46,7 +46,7 @@ func initPubSub(t *testing.T, srcStore, dstStore datastore.Batching) (host.Host,
 
 	srcLnkS := test.MkLinkSystem(srcStore)
 
-	pub, err := dtsync.NewPublisher(srcHost, srcStore, srcLnkS, testTopic, dtsync.Topic(topics[0]), dtsync.MinerID("t01000"))
+	pub, err := dtsync.NewPublisher(srcHost, srcStore, srcLnkS, testTopic, dtsync.Topic(topics[0]), dtsync.WithMinerID("t01000"))
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}

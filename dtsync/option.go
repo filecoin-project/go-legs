@@ -24,8 +24,8 @@ func (c *config) apply(opts []Option) error {
 	return nil
 }
 
-// MinerID sets a miner ID to include in the pubsub message.
-func MinerID(minerID string) Option {
+// WithMinerID sets a miner ID to include in the pubsub message.
+func WithMinerID(minerID string) Option {
 	return func(c *config) error {
 		c.minerID = minerID
 		return nil

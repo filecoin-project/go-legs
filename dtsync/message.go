@@ -87,7 +87,7 @@ func DecodeMessage(data []byte) (Message, error) {
 	if len(data) != 0 {
 		addrCount, n, err := varint.FromUvarint(data)
 		if err != nil {
-			return Message{}, fmt.Errorf("cannot read number of multiadds: %w", err)
+			return Message{}, fmt.Errorf("cannot read number of multiaddrs: %w", err)
 		}
 		if n > len(data) {
 			return Message{}, ErrBadEncoding
@@ -101,7 +101,7 @@ func DecodeMessage(data []byte) (Message, error) {
 			for i := 0; i < int(addrCount); i++ {
 				val, n, err := varint.FromUvarint(data)
 				if err != nil {
-					return Message{}, fmt.Errorf("cannot read multiadds length: %w", err)
+					return Message{}, fmt.Errorf("cannot read multiaddrs length: %w", err)
 				}
 				if n > len(data) {
 					return Message{}, ErrBadEncoding
@@ -113,7 +113,7 @@ func DecodeMessage(data []byte) (Message, error) {
 				}
 				addrs[i], err = multiaddr.NewMultiaddrBytes(data[:val])
 				if err != nil {
-					return Message{}, fmt.Errorf("cannot decode multiadds: %w", err)
+					return Message{}, fmt.Errorf("cannot decode multiaddrs: %w", err)
 				}
 				data = data[val:]
 			}
