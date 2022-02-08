@@ -27,6 +27,7 @@ type publisher struct {
 	dtClose       dtCloseFunc
 	headPublisher *head.Publisher
 	host          host.Host
+	minerID       []byte
 	topic         *pubsub.Topic
 }
 
@@ -69,6 +70,7 @@ func NewPublisher(host host.Host, ds datastore.Batching, lsys ipld.LinkSystem, t
 		dtClose:       dtClose,
 		headPublisher: headPublisher,
 		host:          host,
+		minerID:       []byte(cfg.minerID),
 		topic:         t,
 	}, nil
 }
@@ -119,6 +121,7 @@ func NewPublisherFromExisting(dtManager dt.Manager, host host.Host, topic string
 		cancelPubSub:  cancel,
 		headPublisher: headPublisher,
 		host:          host,
+		minerID:       []byte(cfg.minerID),
 		topic:         t,
 	}, nil
 }
@@ -142,8 +145,9 @@ func (p *publisher) UpdateRootWithAddrs(ctx context.Context, c cid.Cid, addrs []
 	}
 	log.Debugf("Publishing CID and addresses in pubsub channel: %s", c)
 	msg := Message{
-		Cid:   c,
-		Addrs: addrs,
+		Cid:       c,
+		Addrs:     addrs,
+		ExtraData: p.minerID,
 	}
 	return p.topic.Publish(ctx, EncodeMessage(msg))
 }

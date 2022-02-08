@@ -1,6 +1,7 @@
 package dtsync
 
 import (
+	"bytes"
 	"testing"
 
 	"github.com/ipfs/go-cid"
@@ -24,8 +25,9 @@ func TestEncodeDecodeMessage(t *testing.T) {
 	}
 
 	msg1 := Message{
-		Cid:   c,
-		Addrs: []multiaddr.Multiaddr{maddrA, maddrB},
+		Cid:       c,
+		Addrs:     []multiaddr.Multiaddr{maddrA, maddrB},
+		ExtraData: []byte("hello"),
 	}
 
 	data := EncodeMessage(msg1)
@@ -46,5 +48,8 @@ func TestEncodeDecodeMessage(t *testing.T) {
 		if !msg2.Addrs[i].Equal(msg1.Addrs[i]) {
 			t.Fatalf("Decoded multiaddr %d %q is not equal to original %q", i, msg2.Addrs[i], msg1.Addrs[i])
 		}
+	}
+	if !bytes.Equal(msg2.ExtraData, msg1.ExtraData) {
+		t.Fatal("Wrong ExtraData")
 	}
 }

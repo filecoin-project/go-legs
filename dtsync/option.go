@@ -8,7 +8,8 @@ import (
 
 // config contains all options for configuring dtsync.publisher.
 type config struct {
-	topic *pubsub.Topic
+	minerID string
+	topic   *pubsub.Topic
 }
 
 type Option func(*config) error
@@ -21,6 +22,14 @@ func (c *config) apply(opts []Option) error {
 		}
 	}
 	return nil
+}
+
+// MinerID sets a miner ID to include in the pubsub message.
+func MinerID(minerID string) Option {
+	return func(c *config) error {
+		c.minerID = minerID
+		return nil
+	}
 }
 
 // Topic provides an existing pubsub topic.
