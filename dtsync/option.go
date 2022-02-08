@@ -8,7 +8,8 @@ import (
 
 // config contains all options for configuring dtsync.publisher.
 type config struct {
-	topic *pubsub.Topic
+	extraData []byte
+	topic     *pubsub.Topic
 }
 
 type Option func(*config) error
@@ -21,6 +22,16 @@ func (c *config) apply(opts []Option) error {
 		}
 	}
 	return nil
+}
+
+// WithExtraData sets the extra data to include in the pubsub message.
+func WithExtraData(data []byte) Option {
+	return func(c *config) error {
+		if len(data) != 0 {
+			c.extraData = data
+		}
+		return nil
+	}
 }
 
 // Topic provides an existing pubsub topic.

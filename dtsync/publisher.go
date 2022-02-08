@@ -27,6 +27,7 @@ type publisher struct {
 	dtClose       dtCloseFunc
 	headPublisher *head.Publisher
 	host          host.Host
+	extraData     []byte
 	topic         *pubsub.Topic
 }
 
@@ -63,14 +64,19 @@ func NewPublisher(host host.Host, ds datastore.Batching, lsys ipld.LinkSystem, t
 	headPublisher := head.NewPublisher()
 	startHeadPublisher(host, topic, headPublisher)
 
-	return &publisher{
+	p := &publisher{
 		cancelPubSub:  cancel,
 		dtManager:     dtManager,
 		dtClose:       dtClose,
 		headPublisher: headPublisher,
 		host:          host,
 		topic:         t,
-	}, nil
+	}
+
+	if len(cfg.extraData) != 0 {
+		p.extraData = cfg.extraData
+	}
+	return p, nil
 }
 
 func startHeadPublisher(host host.Host, topic string, headPublisher *head.Publisher) {
@@ -115,12 +121,17 @@ func NewPublisherFromExisting(dtManager dt.Manager, host host.Host, topic string
 	headPublisher := head.NewPublisher()
 	startHeadPublisher(host, topic, headPublisher)
 
-	return &publisher{
+	p := &publisher{
 		cancelPubSub:  cancel,
 		headPublisher: headPublisher,
 		host:          host,
 		topic:         t,
-	}, nil
+	}
+
+	if len(cfg.extraData) != 0 {
+		p.extraData = cfg.extraData
+	}
+	return p, nil
 }
 
 func (p *publisher) SetRoot(ctx context.Context, c cid.Cid) error {
@@ -142,8 +153,9 @@ func (p *publisher) UpdateRootWithAddrs(ctx context.Context, c cid.Cid, addrs []
 	}
 	log.Debugf("Publishing CID and addresses in pubsub channel: %s", c)
 	msg := Message{
-		Cid:   c,
-		Addrs: addrs,
+		Cid:       c,
+		Addrs:     addrs,
+		ExtraData: p.extraData,
 	}
 	return p.topic.Publish(ctx, EncodeMessage(msg))
 }
