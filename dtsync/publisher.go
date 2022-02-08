@@ -27,7 +27,7 @@ type publisher struct {
 	dtClose       dtCloseFunc
 	headPublisher *head.Publisher
 	host          host.Host
-	minerID       []byte
+	extraData     []byte
 	topic         *pubsub.Topic
 }
 
@@ -73,8 +73,8 @@ func NewPublisher(host host.Host, ds datastore.Batching, lsys ipld.LinkSystem, t
 		topic:         t,
 	}
 
-	if cfg.minerID != "" {
-		p.minerID = []byte(cfg.minerID)
+	if len(cfg.extraData) != 0 {
+		p.extraData = cfg.extraData
 	}
 	return p, nil
 }
@@ -128,8 +128,8 @@ func NewPublisherFromExisting(dtManager dt.Manager, host host.Host, topic string
 		topic:         t,
 	}
 
-	if cfg.minerID != "" {
-		p.minerID = []byte(cfg.minerID)
+	if len(cfg.extraData) != 0 {
+		p.extraData = cfg.extraData
 	}
 	return p, nil
 }
@@ -155,7 +155,7 @@ func (p *publisher) UpdateRootWithAddrs(ctx context.Context, c cid.Cid, addrs []
 	msg := Message{
 		Cid:       c,
 		Addrs:     addrs,
-		ExtraData: p.minerID,
+		ExtraData: p.extraData,
 	}
 	return p.topic.Publish(ctx, EncodeMessage(msg))
 }

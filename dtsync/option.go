@@ -8,8 +8,8 @@ import (
 
 // config contains all options for configuring dtsync.publisher.
 type config struct {
-	minerID string
-	topic   *pubsub.Topic
+	extraData []byte
+	topic     *pubsub.Topic
 }
 
 type Option func(*config) error
@@ -24,10 +24,12 @@ func (c *config) apply(opts []Option) error {
 	return nil
 }
 
-// WithMinerID sets a miner ID to include in the pubsub message.
-func WithMinerID(minerID string) Option {
+// WithExtraData sets the extra data to include in the pubsub message.
+func WithExtraData(data []byte) Option {
 	return func(c *config) error {
-		c.minerID = minerID
+		if len(data) != 0 {
+			c.extraData = data
+		}
 		return nil
 	}
 }
