@@ -2,6 +2,7 @@ package legs_test
 
 import (
 	"context"
+	cryptorand "crypto/rand"
 	"math/rand"
 	"sync"
 	"sync/atomic"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/filecoin-project/go-legs"
 	"github.com/filecoin-project/go-legs/dtsync"
+	"github.com/filecoin-project/go-legs/httpsync"
 	"github.com/filecoin-project/go-legs/test"
 	"github.com/ipfs/go-cid"
 	"github.com/ipfs/go-datastore"
@@ -20,9 +22,13 @@ import (
 	"github.com/ipld/go-ipld-prime/linking"
 	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
 	basicnode "github.com/ipld/go-ipld-prime/node/basic"
+	"github.com/libp2p/go-libp2p"
+	"github.com/libp2p/go-libp2p-core/crypto"
 	"github.com/libp2p/go-libp2p-core/host"
 	"github.com/libp2p/go-libp2p-core/peer"
+	"github.com/multiformats/go-multiaddr"
 	"github.com/multiformats/go-multicodec"
+	"github.com/stretchr/testify/require"
 )
 
 const (
@@ -83,7 +89,7 @@ func TestConcurrentSync(t *testing.T) {
 			}
 
 			wg := sync.WaitGroup{}
-			// Now sync again. We shouldn't call the hook.
+			// Now sync again. We shouldn't call the hook because we persisted our latestSync
 			for _, pub := range publishers {
 				wg.Add(1)
 
@@ -123,17 +129,33 @@ func TestConcurrentSync(t *testing.T) {
 }
 
 func TestSync(t *testing.T) {
-	err := quick.Check(func(ll llBuilder) bool {
+	err := quick.Check(func(lpsb legsPubSubBuilder, ll llBuilder) bool {
 		return t.Run("Quickcheck", func(t *testing.T) {
-			ds := dssync.MutexWrap(datastore.NewMapDatastore())
-			pubHost := test.MkTestHost()
-			lsys := test.MkLinkSystem(ds)
-			pub, err := dtsync.NewPublisher(pubHost, ds, lsys, testTopic)
-			if err != nil {
-				t.Fatal(err)
+			pubPrivKey, _, err := crypto.GenerateEd25519Key(cryptorand.Reader)
+			require.NoError(t, err)
+
+			pubDs := dssync.MutexWrap(datastore.NewMapDatastore())
+			pubSys := hostSystem{
+				privKey: pubPrivKey,
+				host:    test.MkTestHost(libp2p.Identity(pubPrivKey)),
+				ds:      pubDs,
+				lsys:    test.MkLinkSystem(pubDs),
+			}
+			subDs := dssync.MutexWrap(datastore.NewMapDatastore())
+			subSys := hostSystem{
+				host: test.MkTestHost(),
+				ds:   subDs,
+				lsys: test.MkLinkSystem(subDs),
 			}
 
-			head := ll.Build(t, lsys)
+			calledTimes := 0
+			pubAddr, pub, sub := lpsb.Build(t, testTopic, pubSys, subSys,
+				[]legs.Option{legs.BlockHook(func(i peer.ID, c cid.Cid) {
+					calledTimes++
+				})},
+			)
+
+			head := ll.Build(t, pubSys.lsys)
 			if head == nil {
 				// We built an empty list. So nothing to test.
 				return
@@ -144,29 +166,17 @@ func TestSync(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			subDS := dssync.MutexWrap(datastore.NewMapDatastore())
-			subLsys := test.MkLinkSystem(ds)
-			subHost := test.MkTestHost()
-
-			calledTimes := 0
-			sub, err := legs.NewSubscriber(subHost, subDS, subLsys, testTopic, nil, legs.BlockHook(func(i peer.ID, c cid.Cid) {
-				calledTimes++
-			}))
-			if err != nil {
-				t.Fatal(err)
-			}
-
-			// Now sync again. We shouldn't call the hook.
-			_, err = sub.Sync(context.Background(), pubHost.ID(), cid.Undef, nil, pubHost.Addrs()[0])
+			_, err = sub.Sync(context.Background(), pubSys.host.ID(), cid.Undef, nil, pubAddr)
 			if err != nil {
 				t.Fatal(err)
 			}
 			calledTimesFirstSync := calledTimes
-			latestSync := sub.GetLatestSync(pubHost.ID())
+			latestSync := sub.GetLatestSync(pubSys.host.ID())
 			if latestSync != head {
 				t.Fatalf("Subscriber did not persist latest sync")
 			}
-			_, err = sub.Sync(context.Background(), pubHost.ID(), cid.Undef, nil, pubHost.Addrs()[0])
+			// Now sync again. We shouldn't call the hook.
+			_, err = sub.Sync(context.Background(), pubSys.host.ID(), cid.Undef, nil, pubAddr)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -174,9 +184,76 @@ func TestSync(t *testing.T) {
 				t.Fatalf("Subscriber called the block hook multiple times for the same sync. Expected %d, got %d", calledTimesFirstSync, calledTimes)
 			}
 
+			require.Equal(t, int(ll.Length), calledTimes, "Subscriber did not call the block hook exactly once for each block")
 		})
 	}, &quick.Config{
-		MaxCount: 10,
+		MaxCount: 5,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestSyncWithHydratedDataStore tests what happens if we call sync when the
+// subscriber datastore already has the dag.
+func TestSyncWithHydratedDataStore(t *testing.T) {
+	err := quick.Check(func(lpsb legsPubSubBuilder, ll llBuilder) bool {
+		return t.Run("Quickcheck", func(t *testing.T) {
+			pubPrivKey, _, err := crypto.GenerateEd25519Key(cryptorand.Reader)
+			require.NoError(t, err)
+
+			pubDs := dssync.MutexWrap(datastore.NewMapDatastore())
+			pubSys := hostSystem{
+				privKey: pubPrivKey,
+				host:    test.MkTestHost(libp2p.Identity(pubPrivKey)),
+				ds:      pubDs,
+				lsys:    test.MkLinkSystem(pubDs),
+			}
+			subDs := dssync.MutexWrap(datastore.NewMapDatastore())
+			subSys := hostSystem{
+				host: test.MkTestHost(),
+				ds:   subDs,
+				lsys: test.MkLinkSystem(subDs),
+			}
+
+			calledTimes := 0
+			var calledWith []cid.Cid
+			pubAddr, pub, sub := lpsb.Build(t, testTopic, pubSys, subSys,
+				[]legs.Option{legs.BlockHook(func(i peer.ID, c cid.Cid) {
+					calledWith = append(calledWith, c)
+					calledTimes++
+				})},
+			)
+
+			head := ll.Build(t, pubSys.lsys)
+			if head == nil {
+				// We built an empty list. So nothing to test.
+				return
+			}
+
+			err = pub.UpdateRoot(context.Background(), head.(cidlink.Link).Cid)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			// Sync once to hydrate the datastore
+			// Note we set the cid we are syncing to so we don't update the latestSync.
+			_, err = sub.Sync(context.Background(), pubSys.host.ID(), head.(cidlink.Link).Cid, nil, pubAddr)
+			require.NoError(t, err)
+			require.Equal(t, int(ll.Length), calledTimes, "Subscriber did not call the block hook exactly once for each block")
+			require.Equal(t, head.(cidlink.Link).Cid, calledWith[0], "Subscriber did not call the block hook in the correct order")
+
+			calledTimesFirstSync := calledTimes
+
+			// Now sync again. We should call the hook because we don't have the latestSync persisted.
+			_, err = sub.Sync(context.Background(), pubSys.host.ID(), cid.Undef, nil, pubAddr)
+			if err != nil {
+				t.Fatal(err)
+			}
+			require.Equal(t, calledTimesFirstSync*2, calledTimes, "Expected to have called block hook twice. Once for each sync.")
+		})
+	}, &quick.Config{
+		MaxCount: 5,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -365,6 +442,47 @@ func TestCloseSubscriber(t *testing.T) {
 	case <-time.After(updateTimeout):
 		t.Fatal("OnSyncFinished cancel func did not return after Close")
 	}
+}
+
+type legsPubSubBuilder struct {
+	IsHttp bool
+}
+
+type hostSystem struct {
+	privKey crypto.PrivKey
+	host    host.Host
+	ds      datastore.Batching
+	lsys    ipld.LinkSystem
+}
+
+func (b legsPubSubBuilder) Build(t *testing.T, topicName string, pubSys hostSystem, subSys hostSystem, subOpts []legs.Option) (multiaddr.Multiaddr, legs.Publisher, *legs.Subscriber) {
+	var pubAddr multiaddr.Multiaddr
+	var pub legs.Publisher
+	var err error
+	if b.IsHttp {
+		var id peer.ID
+		id, err = peer.IDFromPrivateKey(pubSys.privKey)
+		if err != nil {
+			t.Fatal(err)
+		}
+		httpPub, err := httpsync.NewPublisher("127.0.0.1:0", pubSys.lsys, id, pubSys.privKey)
+		require.NoError(t, err)
+		pubAddr = httpPub.Address()
+		pub = httpPub
+	} else {
+		pub, err = dtsync.NewPublisher(pubSys.host, pubSys.ds, pubSys.lsys, topicName)
+		pubAddr = pubSys.host.Addrs()[0]
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	sub, err := legs.NewSubscriber(subSys.host, subSys.ds, subSys.lsys, topicName, nil, subOpts...)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	return pubAddr, pub, sub
+
 }
 
 type llBuilder struct {

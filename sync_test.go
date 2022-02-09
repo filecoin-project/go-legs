@@ -82,8 +82,10 @@ func TestSyncFn(t *testing.T) {
 	}
 	defer pub.Close()
 
+	var blockHookCalls int
 	blocksSeenByHook := make(map[cid.Cid]struct{})
 	blockHook := func(_ peer.ID, c cid.Cid) {
+		blockHookCalls++
 		blocksSeenByHook[c] = struct{}{}
 	}
 
@@ -140,6 +142,10 @@ func TestSyncFn(t *testing.T) {
 	_, ok := blocksSeenByHook[lnk.(cidlink.Link).Cid]
 	if !ok {
 		t.Fatal("block hook did not see link cid")
+	}
+
+	if blockHookCalls != 11 {
+		t.Fatalf("expected 11 block hook calls, got %d", blockHookCalls)
 	}
 
 	// Assert the latestSync is not updated by explicit sync when cid is set
