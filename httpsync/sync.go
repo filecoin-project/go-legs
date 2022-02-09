@@ -100,13 +100,6 @@ func (s *Syncer) GetHead(ctx context.Context) (cid.Cid, error) {
 }
 
 func (s *Syncer) Sync(ctx context.Context, nextCid cid.Cid, sel ipld.Node) error {
-	err := s.fetchBlock(ctx, nextCid)
-	if err != nil {
-		msg := "failed to fetch requested block"
-		log.Errorw(msg, "err", err)
-		return errors.New(msg)
-	}
-
 	xsel, err := selector.CompileSelector(sel)
 	if err != nil {
 		msg := "failed to compile selector"
@@ -134,8 +127,19 @@ func (s *Syncer) walkFetch(ctx context.Context, rootCid cid.Cid, sel selector.Se
 	getMissingLs := cidlink.DefaultLinkSystem()
 	// trusted because it'll be hashed/verified on the way into the link system when fetched.
 	getMissingLs.TrustedStorage = true
-	getMissingLs.StorageReadOpener = func(lc ipld.LinkContext, l ipld.Link) (io.Reader, error) {
-		r, err := s.sync.lsys.StorageReadOpener(lc, l)
+	getMissingLs.StorageReadOpener = func(lc ipld.LinkContext, l ipld.Link) (r io.Reader, err error) {
+		defer func() {
+			if err == nil && s.sync.blockHook != nil {
+				// We need to run the block hook here to emulate the behavior of
+				// graphsync's `OnIncomingBlockHook` callback (gets called even if block is already stored locally).
+				// We also do this after we've read the block so that if the hook
+				// removes the block from the datastore we can still progress in our
+				// traversal.
+				s.sync.blockHook(s.peerID, l.(cidlink.Link).Cid)
+			}
+		}()
+
+		r, err = s.sync.lsys.StorageReadOpener(lc, l)
 		if err == nil {
 			// Found block read opener, so return it.
 			return r, nil
@@ -214,9 +218,6 @@ func (s *Syncer) fetchBlock(ctx context.Context, c cid.Cid) error {
 		if err != nil {
 			log.Errorw("Failed to commit ")
 			return err
-		}
-		if s.sync.blockHook != nil {
-			s.sync.blockHook(s.peerID, c)
 		}
 		return nil
 	})
