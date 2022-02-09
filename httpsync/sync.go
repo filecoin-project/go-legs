@@ -123,19 +123,38 @@ func (s *Syncer) Sync(ctx context.Context, nextCid cid.Cid, sel ipld.Node) error
 // local data store. If it cannot, it will then go and get it over HTTP.  This
 // emulates way libp2p/graphsync fetches data, but the actual fetch of data is
 // done over HTTP.
-func (s *Syncer) walkFetch(ctx context.Context, rootCid cid.Cid, sel selector.Selector) error {
+func (s *Syncer) walkFetch(ctx context.Context, rootCid cid.Cid, sel selector.Selector) (err error) {
+	// We run the block hook to emulate the behavior of graphsync's
+	// `OnIncomingBlockHook` callback (gets called even if block is already stored
+	// locally). We keep track of which cids we've traversed and defer
+	// We also do this after we've read the block so that if the hook
+	// removes the block from the datastore we can still progress in our
+	// traversal.
+
+	// Track the order of cids we've seen during our traversal so we can call the
+	// block hook function in the same order. We emulate the behavior of
+	// graphsync's `OnIncomingBlockHook`, this means we call the blockhook even if
+	// we have the block locally.
+	// We are purposefully not doing this in the StorageReadOpener because the
+	// hook can do anything, including deleting the block from the block store. If
+	// it did that then we would not be able to continue our traversal. So instead
+	// we remember the blocks seen during traversal and then call the hook at the
+	// end when we no longer care what it does with the blocks.
+	var traversalOrder []cid.Cid
+	defer func() {
+		if err == nil && s.sync.blockHook != nil {
+			for _, c := range traversalOrder {
+				s.sync.blockHook(s.peerID, c)
+			}
+		}
+	}()
 	getMissingLs := cidlink.DefaultLinkSystem()
 	// trusted because it'll be hashed/verified on the way into the link system when fetched.
 	getMissingLs.TrustedStorage = true
 	getMissingLs.StorageReadOpener = func(lc ipld.LinkContext, l ipld.Link) (r io.Reader, err error) {
 		defer func() {
 			if err == nil && s.sync.blockHook != nil {
-				// We need to run the block hook here to emulate the behavior of
-				// graphsync's `OnIncomingBlockHook` callback (gets called even if block is already stored locally).
-				// We also do this after we've read the block so that if the hook
-				// removes the block from the datastore we can still progress in our
-				// traversal.
-				s.sync.blockHook(s.peerID, l.(cidlink.Link).Cid)
+				traversalOrder = append(traversalOrder, l.(cidlink.Link).Cid)
 			}
 		}()
 

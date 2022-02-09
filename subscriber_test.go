@@ -3,7 +3,6 @@ package legs_test
 import (
 	"context"
 	cryptorand "crypto/rand"
-	"fmt"
 	"math/rand"
 	"sync"
 	"sync/atomic"
@@ -186,7 +185,6 @@ func TestSync(t *testing.T) {
 			}
 
 			require.Equal(t, int(ll.Length), calledTimes, "Subscriber did not call the block hook exactly once for each block")
-			fmt.Println("Times", calledTimes)
 		})
 	}, &quick.Config{
 		MaxCount: 5,
