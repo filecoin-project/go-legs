@@ -1,6 +1,7 @@
 package dtsync
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -154,10 +155,14 @@ func (p *publisher) UpdateRootWithAddrs(ctx context.Context, c cid.Cid, addrs []
 	log.Debugf("Publishing CID and addresses in pubsub channel: %s", c)
 	msg := Message{
 		Cid:       c,
-		Addrs:     addrs,
 		ExtraData: p.extraData,
 	}
-	return p.topic.Publish(ctx, EncodeMessage(msg))
+	msg.SetAddrs(addrs)
+	buf := bytes.NewBuffer(nil)
+	if err := msg.MarshalCBOR(buf); err != nil {
+		return err
+	}
+	return p.topic.Publish(ctx, buf.Bytes())
 }
 
 func (p *publisher) Close() error {

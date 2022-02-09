@@ -1,6 +1,7 @@
 package legs
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -512,8 +513,8 @@ func (s *Subscriber) watch(ctx context.Context) {
 		}
 
 		// Decode CID and originator addresses from message.
-		m, err := dtsync.DecodeMessage(msg.Data)
-		if err != nil {
+		m := dtsync.Message{}
+		if err = m.UnmarshalCBOR(bytes.NewBuffer(msg.Data)); err != nil {
 			log.Errorw("Could not decode pubsub message", "err", err)
 			continue
 		}
@@ -524,7 +525,12 @@ func (s *Subscriber) watch(ctx context.Context) {
 		if len(m.Addrs) != 0 {
 			peerStore := s.host.Peerstore()
 			if peerStore != nil {
-				peerStore.AddAddrs(srcPeer, m.Addrs, s.addrTTL)
+				addrs, err := m.GetAddrs()
+				if err != nil {
+					log.Errorw("Could not decode pubsub message", "err", err)
+					continue
+				}
+				peerStore.AddAddrs(srcPeer, addrs, s.addrTTL)
 			}
 		}
 
