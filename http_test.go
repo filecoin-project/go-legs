@@ -171,8 +171,8 @@ func TestSyncFnHttp(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error when no content to sync")
 	}
-	if !strings.Contains(err.Error(), "failed to fetch requested block") {
-		t.Fatalf("expected error to contain the string 'failed to fetch requested block', got %s", err.Error())
+	if !strings.Contains(err.Error(), "failed to traverse requested dag") {
+		t.Fatalf("expected error to contain the string 'failed to traverse requested dag', got %s", err.Error())
 	}
 	syncncl()
 
@@ -212,8 +212,8 @@ func TestSyncFnHttp(t *testing.T) {
 	if !ok {
 		t.Fatal("block hook did not see link cid")
 	}
-	if blockHookCalls != 7 {
-		t.Fatalf("expected 7 block hook calls, got %d", blockHookCalls)
+	if blockHookCalls != 11 {
+		t.Fatalf("expected 11 block hook calls, got %d", blockHookCalls)
 	}
 
 	// Assert the latestSync is not updated by explicit sync when cid is set
