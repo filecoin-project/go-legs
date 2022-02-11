@@ -131,22 +131,8 @@ func TestConcurrentSync(t *testing.T) {
 func TestSync(t *testing.T) {
 	err := quick.Check(func(lpsb legsPubSubBuilder, ll llBuilder) bool {
 		return t.Run("Quickcheck", func(t *testing.T) {
-			pubPrivKey, _, err := crypto.GenerateEd25519Key(cryptorand.Reader)
-			require.NoError(t, err)
-
-			pubDs := dssync.MutexWrap(datastore.NewMapDatastore())
-			pubSys := hostSystem{
-				privKey: pubPrivKey,
-				host:    test.MkTestHost(libp2p.Identity(pubPrivKey)),
-				ds:      pubDs,
-				lsys:    test.MkLinkSystem(pubDs),
-			}
-			subDs := dssync.MutexWrap(datastore.NewMapDatastore())
-			subSys := hostSystem{
-				host: test.MkTestHost(),
-				ds:   subDs,
-				lsys: test.MkLinkSystem(subDs),
-			}
+			pubSys := newHostSystem(t)
+			subSys := newHostSystem(t)
 
 			calledTimes := 0
 			pubAddr, pub, sub := lpsb.Build(t, testTopic, pubSys, subSys,
@@ -161,7 +147,7 @@ func TestSync(t *testing.T) {
 				return
 			}
 
-			err = pub.UpdateRoot(context.Background(), head.(cidlink.Link).Cid)
+			err := pub.UpdateRoot(context.Background(), head.(cidlink.Link).Cid)
 			if err != nil {
 				t.Fatal(err)
 			}
