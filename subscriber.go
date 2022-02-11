@@ -358,19 +358,15 @@ func (s *Subscriber) Sync(ctx context.Context, peerID peer.ID, nextCid cid.Cid, 
 	var syncer Syncer
 
 	isHttpPeerAddr := false
+	shouldAddToHttpPeerstore := false
 	if peerAddr != nil {
 		for _, p := range peerAddr.Protocols() {
 			if p.Code == multiaddr.P_HTTP || p.Code == multiaddr.P_HTTPS {
 				isHttpPeerAddr = true
+				shouldAddToHttpPeerstore = true
 				break
 			}
 		}
-	}
-
-	if isHttpPeerAddr {
-		// Store this http address so that future calls to sync will work without a
-		// peerAddr (given that it happens within the TTL)
-		s.httpPeerstore.AddAddr(peerID, peerAddr, peerstore.ProviderAddrTTL)
 	}
 
 	if peerAddr == nil {
@@ -457,6 +453,12 @@ func (s *Subscriber) Sync(ctx context.Context, peerID peer.ID, nextCid cid.Cid, 
 	err = hnd.handle(ctx, nextCid, sel, wrapSel, updateLatest, syncer)
 	if err != nil {
 		return cid.Undef, fmt.Errorf("sync handler failed: %w", err)
+	}
+
+	if shouldAddToHttpPeerstore {
+		// Store this http address so that future calls to sync will work without a
+		// peerAddr (given that it happens within the TTL)
+		s.httpPeerstore.AddAddr(peerID, peerAddr, peerstore.ProviderAddrTTL)
 	}
 
 	return nextCid, nil
