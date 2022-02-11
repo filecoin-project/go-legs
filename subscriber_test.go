@@ -384,6 +384,52 @@ func TestRoundTrip(t *testing.T) {
 	}
 }
 
+func TestHttpPeerAddrPeerstore(t *testing.T) {
+	pubHostSys := newHostSystem(t)
+	subHostSys := newHostSystem(t)
+
+	pubAddr, pub, sub := legsPubSubBuilder{
+		IsHttp: true,
+	}.Build(t, testTopic, pubHostSys, subHostSys, nil)
+
+	ll := llBuilder{
+		Length: 3,
+		Seed:   1,
+	}.Build(t, pubHostSys.lsys)
+
+	// a new link on top of ll
+	nextLL := llBuilder{
+		Length: 1,
+		Seed:   2,
+	}.BuildWithPrev(t, pubHostSys.lsys, ll)
+
+	prevHead := ll
+	head := nextLL
+
+	err := pub.UpdateRoot(context.Background(), prevHead.(cidlink.Link).Cid)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = sub.Sync(context.Background(), pubHostSys.host.ID(), cid.Undef, nil, pubAddr)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = pub.UpdateRoot(context.Background(), head.(cidlink.Link).Cid)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Now call sync again with no address. The subscriber should re-use the
+	// previous address and succeeed.
+	_, err = sub.Sync(context.Background(), pubHostSys.host.ID(), cid.Undef, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+}
+
 func waitForSync(t *testing.T, logPrefix string, store *dssync.MutexDatastore, expectedCid cidlink.Link, watcher <-chan legs.SyncFinished) {
 	select {
 	case <-time.After(updateTimeout):
@@ -455,6 +501,18 @@ type hostSystem struct {
 	lsys    ipld.LinkSystem
 }
 
+func newHostSystem(t *testing.T) hostSystem {
+	privKey, _, err := crypto.GenerateEd25519Key(cryptorand.Reader)
+	require.NoError(t, err)
+	ds := dssync.MutexWrap(datastore.NewMapDatastore())
+	return hostSystem{
+		privKey: privKey,
+		host:    test.MkTestHost(libp2p.Identity(privKey)),
+		ds:      ds,
+		lsys:    test.MkLinkSystem(ds),
+	}
+}
+
 func (b legsPubSubBuilder) Build(t *testing.T, topicName string, pubSys hostSystem, subSys hostSystem, subOpts []legs.Option) (multiaddr.Multiaddr, legs.Publisher, *legs.Subscriber) {
 	var pubAddr multiaddr.Multiaddr
 	var pub legs.Publisher
@@ -491,6 +549,10 @@ type llBuilder struct {
 }
 
 func (b llBuilder) Build(t *testing.T, lsys ipld.LinkSystem) datamodel.Link {
+	return b.BuildWithPrev(t, lsys, nil)
+}
+
+func (b llBuilder) BuildWithPrev(t *testing.T, lsys ipld.LinkSystem, prev datamodel.Link) datamodel.Link {
 	var linkproto = cidlink.LinkPrototype{
 		Prefix: cid.Prefix{
 			Version:  1,
@@ -501,7 +563,6 @@ func (b llBuilder) Build(t *testing.T, lsys ipld.LinkSystem) datamodel.Link {
 	}
 
 	rng := rand.New(rand.NewSource(b.Seed))
-	var prev datamodel.Link
 	for i := 0; i < int(b.Length); i++ {
 		p := basicnode.Prototype.Map
 		b := p.NewBuilder()

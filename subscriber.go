@@ -20,6 +20,8 @@ import (
 	"github.com/ipld/go-ipld-prime/traversal/selector"
 	"github.com/libp2p/go-libp2p-core/host"
 	"github.com/libp2p/go-libp2p-core/peer"
+	"github.com/libp2p/go-libp2p-core/peerstore"
+	"github.com/libp2p/go-libp2p-peerstore/pstoremem"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	"github.com/multiformats/go-multiaddr"
 )
@@ -94,6 +96,8 @@ type Subscriber struct {
 	dtSync       *dtsync.Sync
 	httpSync     *httpsync.Sync
 	syncRecLimit selector.RecursionLimit
+
+	httpPeerstore peerstore.Peerstore
 }
 
 // SyncFinished notifies an OnSyncFinished reader that a specified peer
@@ -162,6 +166,12 @@ func NewSubscriber(host host.Host, ds datastore.Batching, lsys ipld.LinkSystem, 
 		return nil, err
 	}
 
+	httpPeerstore, err := pstoremem.NewPeerstore()
+	if err != nil {
+		cancelPubsub()
+		return nil, err
+	}
+
 	s := &Subscriber{
 		dss:  dss,
 		host: host,
@@ -181,6 +191,8 @@ func NewSubscriber(host host.Host, ds datastore.Batching, lsys ipld.LinkSystem, 
 		dtSync:       dtSync,
 		httpSync:     httpsync.NewSync(lsys, cfg.httpClient, cfg.blockHook),
 		syncRecLimit: cfg.syncRecLimit,
+
+		httpPeerstore: httpPeerstore,
 	}
 
 	// Start watcher to read pubsub messages.
@@ -345,15 +357,39 @@ func (s *Subscriber) Sync(ctx context.Context, peerID peer.ID, nextCid cid.Cid, 
 	var err error
 	var syncer Syncer
 
-	// If address specified, then get URL for HTTP sync, or add multiaddr to peerstore.
+	isHttpPeerAddr := false
 	if peerAddr != nil {
 		for _, p := range peerAddr.Protocols() {
 			if p.Code == multiaddr.P_HTTP || p.Code == multiaddr.P_HTTPS {
-				syncer, err = s.httpSync.NewSyncer(peerID, peerAddr)
-				if err != nil {
-					return cid.Undef, fmt.Errorf("cannot create http sync handler: %w", err)
-				}
+				isHttpPeerAddr = true
 				break
+			}
+		}
+	}
+
+	if isHttpPeerAddr {
+		// Store this http address so that future calls to sync will work without a
+		// peerAddr (given that it happens within the TTL)
+		s.httpPeerstore.AddAddr(peerID, peerAddr, peerstore.ProviderAddrTTL)
+	}
+
+	if peerAddr == nil {
+		// Check if we have an http url for this peer since we didn't get an peerAddr.
+		// Note that this gives a preference to use httpSync over dtsync if we have
+		// seen http address and we called sync with no explicit peerAddr.
+		possibleAddrs := s.httpPeerstore.Addrs(peerID)
+		if len(possibleAddrs) > 0 {
+			peerAddr = possibleAddrs[0]
+			isHttpPeerAddr = true
+		}
+	}
+
+	// If address specified, then get URL for HTTP sync, or add multiaddr to peerstore.
+	if peerAddr != nil {
+		if isHttpPeerAddr {
+			syncer, err = s.httpSync.NewSyncer(peerID, peerAddr)
+			if err != nil {
+				return cid.Undef, fmt.Errorf("cannot create http sync handler: %w", err)
 			}
 		}
 
