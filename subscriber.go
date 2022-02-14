@@ -382,6 +382,15 @@ func (s *Subscriber) Sync(ctx context.Context, peerID peer.ID, nextCid cid.Cid, 
 			return cid.Undef, fmt.Errorf("cannot create http sync handler: %w", err)
 		}
 	} else {
+		// Not an httpPeerAddr, so use the dtSync. We'll add it with a small TTL
+		// first, and extend it when we discover we can actually sync from it.
+		// In case the peerstore already has this address and the existing TTL is
+		// greater than this temp one, this is a no-op. In other words we never
+		// decrease the TTL here.
+		peerStore := s.host.Peerstore()
+		if peerStore != nil {
+			peerStore.AddAddr(peerID, peerAddr, peerstore.TempAddrTTL)
+		}
 		syncer = s.dtSync.NewSyncer(peerID, s.topicName)
 	}
 
