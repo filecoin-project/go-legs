@@ -367,9 +367,7 @@ func (s *Subscriber) Sync(ctx context.Context, peerID peer.ID, nextCid cid.Cid, 
 				break
 			}
 		}
-	}
-
-	if peerAddr == nil {
+	} else {
 		// Check if we have an http url for this peer since we didn't get a peerAddr.
 		// Note that this gives a preference to use httpSync over dtsync if we have
 		// seen http address and we called sync with no explicit peerAddr.
