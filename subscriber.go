@@ -285,6 +285,9 @@ func (s *Subscriber) doClose() error {
 
 	// Stop the distribution goroutine.
 	close(s.inEvents)
+
+	s.httpPeerstore.Close()
+
 	return errs
 }
 

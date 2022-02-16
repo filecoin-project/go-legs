@@ -74,18 +74,21 @@ func registerVoucher(dtManager dt.Manager) error {
 
 func makeDataTransfer(host host.Host, ds datastore.Batching, lsys ipld.LinkSystem) (dt.Manager, graphsync.GraphExchange, dtCloseFunc, error) {
 	gsNet := gsnet.NewFromLibp2pHost(host)
-	gs := gsimpl.New(context.Background(), gsNet, lsys)
+	ctx, cancel := context.WithCancel(context.Background())
+	gs := gsimpl.New(ctx, gsNet, lsys)
 
 	dtNet := dtnetwork.NewFromLibp2pHost(host)
 	tp := gstransport.NewTransport(host.ID(), gs)
 
 	dtManager, err := datatransfer.NewDataTransfer(ds, dtNet, tp)
 	if err != nil {
+		cancel()
 		return nil, nil, nil, fmt.Errorf("failed to instantiate datatransfer: %w", err)
 	}
 
 	err = registerVoucher(dtManager)
 	if err != nil {
+		cancel()
 		return nil, nil, nil, fmt.Errorf("failed to register voucher: %w", err)
 	}
 
@@ -98,13 +101,15 @@ func makeDataTransfer(host host.Host, ds datastore.Batching, lsys ipld.LinkSyste
 	// Start datatransfer.  The context passed in allows Start to be canceled
 	// if fsm migration takes too long.  Timeout for dtManager.Start() is not
 	// handled here, so pass context.Background().
-	if err = dtManager.Start(context.Background()); err != nil {
+	if err = dtManager.Start(ctx); err != nil {
+		cancel()
 		return nil, nil, nil, fmt.Errorf("failed to start datatransfer: %w", err)
 	}
 
 	// Wait for datatransfer to be ready.
 	err = <-dtReady
 	if err != nil {
+		cancel()
 		return nil, nil, nil, err
 	}
 
@@ -115,6 +120,7 @@ func makeDataTransfer(host host.Host, ds datastore.Batching, lsys ipld.LinkSyste
 			log.Errorw("Failed to stop datatransfer manager", "err", err)
 			errs = multierror.Append(errs, err)
 		}
+		cancel()
 		return errs
 	}
 
