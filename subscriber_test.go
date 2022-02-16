@@ -83,8 +83,8 @@ func TestScopedBlockHook(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			if atomic.LoadInt64(&calledGeneralBlockHookTimes) != int64(0) {
-				t.Fatalf("Shouldn't have called general block hook. Called %d times", atomic.LoadInt64(&calledGeneralBlockHookTimes))
+			if atomic.LoadInt64(&calledGeneralBlockHookTimes) != int64(ll.Length) {
+				t.Fatalf("Should have called general block hook")
 			}
 			if atomic.LoadInt64(&calledScopedBlockHookTimes) != int64(ll.Length) {
 				t.Fatalf("Didn't call scoped block hook enough times")
@@ -101,10 +101,65 @@ func TestScopedBlockHook(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			if atomic.LoadInt64(&calledGeneralBlockHookTimes) != int64(ll.Length) {
+			if atomic.LoadInt64(&calledGeneralBlockHookTimes) != int64(ll.Length)*2 {
 				t.Fatalf("Didn't call general block hook enough times")
 			}
 
+		})
+	}, &quick.Config{
+		MaxCount: 3,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestSyncedCidsReturned(t *testing.T) {
+	err := quick.Check(func(ll llBuilder) bool {
+		return t.Run("Quickcheck", func(t *testing.T) {
+			ds := dssync.MutexWrap(datastore.NewMapDatastore())
+			pubHost := test.MkTestHost()
+			lsys := test.MkLinkSystem(ds)
+			pub, err := dtsync.NewPublisher(pubHost, ds, lsys, testTopic)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			head := ll.Build(t, lsys)
+			if head == nil {
+				// We built an empty list. So nothing to test.
+				return
+			}
+
+			err = pub.UpdateRoot(context.Background(), head.(cidlink.Link).Cid)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			subDS := dssync.MutexWrap(datastore.NewMapDatastore())
+			subLsys := test.MkLinkSystem(subDS)
+			subHost := test.MkTestHost()
+
+			sub, err := legs.NewSubscriber(subHost, subDS, subLsys, testTopic, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			onFinished, cancel := sub.OnSyncFinished()
+			defer cancel()
+			_, err = sub.Sync(context.Background(), pubHost.ID(), cid.Undef, nil, pubHost.Addrs()[0])
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			finishedVal := <-onFinished
+			if len(finishedVal.SyncedCids) != int(ll.Length) {
+				t.Fatalf("The finished value should include %d synced cids, but has %d", ll.Length, len(finishedVal.SyncedCids))
+			}
+
+			if finishedVal.SyncedCids[0] != head.(cidlink.Link).Cid {
+				t.Fatal("The latest synced cid should be the head and first in the list")
+			}
 		})
 	}, &quick.Config{
 		MaxCount: 3,

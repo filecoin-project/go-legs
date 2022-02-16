@@ -114,6 +114,17 @@ type SyncFinished struct {
 	Cid cid.Cid
 	// PeerID identifies the peer this SyncFinished event pertains to.
 	PeerID peer.ID
+	// A list of cids that this sync acquired. In order from latest to oldest. The latest cid will always be at the beginning.
+	SyncedCids []cid.Cid
+}
+
+func WrapBlockHookWithSyncedCidTracker(cidsSeenSoFar *[]cid.Cid, blockHook BlockHookFunc) BlockHookFunc {
+	return func(p peer.ID, c cid.Cid) {
+		*cidsSeenSoFar = append(*cidsSeenSoFar, c)
+		if blockHook != nil {
+			blockHook(p, c)
+		}
+	}
 }
 
 // handler holds state that is specific to a peer
@@ -138,7 +149,8 @@ func wrapBlockHook(generalBlockHook BlockHookFunc) (*sync.RWMutex, map[peer.ID]B
 		scopedBlockHookMutex.RUnlock()
 		if ok {
 			f(peerID, cid)
-		} else if generalBlockHook != nil {
+		}
+		if generalBlockHook != nil {
 			generalBlockHook(peerID, cid)
 		}
 	}
@@ -475,21 +487,7 @@ func (s *Subscriber) SyncWithHook(ctx context.Context, peerID peer.ID, nextCid c
 	hnd.syncMutex.Lock()
 	defer hnd.syncMutex.Unlock()
 
-	if hook != nil {
-		s.scopedBlockHookMutex.Lock()
-		s.scopedBlockHook[peerID] = hook
-		s.scopedBlockHookMutex.Unlock()
-		defer func() {
-			s.scopedBlockHookMutex.Lock()
-			if s.scopedBlockHook == nil {
-				s.scopedBlockHook = make(map[peer.ID]BlockHookFunc)
-			}
-			delete(s.scopedBlockHook, peerID)
-			s.scopedBlockHookMutex.Unlock()
-		}()
-	}
-
-	err = hnd.handle(ctx, nextCid, sel, wrapSel, updateLatest, syncer)
+	err = hnd.handle(ctx, nextCid, sel, wrapSel, updateLatest, syncer, hook, s.scopedBlockHookMutex, s.scopedBlockHook)
 	if err != nil {
 		return cid.Undef, fmt.Errorf("sync handler failed: %w", err)
 	}
@@ -624,7 +622,7 @@ func (s *Subscriber) watch(ctx context.Context) {
 
 		// Start new goroutine to handle this message instead of having
 		// persistent goroutine for each peer.
-		hnd.handleAsync(ctx, m.Cid, s.dss, watchWG)
+		hnd.handleAsync(ctx, m.Cid, s.dss, watchWG, s.scopedBlockHookMutex, s.scopedBlockHook)
 	}
 
 	watchWG.Wait()
@@ -633,7 +631,7 @@ func (s *Subscriber) watch(ctx context.Context) {
 
 // handleAsync starts a goroutine to process the latest message received over
 // pubsub.
-func (h *handler) handleAsync(ctx context.Context, nextCid cid.Cid, ss ipld.Node, watchWG *sync.WaitGroup) {
+func (h *handler) handleAsync(ctx context.Context, nextCid cid.Cid, ss ipld.Node, watchWG *sync.WaitGroup, scopedBlockHookMutex *sync.RWMutex, scopedBlockHook map[peer.ID]BlockHookFunc) {
 	watchWG.Add(1)
 	// Remove any previous message and replace it with the most recent.  Only
 	// process the most recent message regardless of how many arrive while
@@ -654,7 +652,7 @@ func (h *handler) handleAsync(ctx context.Context, nextCid cid.Cid, ss ipld.Node
 		select {
 		case <-ctx.Done():
 		case c := <-h.msgChan:
-			err := h.handle(ctx, c, ss, true, true, h.subscriber.dtSync.NewSyncer(h.peerID, h.subscriber.topicName))
+			err := h.handle(ctx, c, ss, true, true, h.subscriber.dtSync.NewSyncer(h.peerID, h.subscriber.topicName), nil, scopedBlockHookMutex, scopedBlockHook)
 			if err != nil {
 				// Log error for now.
 				log.Errorw("Cannot process message", "err", err, "peer", h.peerID)
@@ -671,8 +669,23 @@ func (h *handler) handleAsync(ctx context.Context, nextCid cid.Cid, ss ipld.Node
 // handle processes a message from the peer that the handler is responsible for.
 // The caller is responsible for ensuring that this is called while h.syncMutex
 // is locked.
-func (h *handler) handle(ctx context.Context, nextCid cid.Cid, sel ipld.Node, wrapSel, updateLatest bool, syncer Syncer) error {
+func (h *handler) handle(ctx context.Context, nextCid cid.Cid, sel ipld.Node, wrapSel, updateLatest bool, syncer Syncer, hook BlockHookFunc, scopedBlockHookMutex *sync.RWMutex, scopedBlockHook map[peer.ID]BlockHookFunc) error {
 	log := log.With("cid", nextCid, "peer", h.peerID)
+
+	// This is not set to nil so we can get a pointer.
+	syncedCids := []cid.Cid{}
+	hook = WrapBlockHookWithSyncedCidTracker(&syncedCids, hook)
+	scopedBlockHookMutex.Lock()
+	scopedBlockHook[h.peerID] = hook
+	scopedBlockHookMutex.Unlock()
+	defer func() {
+		scopedBlockHookMutex.Lock()
+		if scopedBlockHook == nil {
+			scopedBlockHook = make(map[peer.ID]BlockHookFunc)
+		}
+		delete(scopedBlockHook, h.peerID)
+		scopedBlockHookMutex.Unlock()
+	}()
 
 	if wrapSel {
 		// Note this branch is nested under wrapSel because wrapSel adds the
@@ -708,7 +721,7 @@ func (h *handler) handle(ctx context.Context, nextCid cid.Cid, sel ipld.Node, wr
 
 	// Tell the Subscriber to distribute SyncFinished to all notification
 	// destinations.
-	h.subscriber.inEvents <- SyncFinished{Cid: nextCid, PeerID: h.peerID}
+	h.subscriber.inEvents <- SyncFinished{Cid: nextCid, PeerID: h.peerID, SyncedCids: syncedCids}
 
 	return nil
 }
