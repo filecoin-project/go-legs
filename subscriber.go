@@ -109,12 +109,10 @@ type Subscriber struct {
 // completed a sync.  The channel receives events from providers that are
 // manually synced to the latest, as well as those auto-discovered.
 type SyncFinished struct {
-	// Cid is the CID identifying the link that finished and is now the latest
-	// sync for a specific peer.
-	Cid cid.Cid
 	// PeerID identifies the peer this SyncFinished event pertains to.
 	PeerID peer.ID
-	// A list of cids that this sync acquired. In order from latest to oldest. The latest cid will always be at the beginning.
+	// A list of cids that this sync acquired. In order from latest to oldest. The
+	// latest cid will always be at the beginning
 	SyncedCids []cid.Cid
 }
 
@@ -515,7 +513,7 @@ func (s *Subscriber) SyncWithHook(ctx context.Context, peerID peer.ID, nextCid c
 // to all OnSyncFinished channel readers.
 func (s *Subscriber) distributeEvents() {
 	for event := range s.inEvents {
-		if !event.Cid.Defined() {
+		if len(event.SyncedCids) == 0 {
 			panic("SyncFinished event with undefined cid")
 		}
 		// Send update to all change notification channels.
@@ -718,7 +716,7 @@ func (h *handler) handle(ctx context.Context, nextCid cid.Cid, sel ipld.Node, wr
 
 	// Tell the Subscriber to distribute SyncFinished to all notification
 	// destinations.
-	h.subscriber.inEvents <- SyncFinished{Cid: nextCid, PeerID: h.peerID, SyncedCids: syncedCids}
+	h.subscriber.inEvents <- SyncFinished{PeerID: h.peerID, SyncedCids: syncedCids}
 
 	return nil
 }
