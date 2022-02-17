@@ -487,7 +487,7 @@ func (s *Subscriber) SyncWithHook(ctx context.Context, peerID peer.ID, nextCid c
 	hnd.syncMutex.Lock()
 	defer hnd.syncMutex.Unlock()
 
-	err = hnd.handle(ctx, nextCid, sel, wrapSel, updateLatest, syncer, hook, s.scopedBlockHookMutex, s.scopedBlockHook)
+	err = hnd.handle(ctx, nextCid, sel, wrapSel, updateLatest, syncer, hook)
 	if err != nil {
 		return cid.Undef, fmt.Errorf("sync handler failed: %w", err)
 	}
@@ -622,7 +622,7 @@ func (s *Subscriber) watch(ctx context.Context) {
 
 		// Start new goroutine to handle this message instead of having
 		// persistent goroutine for each peer.
-		hnd.handleAsync(ctx, m.Cid, s.dss, watchWG, s.scopedBlockHookMutex, s.scopedBlockHook)
+		hnd.handleAsync(ctx, m.Cid, s.dss, watchWG)
 	}
 
 	watchWG.Wait()
@@ -631,7 +631,7 @@ func (s *Subscriber) watch(ctx context.Context) {
 
 // handleAsync starts a goroutine to process the latest message received over
 // pubsub.
-func (h *handler) handleAsync(ctx context.Context, nextCid cid.Cid, ss ipld.Node, watchWG *sync.WaitGroup, scopedBlockHookMutex *sync.RWMutex, scopedBlockHook map[peer.ID]BlockHookFunc) {
+func (h *handler) handleAsync(ctx context.Context, nextCid cid.Cid, ss ipld.Node, watchWG *sync.WaitGroup) {
 	watchWG.Add(1)
 	// Remove any previous message and replace it with the most recent.  Only
 	// process the most recent message regardless of how many arrive while
@@ -652,7 +652,7 @@ func (h *handler) handleAsync(ctx context.Context, nextCid cid.Cid, ss ipld.Node
 		select {
 		case <-ctx.Done():
 		case c := <-h.msgChan:
-			err := h.handle(ctx, c, ss, true, true, h.subscriber.dtSync.NewSyncer(h.peerID, h.subscriber.topicName), nil, scopedBlockHookMutex, scopedBlockHook)
+			err := h.handle(ctx, c, ss, true, true, h.subscriber.dtSync.NewSyncer(h.peerID, h.subscriber.topicName), nil)
 			if err != nil {
 				// Log error for now.
 				log.Errorw("Cannot process message", "err", err, "peer", h.peerID)
@@ -669,22 +669,19 @@ func (h *handler) handleAsync(ctx context.Context, nextCid cid.Cid, ss ipld.Node
 // handle processes a message from the peer that the handler is responsible for.
 // The caller is responsible for ensuring that this is called while h.syncMutex
 // is locked.
-func (h *handler) handle(ctx context.Context, nextCid cid.Cid, sel ipld.Node, wrapSel, updateLatest bool, syncer Syncer, hook BlockHookFunc, scopedBlockHookMutex *sync.RWMutex, scopedBlockHook map[peer.ID]BlockHookFunc) error {
+func (h *handler) handle(ctx context.Context, nextCid cid.Cid, sel ipld.Node, wrapSel, updateLatest bool, syncer Syncer, hook BlockHookFunc) error {
 	log := log.With("cid", nextCid, "peer", h.peerID)
 
 	// This is not set to nil so we can get a pointer.
 	syncedCids := []cid.Cid{}
 	hook = WrapBlockHookWithSyncedCidTracker(&syncedCids, hook)
-	scopedBlockHookMutex.Lock()
-	scopedBlockHook[h.peerID] = hook
-	scopedBlockHookMutex.Unlock()
+	h.subscriber.scopedBlockHookMutex.Lock()
+	h.subscriber.scopedBlockHook[h.peerID] = hook
+	h.subscriber.scopedBlockHookMutex.Unlock()
 	defer func() {
-		scopedBlockHookMutex.Lock()
-		if scopedBlockHook == nil {
-			scopedBlockHook = make(map[peer.ID]BlockHookFunc)
-		}
-		delete(scopedBlockHook, h.peerID)
-		scopedBlockHookMutex.Unlock()
+		h.subscriber.scopedBlockHookMutex.Lock()
+		delete(h.subscriber.scopedBlockHook, h.peerID)
+		h.subscriber.scopedBlockHookMutex.Unlock()
 	}()
 
 	if wrapSel {
