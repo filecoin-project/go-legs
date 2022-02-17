@@ -403,10 +403,10 @@ func TestRoundTripSimple(t *testing.T) {
 	case <-time.After(updateTimeout):
 		t.Fatal("timed out waiting for sync to propogate")
 	case downstream := <-watcher:
-		if !downstream.SyncedCids[0].Equals(lnk.(cidlink.Link).Cid) {
-			t.Fatalf("sync'd cid unexpected %s vs %s", downstream.SyncedCids[0], lnk)
+		if !downstream.Cid.Equals(lnk.(cidlink.Link).Cid) {
+			t.Fatalf("sync'd cid unexpected %s vs %s", downstream.Cid, lnk)
 		}
-		if _, err := dstStore.Get(context.Background(), datastore.NewKey(downstream.SyncedCids[0].String())); err != nil {
+		if _, err := dstStore.Get(context.Background(), datastore.NewKey(downstream.Cid.String())); err != nil {
 			t.Fatalf("data not in receiver store: %v", err)
 		}
 	}
@@ -549,13 +549,13 @@ func waitForSync(t *testing.T, logPrefix string, store *dssync.MutexDatastore, e
 	case <-time.After(updateTimeout):
 		t.Fatal("timed out waiting for sync to propogate")
 	case downstream := <-watcher:
-		if !downstream.SyncedCids[0].Equals(expectedCid.Cid) {
+		if !downstream.Cid.Equals(expectedCid.Cid) {
 			t.Fatalf("sync'd cid unexpected %s vs %s", downstream, expectedCid.Cid)
 		}
-		if _, err := store.Get(context.Background(), datastore.NewKey(downstream.SyncedCids[0].String())); err != nil {
+		if _, err := store.Get(context.Background(), datastore.NewKey(downstream.Cid.String())); err != nil {
 			t.Fatalf("data not in receiver store: %v", err)
 		}
-		t.Log(logPrefix+" got sync:", downstream.SyncedCids[0])
+		t.Log(logPrefix+" got sync:", downstream.Cid)
 	}
 
 }
