@@ -62,11 +62,7 @@ func QueryRootCid(ctx context.Context, host host.Host, topic string, peerID peer
 				if err != nil {
 					return nil, err
 				}
-				conn, err := gostream.Dial(ctx, host, peerID, deriveProtocolID(topic))
-				if err != nil {
-					return nil, err
-				}
-				return conn, nil
+				return gostream.Dial(ctx, host, peerID, deriveProtocolID(topic))
 			},
 		},
 	}
