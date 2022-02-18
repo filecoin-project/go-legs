@@ -51,11 +51,18 @@ func (p *Publisher) Serve(host host.Host, topic string) error {
 	return p.server.Serve(l)
 }
 
-func QueryRootCid(ctx context.Context, host host.Host, topic string, peer peer.ID) (cid.Cid, error) {
+func QueryRootCid(ctx context.Context, host host.Host, topic string, peerID peer.ID) (cid.Cid, error) {
 	client := http.Client{
 		Transport: &http.Transport{
 			DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
-				return gostream.Dial(ctx, host, peer, deriveProtocolID(topic))
+				addrInfo := peer.AddrInfo{
+					ID: peerID,
+				}
+				err := host.Connect(ctx, addrInfo)
+				if err != nil {
+					return nil, err
+				}
+				return gostream.Dial(ctx, host, peerID, deriveProtocolID(topic))
 			},
 		},
 	}

@@ -2,6 +2,7 @@ package head_test
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -14,14 +15,32 @@ import (
 	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
 	"github.com/ipld/go-ipld-prime/node/basicnode"
 	"github.com/libp2p/go-libp2p"
+	"github.com/multiformats/go-multiaddr"
 )
 
 func TestFetchLatestHead(t *testing.T) {
+	const ipPrefix = "/ip4/127.0.0.1/tcp/"
+
 	publisher, _ := libp2p.New()
 	client, _ := libp2p.New()
 
+	var addrs []multiaddr.Multiaddr
+	for _, a := range publisher.Addrs() {
+		// Change /ip4/127.0.0.1/tcp/<port> to /dns4/localhost/tcp/<port> to
+		// test that dns address works.
+		if strings.HasPrefix(a.String(), ipPrefix) {
+			addrStr := "/dns4/localhost/tcp/" + a.String()[len(ipPrefix):]
+			addr, err := multiaddr.NewMultiaddr(addrStr)
+			if err != nil {
+				t.Fatal(err)
+			}
+			addrs = append(addrs, addr)
+			break
+		}
+	}
+
 	// Provide multiaddrs to connect to
-	client.Peerstore().AddAddrs(publisher.ID(), publisher.Addrs(), time.Hour)
+	client.Peerstore().AddAddrs(publisher.ID(), addrs, time.Hour)
 
 	publisherStore := dssync.MutexWrap(datastore.NewMapDatastore())
 	rootLnk, err := test.Store(publisherStore, basicnode.NewString("hello world"))
