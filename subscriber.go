@@ -379,11 +379,12 @@ func (s *Subscriber) OnSyncFinished() (<-chan SyncFinished, context.CancelFunc) 
 // only specify the selection sequence itself.
 //
 // See: ExploreRecursiveWithStopNode.
-func (s *Subscriber) Sync(ctx context.Context, peerID peer.ID, nextCid cid.Cid, sel ipld.Node, peerAddr multiaddr.Multiaddr) (cid.Cid, error) {
-	return s.SyncWithHook(ctx, peerID, nextCid, sel, peerAddr, nil)
-}
+func (s *Subscriber) Sync(ctx context.Context, peerID peer.ID, nextCid cid.Cid, sel ipld.Node, peerAddr multiaddr.Multiaddr, opts ...SyncOption) (cid.Cid, error) {
+	cfg := &syncCfg{}
+	for _, opt := range opts {
+		opt(cfg)
+	}
 
-func (s *Subscriber) SyncWithHook(ctx context.Context, peerID peer.ID, nextCid cid.Cid, sel ipld.Node, peerAddr multiaddr.Multiaddr, hook BlockHookFunc) (cid.Cid, error) {
 	if peerID == "" {
 		return cid.Undef, errors.New("empty peer id")
 	}
@@ -430,7 +431,7 @@ func (s *Subscriber) SyncWithHook(ctx context.Context, peerID peer.ID, nextCid c
 		syncer = s.dtSync.NewSyncer(peerID, s.topicName)
 	}
 
-	var updateLatest bool
+	updateLatest := cfg.alwaysUpdateLatest
 	if nextCid == cid.Undef {
 		// Query the peer for the latest CID
 		nextCid, err = syncer.GetHead(ctx)
@@ -477,7 +478,7 @@ func (s *Subscriber) SyncWithHook(ctx context.Context, peerID peer.ID, nextCid c
 	hnd.syncMutex.Lock()
 	defer hnd.syncMutex.Unlock()
 
-	err = hnd.handle(ctx, nextCid, sel, wrapSel, updateLatest, syncer, hook)
+	err = hnd.handle(ctx, nextCid, sel, wrapSel, updateLatest, syncer, cfg.scopedBlockHook)
 	if err != nil {
 		return cid.Undef, fmt.Errorf("sync handler failed: %w", err)
 	}

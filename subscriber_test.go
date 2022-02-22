@@ -76,9 +76,9 @@ func TestScopedBlockHook(t *testing.T) {
 			}
 
 			var calledScopedBlockHookTimes int64
-			_, err = sub.SyncWithHook(context.Background(), pubHost.ID(), cid.Undef, nil, pubHost.Addrs()[0], func(i peer.ID, c cid.Cid) {
+			_, err = sub.Sync(context.Background(), pubHost.ID(), cid.Undef, nil, pubHost.Addrs()[0], legs.ScopedBlockHook(func(i peer.ID, c cid.Cid) {
 				atomic.AddInt64(&calledScopedBlockHookTimes, 1)
-			})
+			}))
 			if err != nil {
 				t.Fatal(err)
 			}
