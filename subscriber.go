@@ -75,6 +75,11 @@ type Subscriber struct {
 	handlers      map[peer.ID]*handler
 	handlersMutex sync.Mutex
 
+	// A map of block hooks to call for a specific peer id, instead of the general
+	// block hook func.
+	scopedBlockHook      map[peer.ID]BlockHookFunc
+	scopedBlockHookMutex *sync.RWMutex
+
 	// inEvents is used to send a SyncFinished from a peer handler to the
 	// distributeEvents goroutine.
 	inEvents chan SyncFinished
@@ -109,6 +114,17 @@ type SyncFinished struct {
 	Cid cid.Cid
 	// PeerID identifies the peer this SyncFinished event pertains to.
 	PeerID peer.ID
+	// A list of cids that this sync acquired. In order from latest to oldest. The latest cid will always be at the beginning.
+	SyncedCids []cid.Cid
+}
+
+func WrapBlockHookWithSyncedCidTracker(cidsSeenSoFar *[]cid.Cid, blockHook BlockHookFunc) BlockHookFunc {
+	return func(p peer.ID, c cid.Cid) {
+		*cidsSeenSoFar = append(*cidsSeenSoFar, c)
+		if blockHook != nil {
+			blockHook(p, c)
+		}
+	}
 }
 
 // handler holds state that is specific to a peer
@@ -120,6 +136,24 @@ type handler struct {
 	peerID peer.ID
 	// syncMutex serializes the handling of individual syncs
 	syncMutex sync.Mutex
+}
+
+// wrapBlockHook wraps a possibly nil block hook func to allow a for dispatching
+// to a blockhook func that is scoped within a .Sync call.
+func wrapBlockHook(generalBlockHook BlockHookFunc) (*sync.RWMutex, map[peer.ID]BlockHookFunc, BlockHookFunc) {
+	var scopedBlockHookMutex sync.RWMutex
+	scopedBlockHook := make(map[peer.ID]BlockHookFunc)
+	return &scopedBlockHookMutex, scopedBlockHook, func(peerID peer.ID, cid cid.Cid) {
+		scopedBlockHookMutex.RLock()
+		f, ok := scopedBlockHook[peerID]
+		scopedBlockHookMutex.RUnlock()
+		if ok {
+			f(peerID, cid)
+		}
+		if generalBlockHook != nil {
+			generalBlockHook(peerID, cid)
+		}
+	}
 }
 
 // NewSubscriber creates a new Subscriber that process pubsub messages.
@@ -149,18 +183,10 @@ func NewSubscriber(host host.Host, ds datastore.Batching, lsys ipld.LinkSystem, 
 		return nil, err
 	}
 
+	scopedBlockHookMutex, scopedBlockHook, blockHook := wrapBlockHook(cfg.blockHook)
+
 	var dtSync *dtsync.Sync
-	if cfg.dtManager != nil {
-		if ds != nil {
-			log.Warn("Datastore cannot be used with DtManager option")
-		}
-		if cfg.blockHook != nil {
-			log.Warn("BlockHook option cannot be used with DtManager option")
-		}
-		dtSync, err = dtsync.NewSyncWithDT(host, cfg.dtManager)
-	} else {
-		dtSync, err = dtsync.NewSync(host, ds, lsys, cfg.blockHook)
-	}
+	dtSync, err = dtsync.NewSync(host, ds, lsys, blockHook)
 	if err != nil {
 		cancelPubsub()
 		return nil, err
@@ -189,10 +215,13 @@ func NewSubscriber(host host.Host, ds datastore.Batching, lsys ipld.LinkSystem, 
 		inEvents:  make(chan SyncFinished, 1),
 
 		dtSync:       dtSync,
-		httpSync:     httpsync.NewSync(lsys, cfg.httpClient, cfg.blockHook),
+		httpSync:     httpsync.NewSync(lsys, cfg.httpClient, blockHook),
 		syncRecLimit: cfg.syncRecLimit,
 
 		httpPeerstore: httpPeerstore,
+
+		scopedBlockHookMutex: scopedBlockHookMutex,
+		scopedBlockHook:      scopedBlockHook,
 	}
 
 	// Start watcher to read pubsub messages.
@@ -351,6 +380,10 @@ func (s *Subscriber) OnSyncFinished() (<-chan SyncFinished, context.CancelFunc) 
 //
 // See: ExploreRecursiveWithStopNode.
 func (s *Subscriber) Sync(ctx context.Context, peerID peer.ID, nextCid cid.Cid, sel ipld.Node, peerAddr multiaddr.Multiaddr) (cid.Cid, error) {
+	return s.SyncWithHook(ctx, peerID, nextCid, sel, peerAddr, nil)
+}
+
+func (s *Subscriber) SyncWithHook(ctx context.Context, peerID peer.ID, nextCid cid.Cid, sel ipld.Node, peerAddr multiaddr.Multiaddr, hook BlockHookFunc) (cid.Cid, error) {
 	if peerID == "" {
 		return cid.Undef, errors.New("empty peer id")
 	}
@@ -444,7 +477,7 @@ func (s *Subscriber) Sync(ctx context.Context, peerID peer.ID, nextCid cid.Cid, 
 	hnd.syncMutex.Lock()
 	defer hnd.syncMutex.Unlock()
 
-	err = hnd.handle(ctx, nextCid, sel, wrapSel, updateLatest, syncer)
+	err = hnd.handle(ctx, nextCid, sel, wrapSel, updateLatest, syncer, hook)
 	if err != nil {
 		return cid.Undef, fmt.Errorf("sync handler failed: %w", err)
 	}
@@ -609,7 +642,7 @@ func (h *handler) handleAsync(ctx context.Context, nextCid cid.Cid, ss ipld.Node
 		select {
 		case <-ctx.Done():
 		case c := <-h.msgChan:
-			err := h.handle(ctx, c, ss, true, true, h.subscriber.dtSync.NewSyncer(h.peerID, h.subscriber.topicName))
+			err := h.handle(ctx, c, ss, true, true, h.subscriber.dtSync.NewSyncer(h.peerID, h.subscriber.topicName), nil)
 			if err != nil {
 				// Log error for now.
 				log.Errorw("Cannot process message", "err", err, "peer", h.peerID)
@@ -626,8 +659,20 @@ func (h *handler) handleAsync(ctx context.Context, nextCid cid.Cid, ss ipld.Node
 // handle processes a message from the peer that the handler is responsible for.
 // The caller is responsible for ensuring that this is called while h.syncMutex
 // is locked.
-func (h *handler) handle(ctx context.Context, nextCid cid.Cid, sel ipld.Node, wrapSel, updateLatest bool, syncer Syncer) error {
+func (h *handler) handle(ctx context.Context, nextCid cid.Cid, sel ipld.Node, wrapSel, updateLatest bool, syncer Syncer, hook BlockHookFunc) error {
 	log := log.With("cid", nextCid, "peer", h.peerID)
+
+	// This is not set to nil so we can get a pointer.
+	syncedCids := []cid.Cid{}
+	hook = WrapBlockHookWithSyncedCidTracker(&syncedCids, hook)
+	h.subscriber.scopedBlockHookMutex.Lock()
+	h.subscriber.scopedBlockHook[h.peerID] = hook
+	h.subscriber.scopedBlockHookMutex.Unlock()
+	defer func() {
+		h.subscriber.scopedBlockHookMutex.Lock()
+		delete(h.subscriber.scopedBlockHook, h.peerID)
+		h.subscriber.scopedBlockHookMutex.Unlock()
+	}()
 
 	if wrapSel {
 		// Note this branch is nested under wrapSel because wrapSel adds the
@@ -663,7 +708,7 @@ func (h *handler) handle(ctx context.Context, nextCid cid.Cid, sel ipld.Node, wr
 
 	// Tell the Subscriber to distribute SyncFinished to all notification
 	// destinations.
-	h.subscriber.inEvents <- SyncFinished{Cid: nextCid, PeerID: h.peerID}
+	h.subscriber.inEvents <- SyncFinished{Cid: nextCid, PeerID: h.peerID, SyncedCids: syncedCids}
 
 	return nil
 }
