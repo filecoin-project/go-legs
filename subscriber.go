@@ -478,7 +478,7 @@ func (s *Subscriber) Sync(ctx context.Context, peerID peer.ID, nextCid cid.Cid, 
 	hnd.syncMutex.Lock()
 	defer hnd.syncMutex.Unlock()
 
-	err = hnd.handle(ctx, nextCid, sel, wrapSel, updateLatest, syncer, cfg.scopedBlockHook, cfg.checkAlreadySynced)
+	err = hnd.handle(ctx, nextCid, sel, wrapSel, updateLatest, syncer, cfg.scopedBlockHook)
 	if err != nil {
 		return cid.Undef, fmt.Errorf("sync handler failed: %w", err)
 	}
@@ -643,7 +643,7 @@ func (h *handler) handleAsync(ctx context.Context, nextCid cid.Cid, ss ipld.Node
 		select {
 		case <-ctx.Done():
 		case c := <-h.msgChan:
-			err := h.handle(ctx, c, ss, true, true, h.subscriber.dtSync.NewSyncer(h.peerID, h.subscriber.topicName), nil, false)
+			err := h.handle(ctx, c, ss, true, true, h.subscriber.dtSync.NewSyncer(h.peerID, h.subscriber.topicName), nil)
 			if err != nil {
 				// Log error for now.
 				log.Errorw("Cannot process message", "err", err, "peer", h.peerID)
@@ -660,7 +660,7 @@ func (h *handler) handleAsync(ctx context.Context, nextCid cid.Cid, ss ipld.Node
 // handle processes a message from the peer that the handler is responsible for.
 // The caller is responsible for ensuring that this is called while h.syncMutex
 // is locked.
-func (h *handler) handle(ctx context.Context, nextCid cid.Cid, sel ipld.Node, wrapSel, updateLatest bool, syncer Syncer, hook BlockHookFunc, checkAlreadySynced bool) error {
+func (h *handler) handle(ctx context.Context, nextCid cid.Cid, sel ipld.Node, wrapSel, updateLatest bool, syncer Syncer, hook BlockHookFunc) error {
 	log := log.With("cid", nextCid, "peer", h.peerID)
 
 	// This is not set to nil so we can get a pointer.
@@ -676,26 +676,13 @@ func (h *handler) handle(ctx context.Context, nextCid cid.Cid, sel ipld.Node, wr
 	}()
 
 	if wrapSel {
-		// Note this branch is nested under wrapSel because wrapSel adds the
-		// semantics that we stop when we hit the `h.latestSync` node. This is
-		// a special case where we are starting at the stop node so we can just
-		// return.
-		if h.latestSync != nil && h.latestSync.(cidlink.Link).Cid == nextCid {
-			// Nothing to do. We've already synced to this cid because we have
-			// it as h.latestSync.
-			log.Infow("Already synced")
-			return nil
-		}
-
 		sel = ExploreRecursiveWithStopNode(h.subscriber.syncRecLimit, sel, h.latestSync)
-	} else if checkAlreadySynced {
-		// Special case when starting at stop node; selector does not check it.
-		if h.latestSync != nil && h.latestSync.(cidlink.Link).Cid == nextCid {
-			// Nothing to do. We've already synced to this cid because we have
-			// it as h.latestSync.
-			log.Infow("Already synced")
-			return nil
-		}
+	}
+
+	stopNode, ok := getStopNode(sel)
+	if ok && stopNode.(cidlink.Link).Cid == nextCid {
+		log.Infow("cid to sync to is the stop node. Nothing to do")
+		return nil
 	}
 
 	err := syncer.Sync(ctx, nextCid, sel)
