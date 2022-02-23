@@ -679,15 +679,13 @@ func (h *handler) handle(ctx context.Context, nextCid cid.Cid, sel ipld.Node, wr
 		sel = ExploreRecursiveWithStopNode(h.subscriber.syncRecLimit, sel, h.latestSync)
 	}
 
-	if sel != nil {
-		stopNode, err := getStopNode(sel)
-		if err == nil && stopNode.(cidlink.Link).Cid == nextCid {
-			log.Infow("cid to sync to is the stop node. Nothing to do")
-			return nil
-		}
+	stopNode, err := getStopNode(sel)
+	if err == nil && stopNode.(cidlink.Link).Cid == nextCid {
+		log.Infow("cid to sync to is the stop node. Nothing to do")
+		return nil
 	}
 
-	err := syncer.Sync(ctx, nextCid, sel)
+	err = syncer.Sync(ctx, nextCid, sel)
 	if err != nil {
 		return err
 	}
