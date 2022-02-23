@@ -11,10 +11,6 @@ import (
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 )
 
-type blockHookRegister interface {
-	RegisterIncomingBlockHook(graphsync.OnIncomingBlockHook) graphsync.UnregisterHookFunc
-}
-
 // config contains all options for configuring Subscriber.
 type config struct {
 	addrTTL   time.Duration
