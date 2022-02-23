@@ -186,7 +186,15 @@ func NewSubscriber(host host.Host, ds datastore.Batching, lsys ipld.LinkSystem, 
 	scopedBlockHookMutex, scopedBlockHook, blockHook := wrapBlockHook(cfg.blockHook)
 
 	var dtSync *dtsync.Sync
-	dtSync, err = dtsync.NewSync(host, ds, lsys, blockHook)
+	if cfg.dtManager != nil {
+		if ds != nil {
+			cancelPubsub()
+			return nil, fmt.Errorf("datastore cannot be used with DtManager option")
+		}
+		dtSync, err = dtsync.NewSyncWithDT(host, cfg.dtManager, cfg.graphExchange, blockHook)
+	} else {
+		dtSync, err = dtsync.NewSync(host, ds, lsys, blockHook)
+	}
 	if err != nil {
 		cancelPubsub()
 		return nil, err

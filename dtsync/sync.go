@@ -39,11 +39,15 @@ type Sync struct {
 
 // NewSyncWithDT creates a new Sync with a datatransfer.Manager provided by the
 // caller.
-func NewSyncWithDT(host host.Host, dtManager dt.Manager) (*Sync, error) {
+func NewSyncWithDT(host host.Host, dtManager dt.Manager, gs graphsync.GraphExchange, blockHook func(peer.ID, cid.Cid)) (*Sync, error) {
 	registerVoucher(dtManager)
 	s := &Sync{
 		host:      host,
 		dtManager: dtManager,
+	}
+
+	if blockHook != nil {
+		s.unregHook = gs.RegisterIncomingBlockHook(makeIncomingBlockHook(blockHook))
 	}
 
 	s.unsubEvents = dtManager.SubscribeToEvents(s.onEvent)

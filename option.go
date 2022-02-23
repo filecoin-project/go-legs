@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"time"
 
+	dt "github.com/filecoin-project/go-data-transfer"
+	"github.com/ipfs/go-graphsync"
 	"github.com/ipld/go-ipld-prime/traversal/selector"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 )
@@ -15,8 +17,10 @@ type config struct {
 	allowPeer AllowPeerFunc
 
 	topic *pubsub.Topic
-	// TODO We can re-enable this when we figure out how to register a block hook with an existing dtManager
-	// dtManager  dt.Manager
+
+	dtManager     dt.Manager
+	graphExchange graphsync.GraphExchange
+
 	blockHook  BlockHookFunc
 	httpClient *http.Client
 
@@ -57,6 +61,15 @@ func AddrTTL(addrTTL time.Duration) Option {
 func Topic(topic *pubsub.Topic) Option {
 	return func(c *config) error {
 		c.topic = topic
+		return nil
+	}
+}
+
+// DtManager provides an existing datatransfer manager.
+func DtManager(dtManager dt.Manager, gs graphsync.GraphExchange) Option {
+	return func(c *config) error {
+		c.dtManager = dtManager
+		c.graphExchange = gs
 		return nil
 	}
 }
