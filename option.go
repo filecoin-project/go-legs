@@ -88,7 +88,6 @@ func SyncRecursionLimit(limit selector.RecursionLimit) Option {
 
 type syncCfg struct {
 	alwaysUpdateLatest bool
-	checkAlreadySynced bool
 	scopedBlockHook    BlockHookFunc
 }
 
@@ -97,16 +96,6 @@ type SyncOption func(*syncCfg)
 func AlwaysUpdateLatest() SyncOption {
 	return func(sc *syncCfg) {
 		sc.alwaysUpdateLatest = true
-	}
-}
-
-// CheckAlreadySynced is used when a custom selector is provided, and checks if
-// the head node returned from the publisher is the latest seen.  This is
-// needed because a selector with a stop node only recognizes if the previous
-// link is the stop, not if the current node is.
-func CheckAlreadySynced() SyncOption {
-	return func(sc *syncCfg) {
-		sc.checkAlreadySynced = true
 	}
 }
 
