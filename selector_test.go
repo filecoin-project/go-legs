@@ -14,13 +14,13 @@ func TestGetStopNode(t *testing.T) {
 	require.NoError(t, err)
 	stopNode := cidlink.Link{Cid: c}
 	sel := ExploreRecursiveWithStopNode(selector.RecursionLimitNone(), nil, stopNode)
-	actualStopNode, err := getStopNode(sel)
-	require.NoError(t, err)
+	actualStopNode, ok := getStopNode(sel)
+	require.True(t, ok)
 	require.Equal(t, stopNode, actualStopNode)
 }
 
 func TestGetStopNodeWhenNil(t *testing.T) {
 	sel := ExploreRecursiveWithStopNode(selector.RecursionLimitNone(), nil, nil)
-	_, err := getStopNode(sel)
-	require.Error(t, err, "We shouldn't get a stop node out if none was set")
+	_, ok := getStopNode(sel)
+	require.False(t, ok, "We shouldn't get a stop node out if none was set")
 }

@@ -1,8 +1,6 @@
 package legs
 
 import (
-	"fmt"
-
 	"github.com/ipld/go-ipld-prime"
 	"github.com/ipld/go-ipld-prime/datamodel"
 	"github.com/ipld/go-ipld-prime/fluent"
@@ -57,23 +55,24 @@ func ExploreRecursiveWithStopNode(limit selector.RecursionLimit, sequence ipld.N
 }
 
 // getStopNode will try to return the stop node from a recursive selector.
-func getStopNode(selNode datamodel.Node) (datamodel.Link, error) {
+func getStopNode(selNode datamodel.Node) (datamodel.Link, bool) {
 	if selNode == nil {
-		return nil, fmt.Errorf("nil selector")
+		return nil, false
 	}
 	selNode, err := selNode.LookupByString(selector.SelectorKey_ExploreRecursive)
 	if err != nil {
-		return nil, err
+		return nil, false
 	}
 	selNode, err = selNode.LookupByString(selector.SelectorKey_StopAt)
 	if err != nil {
-		return nil, err
+		return nil, false
 	}
 	selNode, err = selNode.LookupByString(string(selector.ConditionMode_Link))
 	if err != nil {
-		return nil, err
+		return nil, false
 	}
-	return selNode.AsLink()
+	stopNodeLink, err := selNode.AsLink()
+	return stopNodeLink, err == nil
 }
 
 // LegSelector is a convenient function that returns the selector
