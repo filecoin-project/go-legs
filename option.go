@@ -87,18 +87,12 @@ func SyncRecursionLimit(limit selector.RecursionLimit) Option {
 }
 
 type syncCfg struct {
-	scopedBlockHook    BlockHookFunc
 	alwaysUpdateLatest bool
 	checkAlreadySynced bool
+	scopedBlockHook    BlockHookFunc
 }
 
 type SyncOption func(*syncCfg)
-
-func ScopedBlockHook(hook BlockHookFunc) SyncOption {
-	return func(sc *syncCfg) {
-		sc.scopedBlockHook = hook
-	}
-}
 
 func AlwaysUpdateLatest() SyncOption {
 	return func(sc *syncCfg) {
@@ -113,5 +107,11 @@ func AlwaysUpdateLatest() SyncOption {
 func CheckAlreadySynced() SyncOption {
 	return func(sc *syncCfg) {
 		sc.checkAlreadySynced = true
+	}
+}
+
+func ScopedBlockHook(hook BlockHookFunc) SyncOption {
+	return func(sc *syncCfg) {
+		sc.scopedBlockHook = hook
 	}
 }
