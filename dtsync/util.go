@@ -3,8 +3,10 @@ package dtsync
 import (
 	"context"
 	"fmt"
+	"time"
 
 	dt "github.com/filecoin-project/go-data-transfer"
+	"github.com/filecoin-project/go-data-transfer/channelmonitor"
 	datatransfer "github.com/filecoin-project/go-data-transfer/impl"
 	dtnetwork "github.com/filecoin-project/go-data-transfer/network"
 	gstransport "github.com/filecoin-project/go-data-transfer/transport/graphsync"
@@ -80,7 +82,20 @@ func makeDataTransfer(host host.Host, ds datastore.Batching, lsys ipld.LinkSyste
 	dtNet := dtnetwork.NewFromLibp2pHost(host)
 	tp := gstransport.NewTransport(host.ID(), gs)
 
-	dtManager, err := datatransfer.NewDataTransfer(ds, dtNet, tp)
+	dtRestartConfig := datatransfer.ChannelRestartConfig(channelmonitor.Config{
+		AcceptTimeout:   time.Minute,
+		CompleteTimeout: time.Minute,
+
+		// When an error occurs, wait a little while until all related errors
+		// have fired before sending a restart message
+		RestartDebounce: 10 * time.Second,
+		// After sending a restart, wait for at least 1 minute before sending another
+		RestartBackoff: time.Minute,
+		// After trying to restart 3 times, give up and fail the transfer
+		MaxConsecutiveRestarts: 3,
+	})
+
+	dtManager, err := datatransfer.NewDataTransfer(ds, dtNet, tp, dtRestartConfig)
 	if err != nil {
 		cancel()
 		return nil, nil, nil, fmt.Errorf("failed to instantiate datatransfer: %w", err)
