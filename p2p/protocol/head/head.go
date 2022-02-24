@@ -3,13 +3,14 @@ package head
 import (
 	"context"
 	"fmt"
-	logging "github.com/ipfs/go-log/v2"
 	"io/ioutil"
 	"net"
 	"net/http"
 	"path"
 	"sync"
 	"time"
+
+	logging "github.com/ipfs/go-log/v2"
 
 	"github.com/ipfs/go-cid"
 	"github.com/libp2p/go-libp2p-core/host"
@@ -98,7 +99,7 @@ func QueryRootCid(ctx context.Context, host host.Host, topic string, peerID peer
 func (p *Publisher) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	base := path.Base(r.URL.Path)
 	if base != "head" {
-		log.Debug("Only head is supported; rejecting reqpuest with base path: %s", base)
+		log.Debug("Only head is supported; rejecting request with different base path")
 		http.Error(w, "", http.StatusNotFound)
 		return
 	}
