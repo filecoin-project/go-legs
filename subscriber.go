@@ -31,7 +31,10 @@ var log = logging.Logger("go-legs")
 // defaultAddrTTL is the default amount of time that addresses discovered from
 // pubsub messages will remain in the peerstore.  This is twice the default
 // provider poll interval.
-const defaultAddrTTL = 48 * time.Hour
+const (
+	defaultAddrTTL = 48 * time.Hour
+	tempAddrTTL    = 24 * time.Hour // must be long enough for ad chain to sync
+)
 
 // errSourceNotAllowed is the error returned when a message source peer's
 // messages is not allowed to be processed.  This is only used internally, and
@@ -434,7 +437,7 @@ func (s *Subscriber) Sync(ctx context.Context, peerID peer.ID, nextCid cid.Cid, 
 		// decrease the TTL here.
 		peerStore := s.host.Peerstore()
 		if peerStore != nil {
-			peerStore.AddAddr(peerID, peerAddr, peerstore.TempAddrTTL)
+			peerStore.AddAddr(peerID, peerAddr, tempAddrTTL)
 		}
 		syncer = s.dtSync.NewSyncer(peerID, s.topicName)
 	}
