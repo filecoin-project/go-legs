@@ -176,12 +176,6 @@ func (s *Sync) onEvent(event dt.Event, channelState dt.ChannelState) {
 		if strings.HasSuffix(msg, "content not found") {
 			err = errors.New(err.Error() + ": content not found")
 		}
-	case dt.Ongoing:
-		if channelState.Message() != "stream reset" {
-			return
-		}
-		log.Warnw("Detected stream reset from peer", "peer", channelState.OtherPeer())
-		err = errors.New("stream reset")
 	default:
 		// Ignore non-terminal channel states.
 		return
