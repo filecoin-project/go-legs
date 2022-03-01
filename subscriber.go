@@ -133,12 +133,18 @@ func WrapBlockHookWithSyncedCidTracker(cidsSeenSoFar *[]cid.Cid, blockHook Block
 // handler holds state that is specific to a peer
 type handler struct {
 	subscriber *Subscriber
-	latestSync ipld.Link
-	msgChan    chan cid.Cid
+	// syncMutex serializes the handling of individual syncs. This should only
+	// guard the actual handling of a sync, nothing else.
+	syncMutex sync.Mutex
+	// When grabbing this lock, make sure to encompass the syncMutex. It's
+	// incorrect to grab this lock only while updating latestSync. You must hold
+	// this lock while syncing to the next latestSync. Otherwise another process
+	// may overwrite your state.
+	latestSyncMu sync.Mutex
+	latestSync   ipld.Link
+	msgChan      chan cid.Cid
 	// peerID is the ID of the peer this handler is responsible for.
 	peerID peer.ID
-	// syncMutex serializes the handling of individual syncs
-	syncMutex sync.Mutex
 }
 
 // wrapBlockHook wraps a possibly nil block hook func to allow a for dispatching
@@ -436,7 +442,7 @@ func (s *Subscriber) Sync(ctx context.Context, peerID peer.ID, nextCid cid.Cid, 
 		// greater than this temp one, this is a no-op. In other words we never
 		// decrease the TTL here.
 		peerStore := s.host.Peerstore()
-		if peerStore != nil {
+		if peerStore != nil && peerAddr != nil {
 			peerStore.AddAddr(peerID, peerAddr, tempAddrTTL)
 		}
 		syncer = s.dtSync.NewSyncer(peerID, s.topicName)
@@ -486,26 +492,40 @@ func (s *Subscriber) Sync(ctx context.Context, peerID peer.ID, nextCid cid.Cid, 
 		return cid.Undef, err
 	}
 
-	hnd.syncMutex.Lock()
-	defer hnd.syncMutex.Unlock()
+	if updateLatest {
+		// Grab the latestSyncMu lock so that an async handler doesn't update the
+		// latestSync between when we call hnd.handle and when we actually updateLatest.
+		hnd.latestSyncMu.Lock()
+		defer hnd.latestSyncMu.Unlock()
+	}
 
-	err = hnd.handle(ctx, nextCid, sel, wrapSel, updateLatest, syncer, cfg.scopedBlockHook)
+	hnd.syncMutex.Lock()
+	syncedCids, err := hnd.handle(ctx, nextCid, sel, wrapSel, syncer, cfg.scopedBlockHook)
+	hnd.syncMutex.Unlock()
 	if err != nil {
 		return cid.Undef, fmt.Errorf("sync handler failed: %w", err)
+	}
+
+	if updateLatest {
+		hnd.latestSync = cidlink.Link{Cid: nextCid}
+		hnd.subscriber.inEvents <- SyncFinished{Cid: nextCid, PeerID: hnd.peerID, SyncedCids: syncedCids}
+		log.Infow("Updating latest sync")
 	}
 
 	// The sync succeeded, so let's remember this address in the appropriate
 	// peerstore. If the address was already in the peerstore, this will extend
 	// its ttl.
-	if isHttpPeerAddr {
-		// Store this http address so that future calls to sync will work without a
-		// peerAddr (given that it happens within the TTL)
-		s.httpPeerstore.AddAddr(peerID, peerAddr, s.addrTTL)
-	} else {
-		// Not an http address, so add to the host's libp2p peerstore.
-		peerStore := s.host.Peerstore()
-		if peerStore != nil {
-			peerStore.AddAddr(peerID, peerAddr, s.addrTTL)
+	if peerAddr != nil {
+		if isHttpPeerAddr {
+			// Store this http address so that future calls to sync will work without a
+			// peerAddr (given that it happens within the TTL)
+			s.httpPeerstore.AddAddr(peerID, peerAddr, s.addrTTL)
+		} else {
+			// Not an http address, so add to the host's libp2p peerstore.
+			peerStore := s.host.Peerstore()
+			if peerStore != nil {
+				peerStore.AddAddr(peerID, peerAddr, s.addrTTL)
+			}
 		}
 	}
 
@@ -647,18 +667,36 @@ func (h *handler) handleAsync(ctx context.Context, nextCid cid.Cid, ss ipld.Node
 
 	go func() {
 		defer watchWG.Done()
-		// Wait for this handler to become available.
-		h.syncMutex.Lock()
-		defer h.syncMutex.Unlock()
+		// Grab the lock for the latest sync mutex so we only have one async handler
+		// updating the latestSync state
+		h.latestSyncMu.Lock()
+		defer h.latestSyncMu.Unlock()
 
 		select {
 		case <-ctx.Done():
 		case c := <-h.msgChan:
-			err := h.handle(ctx, c, ss, true, true, h.subscriber.dtSync.NewSyncer(h.peerID, h.subscriber.topicName), nil)
+			// Wait for this handler to become available.
+			// Note this only wraps the handler. This is to free up the handler in
+			// case someone else needs it while we wait to send on the events chan.
+			h.syncMutex.Lock()
+			syncedCids, err := h.handle(ctx, c, ss, true, h.subscriber.dtSync.NewSyncer(h.peerID, h.subscriber.topicName), nil)
+			h.syncMutex.Unlock()
+
 			if err != nil {
 				// Log error for now.
 				log.Errorw("Cannot process message", "err", err, "peer", h.peerID)
+				return
 			}
+
+			// Update latest head seen.
+			//
+			// NOTE: This is not persisted anywhere. Is the top-level user's
+			// responsibility to persist if needed to initialize a partially-synced
+			// subscriber.
+			log.Infow("Updating latest sync")
+			h.latestSync = cidlink.Link{Cid: nextCid}
+
+			h.subscriber.inEvents <- SyncFinished{Cid: nextCid, PeerID: h.peerID, SyncedCids: syncedCids}
 		default:
 			// A previous goroutine, that had its message replaced, read the
 			// message.  Or, the message was removed and will be replaced by
@@ -671,7 +709,7 @@ func (h *handler) handleAsync(ctx context.Context, nextCid cid.Cid, ss ipld.Node
 // handle processes a message from the peer that the handler is responsible for.
 // The caller is responsible for ensuring that this is called while h.syncMutex
 // is locked.
-func (h *handler) handle(ctx context.Context, nextCid cid.Cid, sel ipld.Node, wrapSel, updateLatest bool, syncer Syncer, hook BlockHookFunc) error {
+func (h *handler) handle(ctx context.Context, nextCid cid.Cid, sel ipld.Node, wrapSel bool, syncer Syncer, hook BlockHookFunc) ([]cid.Cid, error) {
 	log := log.With("cid", nextCid, "peer", h.peerID)
 
 	// This is not set to nil so we can get a pointer.
@@ -693,32 +731,16 @@ func (h *handler) handle(ctx context.Context, nextCid cid.Cid, sel ipld.Node, wr
 	stopNode, ok := getStopNode(sel)
 	if ok && stopNode.(cidlink.Link).Cid == nextCid {
 		log.Infow("cid to sync to is the stop node. Nothing to do")
-		return nil
+		return nil, nil
 	}
 
 	err := syncer.Sync(ctx, nextCid, sel)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	log.Infow("Sync completed")
 
-	if !updateLatest {
-		return nil
-	}
-
-	// Update latest head seen.
-	//
-	// NOTE: This is not persisted anywhere. Is the top-level user's
-	// responsibility to persist if needed to initialize a partially-synced
-	// subscriber.
-	h.latestSync = cidlink.Link{Cid: nextCid}
-	log.Infow("Updating latest sync")
-
-	// Tell the Subscriber to distribute SyncFinished to all notification
-	// destinations.
-	h.subscriber.inEvents <- SyncFinished{Cid: nextCid, PeerID: h.peerID, SyncedCids: syncedCids}
-
-	return nil
+	return syncedCids, nil
 }
 
 // setLatestSync sets this handler's latest synced CID to the one specified.
