@@ -136,10 +136,9 @@ type handler struct {
 	// syncMutex serializes the handling of individual syncs. This should only
 	// guard the actual handling of a sync, nothing else.
 	syncMutex sync.Mutex
-	// When grabbing this lock, make sure to encompass the syncMutex. It's
-	// incorrect to grab this lock only while updating latestSync. You must hold
-	// this lock while syncing to the next latestSync. Otherwise another process
-	// may overwrite your state.
+	// If updating this from the result of a sync make sure you grab this lock
+	// before calling handler.handle(). Otherwise another process may overwrite
+	// your state.
 	latestSyncMu sync.Mutex
 	latestSync   ipld.Link
 	msgChan      chan cid.Cid
