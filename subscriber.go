@@ -499,9 +499,7 @@ func (s *Subscriber) Sync(ctx context.Context, peerID peer.ID, nextCid cid.Cid, 
 		defer hnd.latestSyncMu.Unlock()
 	}
 
-	hnd.syncMutex.Lock()
 	syncedCids, err := hnd.handle(ctx, nextCid, sel, wrapSel, syncer, cfg.scopedBlockHook)
-	hnd.syncMutex.Unlock()
 	if err != nil {
 		return cid.Undef, fmt.Errorf("sync handler failed: %w", err)
 	}
@@ -678,9 +676,7 @@ func (h *handler) handleAsync(ctx context.Context, nextCid cid.Cid, ss ipld.Node
 			// Wait for this handler to become available.
 			// Note this only wraps the handler. This is to free up the handler in
 			// case someone else needs it while we wait to send on the events chan.
-			h.syncMutex.Lock()
 			syncedCids, err := h.handle(ctx, c, ss, true, h.subscriber.dtSync.NewSyncer(h.peerID, h.subscriber.topicName), nil)
-			h.syncMutex.Unlock()
 
 			if err != nil {
 				// Log error for now.
@@ -707,9 +703,9 @@ func (h *handler) handleAsync(ctx context.Context, nextCid cid.Cid, ss ipld.Node
 }
 
 // handle processes a message from the peer that the handler is responsible for.
-// The caller is responsible for ensuring that this is called while h.syncMutex
-// is locked.
 func (h *handler) handle(ctx context.Context, nextCid cid.Cid, sel ipld.Node, wrapSel bool, syncer Syncer, hook BlockHookFunc) ([]cid.Cid, error) {
+	h.syncMutex.Lock()
+	defer h.syncMutex.Unlock()
 	log := log.With("cid", nextCid, "peer", h.peerID)
 
 	// This is not set to nil so we can get a pointer.
@@ -745,8 +741,8 @@ func (h *handler) handle(ctx context.Context, nextCid cid.Cid, sel ipld.Node, wr
 
 // setLatestSync sets this handler's latest synced CID to the one specified.
 func (h *handler) setLatestSync(latestSync cid.Cid) {
-	h.syncMutex.Lock()
-	defer h.syncMutex.Unlock()
+	h.latestSyncMu.Lock()
+	defer h.latestSyncMu.Unlock()
 
 	if latestSync != cid.Undef {
 		h.latestSync = cidlink.Link{Cid: latestSync}
@@ -754,7 +750,7 @@ func (h *handler) setLatestSync(latestSync cid.Cid) {
 }
 
 func (h *handler) getLatestSync() ipld.Link {
-	h.syncMutex.Lock()
-	defer h.syncMutex.Unlock()
+	h.latestSyncMu.Lock()
+	defer h.latestSyncMu.Unlock()
 	return h.latestSync
 }
