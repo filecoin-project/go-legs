@@ -22,6 +22,7 @@ import (
 	"github.com/ipld/go-ipld-prime/linking"
 	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
 	basicnode "github.com/ipld/go-ipld-prime/node/basic"
+	"github.com/ipld/go-ipld-prime/traversal/selector"
 	"github.com/libp2p/go-libp2p"
 	"github.com/libp2p/go-libp2p-core/crypto"
 	"github.com/libp2p/go-libp2p-core/host"
@@ -542,6 +543,113 @@ func TestHttpPeerAddrPeerstore(t *testing.T) {
 		t.Fatal(err)
 	}
 
+}
+
+func TestBackpressureDoesntDeadlock(t *testing.T) {
+	pubHostSys := newHostSystem(t)
+	subHostSys := newHostSystem(t)
+
+	pubAddr, pub, sub := legsPubSubBuilder{}.Build(t, testTopic, pubHostSys, subHostSys, nil)
+
+	ll := llBuilder{
+		Length: 1,
+		Seed:   1,
+	}.Build(t, pubHostSys.lsys)
+
+	// a new link on top of ll
+	nextLL := llBuilder{
+		Length: 1,
+		Seed:   2,
+	}.BuildWithPrev(t, pubHostSys.lsys, ll)
+
+	prevHead := ll
+	head := nextLL
+
+	// Purposefully not pulling from this channel yet to create backpressure
+	onSyncFinishedChan, cncl := sub.OnSyncFinished()
+	defer cncl()
+
+	err := pub.UpdateRoot(context.Background(), prevHead.(cidlink.Link).Cid)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = sub.Sync(context.Background(), pubHostSys.host.ID(), cid.Undef, nil, pubAddr)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = pub.UpdateRoot(context.Background(), head.(cidlink.Link).Cid)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = sub.Sync(context.Background(), pubHostSys.host.ID(), cid.Undef, nil, pubAddr)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	head = llBuilder{
+		Length: 1,
+		Seed:   2,
+	}.BuildWithPrev(t, pubHostSys.lsys, head)
+
+	err = pub.UpdateRoot(context.Background(), head.(cidlink.Link).Cid)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// This is blocked until we read from onSyncFinishedChan
+	syncDoneCh := make(chan error)
+	go func() {
+		_, err = sub.Sync(context.Background(), pubHostSys.host.ID(), cid.Undef, nil, pubAddr)
+		syncDoneCh <- err
+	}()
+
+	specificSyncDoneCh := make(chan error)
+	go func() {
+		// A sleep so that the upper sync starts first
+		time.Sleep(time.Second)
+		sel := legs.ExploreRecursiveWithStopNode(selector.RecursionLimitDepth(1), nil, nil)
+		_, err = sub.Sync(context.Background(), pubHostSys.host.ID(), prevHead.(cidlink.Link).Cid, sel, pubAddr)
+		specificSyncDoneCh <- err
+	}()
+
+	select {
+	case <-syncDoneCh:
+		t.Fatal("sync should not have finished because it should be blocked by backpressure on the onSyncFinishedChan")
+	case err := <-specificSyncDoneCh:
+		// This sync should finish because it's not blocked by backpressure. This is
+		// because it's a simple sync not trying to setLatest. This is the kind of
+		// sync a user will call explicitly, so it should not be blocked by the
+		// backpressure of SyncFinishedEvent (it doesn't emit a SyncFinishedEvent).
+		require.NoError(t, err)
+	}
+
+	// Now pull from onSyncFinishedChan
+	select {
+	case <-onSyncFinishedChan:
+	default:
+		t.Fatal("Expected event to be ready to read from onSyncFinishedChan")
+	}
+	emptySyncFinishedChan(onSyncFinishedChan)
+
+	// Now the syncDoneCh should be able to proceed
+	err = <-syncDoneCh
+	require.NoError(t, err)
+
+	// So that we can close properly
+	emptySyncFinishedChan(onSyncFinishedChan)
+}
+
+func emptySyncFinishedChan(ch <-chan legs.SyncFinished) {
+	for {
+		select {
+		case <-ch:
+		default:
+			return
+		}
+	}
 }
 
 func waitForSync(t *testing.T, logPrefix string, store *dssync.MutexDatastore, expectedCid cidlink.Link, watcher <-chan legs.SyncFinished) {
