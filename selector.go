@@ -22,12 +22,11 @@ func ExploreRecursiveWithStop(limit selector.RecursionLimit, sequence selectorbu
 func ExploreRecursiveWithStopNode(limit selector.RecursionLimit, sequence ipld.Node, stopLnk ipld.Link) ipld.Node {
 	if sequence == nil {
 		log.Debug("No selector sequence specified; using default explore all with recursive edge.")
-		np := basicnode.Prototype__Any{}
-		ssb := selectorbuilder.NewSelectorSpecBuilder(np)
+		ssb := selectorbuilder.NewSelectorSpecBuilder(basicnode.Prototype__Any{})
 		sequence = ssb.ExploreAll(ssb.ExploreRecursiveEdge()).Node()
 	}
-	np := basicnode.Prototype__Map{}
-	return fluent.MustBuildMap(np, 1, func(na fluent.MapAssembler) {
+
+	return fluent.MustBuildMap(basicnode.Prototype__Map{}, 1, func(na fluent.MapAssembler) {
 		// RecursionLimit
 		na.AssembleEntry(selector.SelectorKey_ExploreRecursive).CreateMap(3, func(na fluent.MapAssembler) {
 			na.AssembleEntry(selector.SelectorKey_Limit).CreateMap(1, func(na fluent.MapAssembler) {

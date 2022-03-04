@@ -44,10 +44,8 @@ var errSourceNotAllowed = errors.New("message source not allowed")
 // AllowPeerFunc is the signature of a function given to Subscriber that
 // determines whether to allow or reject messages originating from a peer
 // passed into the function.  Returning true or false indicates that messages
-// from that peer are allowed rejected, respectively.  Returning an error
-// indicates that there was a problem evaluating the function, and results in
-// the messages being rejected.
-type AllowPeerFunc func(peer.ID) (bool, error)
+// from that peer are allowed rejected, respectively.
+type AllowPeerFunc func(peer.ID) bool
 
 // BlockHookFunc is the signature of a function that is called when a received.
 type BlockHookFunc func(peer.ID, cid.Cid)
@@ -106,6 +104,11 @@ type Subscriber struct {
 	syncRecLimit selector.RecursionLimit
 
 	httpPeerstore peerstore.Peerstore
+
+	// trustPeer determines if the peer is allowed to use trustedSyncRecLimit.
+	trustPeer AllowPeerFunc
+	// trustedSyncRecLimit is the depth to sync with trusted peer.
+	trustedSyncRecLimit selector.RecursionLimit
 }
 
 // SyncFinished notifies an OnSyncFinished reader that a specified peer
@@ -144,6 +147,9 @@ type handler struct {
 	msgChan      chan cid.Cid
 	// peerID is the ID of the peer this handler is responsible for.
 	peerID peer.ID
+	// recLimit is the recursion limit this peer will use.
+	recLimit    selector.RecursionLimit
+	recLimitSet bool
 }
 
 // wrapBlockHook wraps a possibly nil block hook func to allow a for dispatching
@@ -233,6 +239,9 @@ func NewSubscriber(host host.Host, ds datastore.Batching, lsys ipld.LinkSystem, 
 		dtSync:       dtSync,
 		httpSync:     httpsync.NewSync(lsys, cfg.httpClient, blockHook),
 		syncRecLimit: cfg.syncRecLimit,
+
+		trustPeer:           cfg.trustPeer,
+		trustedSyncRecLimit: cfg.trustedSyncRecLimit,
 
 		httpPeerstore: httpPeerstore,
 
@@ -476,15 +485,6 @@ func (s *Subscriber) Sync(ctx context.Context, peerID peer.ID, nextCid cid.Cid, 
 		return cid.Undef, fmt.Errorf("sync canceled: %w", ctx.Err())
 	}
 
-	var wrapSel bool
-	if sel == nil {
-		// Fall back onto the default selector sequence if one is not
-		// given.  Note that if selector is specified it is used as is
-		// without any wrapping.
-		sel = s.dss
-		wrapSel = true
-	}
-
 	// Check for existing handler.  If none, create one if allowed.
 	hnd, err := s.getOrCreateHandler(peerID, true)
 	if err != nil {
@@ -498,7 +498,7 @@ func (s *Subscriber) Sync(ctx context.Context, peerID peer.ID, nextCid cid.Cid, 
 		defer hnd.latestSyncMu.Unlock()
 	}
 
-	syncedCids, err := hnd.handle(ctx, nextCid, sel, wrapSel, syncer, cfg.scopedBlockHook)
+	syncedCids, err := hnd.handle(ctx, nextCid, sel, syncer, cfg.scopedBlockHook)
 	if err != nil {
 		return cid.Undef, fmt.Errorf("sync handler failed: %w", err)
 	}
@@ -553,11 +553,7 @@ func (s *Subscriber) getOrCreateHandler(peerID peer.ID, force bool) (*handler, e
 
 	// Check callback, if needed, to see if peer ID allowed.
 	if s.allowPeer != nil && !force {
-		allow, err := s.allowPeer(peerID)
-		if err != nil {
-			return nil, fmt.Errorf("error checking if peer allowed: %w", err)
-		}
-		if !allow {
+		if !s.allowPeer(peerID) {
 			return nil, errSourceNotAllowed
 		}
 	}
@@ -641,7 +637,7 @@ func (s *Subscriber) watch(ctx context.Context) {
 
 		// Start new goroutine to handle this message instead of having
 		// persistent goroutine for each peer.
-		hnd.handleAsync(ctx, m.Cid, s.dss, watchWG)
+		hnd.handleAsync(ctx, m.Cid, watchWG)
 	}
 
 	watchWG.Wait()
@@ -650,7 +646,7 @@ func (s *Subscriber) watch(ctx context.Context) {
 
 // handleAsync starts a goroutine to process the latest message received over
 // pubsub.
-func (h *handler) handleAsync(ctx context.Context, nextCid cid.Cid, ss ipld.Node, watchWG *sync.WaitGroup) {
+func (h *handler) handleAsync(ctx context.Context, nextCid cid.Cid, watchWG *sync.WaitGroup) {
 	watchWG.Add(1)
 	// Remove any previous message and replace it with the most recent.  Only
 	// process the most recent message regardless of how many arrive while
@@ -675,7 +671,7 @@ func (h *handler) handleAsync(ctx context.Context, nextCid cid.Cid, ss ipld.Node
 			// Wait for this handler to become available.
 			// Note this only wraps the handler. This is to free up the handler in
 			// case someone else needs it while we wait to send on the events chan.
-			syncedCids, err := h.handle(ctx, c, ss, true, h.subscriber.dtSync.NewSyncer(h.peerID, h.subscriber.topicName), nil)
+			syncedCids, err := h.handle(ctx, c, nil, h.subscriber.dtSync.NewSyncer(h.peerID, h.subscriber.topicName), nil)
 
 			if err != nil {
 				// Log error for now.
@@ -702,7 +698,7 @@ func (h *handler) handleAsync(ctx context.Context, nextCid cid.Cid, ss ipld.Node
 }
 
 // handle processes a message from the peer that the handler is responsible for.
-func (h *handler) handle(ctx context.Context, nextCid cid.Cid, sel ipld.Node, wrapSel bool, syncer Syncer, hook BlockHookFunc) ([]cid.Cid, error) {
+func (h *handler) handle(ctx context.Context, nextCid cid.Cid, sel ipld.Node, syncer Syncer, hook BlockHookFunc) ([]cid.Cid, error) {
 	h.syncMutex.Lock()
 	defer h.syncMutex.Unlock()
 	log := log.With("cid", nextCid, "peer", h.peerID)
@@ -719,8 +715,19 @@ func (h *handler) handle(ctx context.Context, nextCid cid.Cid, sel ipld.Node, wr
 		h.subscriber.scopedBlockHookMutex.Unlock()
 	}()
 
-	if wrapSel {
-		sel = ExploreRecursiveWithStopNode(h.subscriber.syncRecLimit, sel, h.latestSync)
+	if sel == nil {
+		if !h.recLimitSet {
+			if h.subscriber.trustPeer != nil && h.subscriber.trustPeer(h.peerID) {
+				h.recLimit = h.subscriber.trustedSyncRecLimit
+			} else {
+				h.recLimit = h.subscriber.syncRecLimit
+			}
+			h.recLimitSet = true
+		}
+
+		// Fall back onto the default selector sequence if one is not given. If
+		// a selector is specified, then it is used without any wrapping.
+		sel = ExploreRecursiveWithStopNode(h.recLimit, h.subscriber.dss, h.latestSync)
 	}
 
 	stopNode, ok := getStopNode(sel)

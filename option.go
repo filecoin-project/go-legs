@@ -15,6 +15,7 @@ import (
 type config struct {
 	addrTTL   time.Duration
 	allowPeer AllowPeerFunc
+	trustPeer AllowPeerFunc
 
 	topic *pubsub.Topic
 
@@ -24,7 +25,8 @@ type config struct {
 	blockHook  BlockHookFunc
 	httpClient *http.Client
 
-	syncRecLimit selector.RecursionLimit
+	syncRecLimit        selector.RecursionLimit
+	trustedSyncRecLimit selector.RecursionLimit
 }
 
 type Option func(*config) error
@@ -44,6 +46,17 @@ func (c *config) apply(opts []Option) error {
 func AllowPeer(allowPeer AllowPeerFunc) Option {
 	return func(c *config) error {
 		c.allowPeer = allowPeer
+		return nil
+	}
+}
+
+// TrustPeer sets the function that determines whether to trust a peer. Trusted
+// peers can use the TrustedSyncRecursionLimit if one is defined.  If a
+// TrustedSyncRecursionLimit is not specified, then trusted peers will have no
+// depth limit.
+func TrustPeer(trustPeer AllowPeerFunc) Option {
+	return func(c *config) error {
+		c.trustPeer = trustPeer
 		return nil
 	}
 }
@@ -95,6 +108,16 @@ func BlockHook(blockHook BlockHookFunc) Option {
 func SyncRecursionLimit(limit selector.RecursionLimit) Option {
 	return func(c *config) error {
 		c.syncRecLimit = limit
+		return nil
+	}
+}
+
+// TrustedSyncRecursionLimit sets the recursion limit of the background syncing
+// process for trusted peers.  Defaults to selector.RecursionLimitNone if not
+// specified.
+func TrustedSyncRecursionLimit(limit selector.RecursionLimit) Option {
+	return func(c *config) error {
+		c.trustedSyncRecLimit = limit
 		return nil
 	}
 }

@@ -74,8 +74,8 @@ func TestAllowPeerReject(t *testing.T) {
 
 	// Set function to reject anything except dstHost, which is not the one
 	// generating the update.
-	sub.SetAllowPeer(func(peerID peer.ID) (bool, error) {
-		return peerID == dstHost.ID(), nil
+	sub.SetAllowPeer(func(peerID peer.ID) bool {
+		return peerID == dstHost.ID()
 	})
 
 	watcher, cncl := sub.OnSyncFinished()
@@ -110,8 +110,8 @@ func TestAllowPeerAllows(t *testing.T) {
 	defer sub.Close()
 
 	// Set function to allow any peer.
-	sub.SetAllowPeer(func(peerID peer.ID) (bool, error) {
-		return true, nil
+	sub.SetAllowPeer(func(peerID peer.ID) bool {
+		return true
 	})
 
 	watcher, cncl := sub.OnSyncFinished()
