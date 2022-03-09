@@ -106,6 +106,8 @@ type Subscriber struct {
 	syncRecLimit selector.RecursionLimit
 
 	httpPeerstore peerstore.Peerstore
+
+	latestSyncHander LatestSyncHandler
 }
 
 // SyncFinished notifies an OnSyncFinished reader that a specified peer
@@ -136,11 +138,10 @@ type handler struct {
 	// syncMutex serializes the handling of individual syncs. This should only
 	// guard the actual handling of a sync, nothing else.
 	syncMutex sync.Mutex
-	// If updating this from the result of a sync make sure you grab this lock
-	// before calling handler.handle(). Otherwise another process may overwrite
-	// your state.
+	// If this sync will update the latestSync state (via latestSyncHandler) then
+	// it should grab this lock to insure no other process updates that state
+	// concurrently.
 	latestSyncMu sync.Mutex
-	latestSync   ipld.Link
 	msgChan      chan cid.Cid
 	// peerID is the ID of the peer this handler is responsible for.
 	peerID peer.ID
@@ -214,6 +215,11 @@ func NewSubscriber(host host.Host, ds datastore.Batching, lsys ipld.LinkSystem, 
 		return nil, err
 	}
 
+	latestSyncHandler := cfg.latestSyncHandler
+	if latestSyncHandler == nil {
+		latestSyncHandler = &DefaultLatestSyncHandler{}
+	}
+
 	s := &Subscriber{
 		dss:  dss,
 		host: host,
@@ -238,6 +244,8 @@ func NewSubscriber(host host.Host, ds datastore.Batching, lsys ipld.LinkSystem, 
 
 		scopedBlockHookMutex: scopedBlockHookMutex,
 		scopedBlockHook:      scopedBlockHook,
+
+		latestSyncHander: latestSyncHandler,
 	}
 
 	// Start watcher to read pubsub messages.
@@ -253,15 +261,11 @@ func NewSubscriber(host host.Host, ds datastore.Batching, lsys ipld.LinkSystem, 
 // no data is synced with that peer, it means that the Subscriber does not know
 // about it.  Calling Sync() first may be necessary.
 func (s *Subscriber) GetLatestSync(peerID peer.ID) ipld.Link {
-	s.handlersMutex.Lock()
-	hnd, ok := s.handlers[peerID]
-	if !ok {
-		s.handlersMutex.Unlock()
+	v, ok := s.latestSyncHander.GetLatestSync(peerID)
+	if !ok || v == cid.Undef {
 		return nil
 	}
-	s.handlersMutex.Unlock()
-
-	return hnd.getLatestSync()
+	return cidlink.Link{Cid: v}
 }
 
 // SetLatestSync sets the latest synced CID for a specified peer.  If there is
@@ -275,8 +279,10 @@ func (s *Subscriber) SetLatestSync(peerID peer.ID, latestSync cid.Cid) error {
 	if err != nil {
 		return err
 	}
+	hnd.latestSyncMu.Lock()
+	defer hnd.latestSyncMu.Unlock()
 
-	hnd.setLatestSync(latestSync)
+	s.latestSyncHander.SetLatestSync(peerID, latestSync)
 	return nil
 }
 
@@ -504,7 +510,7 @@ func (s *Subscriber) Sync(ctx context.Context, peerID peer.ID, nextCid cid.Cid, 
 	}
 
 	if updateLatest {
-		hnd.latestSync = cidlink.Link{Cid: nextCid}
+		hnd.subscriber.latestSyncHander.SetLatestSync(hnd.peerID, nextCid)
 		hnd.subscriber.inEvents <- SyncFinished{Cid: nextCid, PeerID: hnd.peerID, SyncedCids: syncedCids}
 		log.Infow("Updating latest sync")
 	}
@@ -684,12 +690,8 @@ func (h *handler) handleAsync(ctx context.Context, nextCid cid.Cid, ss ipld.Node
 			}
 
 			// Update latest head seen.
-			//
-			// NOTE: This is not persisted anywhere. Is the top-level user's
-			// responsibility to persist if needed to initialize a partially-synced
-			// subscriber.
 			log.Infow("Updating latest sync")
-			h.latestSync = cidlink.Link{Cid: nextCid}
+			h.subscriber.latestSyncHander.SetLatestSync(h.peerID, nextCid)
 
 			h.subscriber.inEvents <- SyncFinished{Cid: nextCid, PeerID: h.peerID, SyncedCids: syncedCids}
 		default:
@@ -720,7 +722,12 @@ func (h *handler) handle(ctx context.Context, nextCid cid.Cid, sel ipld.Node, wr
 	}()
 
 	if wrapSel {
-		sel = ExploreRecursiveWithStopNode(h.subscriber.syncRecLimit, sel, h.latestSync)
+		var latestSyncLink ipld.Link
+		latestSync, ok := h.subscriber.latestSyncHander.GetLatestSync(h.peerID)
+		if ok && latestSync != cid.Undef {
+			latestSyncLink = cidlink.Link{Cid: latestSync}
+		}
+		sel = ExploreRecursiveWithStopNode(h.subscriber.syncRecLimit, sel, latestSyncLink)
 	}
 
 	stopNode, ok := getStopNode(sel)
@@ -736,20 +743,4 @@ func (h *handler) handle(ctx context.Context, nextCid cid.Cid, sel ipld.Node, wr
 	log.Infow("Sync completed")
 
 	return syncedCids, nil
-}
-
-// setLatestSync sets this handler's latest synced CID to the one specified.
-func (h *handler) setLatestSync(latestSync cid.Cid) {
-	h.latestSyncMu.Lock()
-	defer h.latestSyncMu.Unlock()
-
-	if latestSync != cid.Undef {
-		h.latestSync = cidlink.Link{Cid: latestSync}
-	}
-}
-
-func (h *handler) getLatestSync() ipld.Link {
-	h.latestSyncMu.Lock()
-	defer h.latestSyncMu.Unlock()
-	return h.latestSync
 }

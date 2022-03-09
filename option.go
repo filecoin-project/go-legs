@@ -3,11 +3,14 @@ package legs
 import (
 	"fmt"
 	"net/http"
+	"sync"
 	"time"
 
 	dt "github.com/filecoin-project/go-data-transfer"
+	"github.com/ipfs/go-cid"
 	"github.com/ipfs/go-graphsync"
 	"github.com/ipld/go-ipld-prime/traversal/selector"
+	"github.com/libp2p/go-libp2p-core/peer"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 )
 
@@ -25,6 +28,8 @@ type config struct {
 	httpClient *http.Client
 
 	syncRecLimit selector.RecursionLimit
+
+	latestSyncHandler LatestSyncHandler
 }
 
 type Option func(*config) error
@@ -95,6 +100,38 @@ func BlockHook(blockHook BlockHookFunc) Option {
 func SyncRecursionLimit(limit selector.RecursionLimit) Option {
 	return func(c *config) error {
 		c.syncRecLimit = limit
+		return nil
+	}
+}
+
+// LatestSyncHandler defines how to store the latest synced cid for a given peer
+// and how to fetch it. Legs gaurantees this will not be called concurrently for
+// the same peer, but it may be called concurrently for different peers.
+type LatestSyncHandler interface {
+	SetLatestSync(peer peer.ID, cid cid.Cid)
+	GetLatestSync(peer peer.ID) (cid.Cid, bool)
+}
+
+type DefaultLatestSyncHandler struct {
+	m sync.Map
+}
+
+func (h *DefaultLatestSyncHandler) SetLatestSync(p peer.ID, c cid.Cid) {
+	h.m.Store(p, c)
+}
+
+func (h *DefaultLatestSyncHandler) GetLatestSync(p peer.ID) (cid.Cid, bool) {
+	v, ok := h.m.Load(p)
+	if !ok {
+		return cid.Undef, false
+	}
+	return v.(cid.Cid), true
+}
+
+// UseLatestSyncHandler sets the latest sync handler to use.
+func UseLatestSyncHandler(h LatestSyncHandler) Option {
+	return func(c *config) error {
+		c.latestSyncHandler = h
 		return nil
 	}
 }
