@@ -22,6 +22,7 @@ import (
 	ic "github.com/libp2p/go-libp2p-core/crypto"
 	"github.com/libp2p/go-libp2p-core/peer"
 	"github.com/multiformats/go-multiaddr"
+	"golang.org/x/time/rate"
 )
 
 const defaultHttpTimeout = 10 * time.Second
@@ -49,7 +50,7 @@ func NewSync(lsys ipld.LinkSystem, client *http.Client, blockHook func(peer.ID, 
 }
 
 // NewSyncer creates a new Syncer to use for a single sync operation against a peer.
-func (s *Sync) NewSyncer(peerID peer.ID, peerAddr multiaddr.Multiaddr) (*Syncer, error) {
+func (s *Sync) NewSyncer(peerID peer.ID, peerAddr multiaddr.Multiaddr, limiter *rate.Limiter) (*Syncer, error) {
 	rootURL, err := maurl.ToURL(peerAddr)
 	if err != nil {
 		return nil, err
@@ -59,6 +60,7 @@ func (s *Sync) NewSyncer(peerID peer.ID, peerAddr multiaddr.Multiaddr) (*Syncer,
 		sync:    s,
 		rootURL: *rootURL,
 		peerID:  peerID,
+		limiter: limiter,
 	}, nil
 }
 
@@ -72,6 +74,8 @@ type Syncer struct {
 	sync    *Sync
 	rootURL url.URL
 	peerID  peer.ID
+
+	limiter *rate.Limiter
 }
 
 func (s *Syncer) GetHead(ctx context.Context) (cid.Cid, error) {
@@ -126,10 +130,7 @@ func (s *Syncer) Sync(ctx context.Context, nextCid cid.Cid, sel ipld.Node) error
 func (s *Syncer) walkFetch(ctx context.Context, rootCid cid.Cid, sel selector.Selector) (err error) {
 	// We run the block hook to emulate the behavior of graphsync's
 	// `OnIncomingBlockHook` callback (gets called even if block is already stored
-	// locally). We keep track of which cids we've traversed and defer
-	// We also do this after we've read the block so that if the hook
-	// removes the block from the datastore we can still progress in our
-	// traversal.
+	// locally).
 
 	// Track the order of cids we've seen during our traversal so we can call the
 	// block hook function in the same order. We emulate the behavior of
@@ -195,6 +196,11 @@ func (s *Syncer) walkFetch(ctx context.Context, rootCid cid.Cid, sel selector.Se
 func (s *Syncer) fetch(ctx context.Context, rsrc string, cb func(io.Reader) error) error {
 	localURL := s.rootURL
 	localURL.Path = path.Join(s.rootURL.Path, rsrc)
+
+	err := s.limiter.Wait(ctx)
+	if err != nil {
+		return err
+	}
 
 	req, err := http.NewRequestWithContext(ctx, "GET", localURL.String(), nil)
 	if err != nil {
