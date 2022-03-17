@@ -41,9 +41,14 @@ func (s *Syncer) Sync(ctx context.Context, nextCid cid.Cid, sel ipld.Node) error
 		}()
 	}
 
-	inProgressSyncK := inProgressSyncKey{nextCid, s.peerID}
-
 	for {
+		stoppedBlock, isRetrying := s.sync.isRetryingDueToRateLimit.Load(s.peerID)
+		if isRetrying {
+			// if this is a retry due to rate limit, we can resume from where we bailed.
+			nextCid = stoppedBlock.(cid.Cid)
+		}
+
+		inProgressSyncK := inProgressSyncKey{nextCid, s.peerID}
 		// For loop to retry if we get rate limited.
 		syncDone := s.sync.notifyOnSyncDone(inProgressSyncK)
 

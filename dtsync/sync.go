@@ -130,11 +130,6 @@ func (s *Sync) addRateLimiting(bFn graphsync.OnIncomingBlockHook, rateLimiter ra
 		lastFailedBlock, isRetryingDueToRateLimit := s.isRetryingDueToRateLimit.Load(p)
 		if isRetryingDueToRateLimit && lastFailedBlock == blockData.Link().(cidlink.Link).Cid {
 			s.isRetryingDueToRateLimit.Delete(p)
-		} else if isRetryingDueToRateLimit {
-			// We're in a retry loop due to rate limiting and we haven't seen the
-			// block that we stopped at before, so we won't call the wrapped block
-			// hook. This is because we already called it in a previous iteration of this sync.
-			return
 		}
 
 		if bFn != nil {
