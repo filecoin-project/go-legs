@@ -62,7 +62,10 @@ func (s *Syncer) Sync(ctx context.Context, nextCid cid.Cid, sel ipld.Node) error
 
 			// Wait until we've fully refilled our rate limit bucket since this is a
 			// relatively heavy operation (essentially restarting the sync).
-			s.rateLimiter.WaitN(ctx, s.rateLimiter.Burst())
+			waitErr := s.rateLimiter.WaitN(ctx, s.rateLimiter.Burst())
+			if waitErr != nil {
+				return err
+			}
 
 			// Set the nextCid to be the cid that we stopped at becasuse of rate
 			// limitting. This lets us pick up where we left off
