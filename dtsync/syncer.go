@@ -42,12 +42,6 @@ func (s *Syncer) Sync(ctx context.Context, nextCid cid.Cid, sel ipld.Node) error
 	}
 
 	for {
-		stoppedBlock, isRetrying := s.sync.isRetryingDueToRateLimit.Load(s.peerID)
-		if isRetrying {
-			// if this is a retry due to rate limit, we can resume from where we bailed.
-			nextCid = stoppedBlock.(cid.Cid)
-		}
-
 		inProgressSyncK := inProgressSyncKey{nextCid, s.peerID}
 		// For loop to retry if we get rate limited.
 		syncDone := s.sync.notifyOnSyncDone(inProgressSyncK)
@@ -63,11 +57,16 @@ func (s *Syncer) Sync(ctx context.Context, nextCid cid.Cid, sel ipld.Node) error
 
 		// Wait for transfer finished signal.
 		err = <-syncDone
-		if _, ok := err.(rateLimitErr); ok {
+		if err, ok := err.(rateLimitErr); ok {
 			log.Infow("hit rate limit. Waiting and will retry later", "cid", nextCid, "source_peer", s.peerID)
 
-			// Wait until we've fully refilled our rate limit bucket since this is a relatively heavy operation (essentially restarting the sync).
+			// Wait until we've fully refilled our rate limit bucket since this is a
+			// relatively heavy operation (essentially restarting the sync).
 			s.rateLimiter.WaitN(ctx, s.rateLimiter.Burst())
+
+			// Set the nextCid to be the cid that we stopped at becasuse of rate
+			// limitting. This lets us pick up where we left off
+			nextCid = err.stoppedAtCid
 			continue
 		}
 		return err

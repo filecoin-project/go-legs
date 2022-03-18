@@ -590,6 +590,7 @@ func TestRateLimiter(t *testing.T) {
 			start := time.Now()
 			_, err = sub.Sync(context.Background(), pubHostSys.host.ID(), cid.Undef, nil, pubAddr)
 			require.NoError(t, err)
+			// Minus 1 because we start with a full bucket.
 			require.GreaterOrEqual(t, time.Since(start), tokenEvery*time.Duration(llB.Length-1))
 
 			require.Equal(t, atomic.LoadInt64(&calledTimes), int64(llB.Length))

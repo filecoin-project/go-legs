@@ -21,7 +21,7 @@ import (
 
 var log = logging.Logger("go-legs-dtsync")
 
-const hitRateLimitErrStr = "hit rate limit"
+const hitRateLimitErrStr = "hitRateLimit"
 
 type inProgressSyncKey struct {
 	c    cid.Cid
@@ -45,14 +45,6 @@ type Sync struct {
 	// overrideRateLimiterFor let's a specific sync define its own rate limiter
 	overrideRateLimiterFor   map[peer.ID]*rate.Limiter
 	overrideRateLimiterForMu sync.RWMutex
-
-	// isRetryingDueToRateLimit keeps track of if an existing sync is retrying due
-	// to a previous failed rate limit.  It is used to prevent the caller's block
-	// hook from being called multiple times while we retry due to rate limit.
-	//
-	// The value represents the last block that it did not call the caller's block
-	// hook on.
-	isRetryingDueToRateLimit sync.Map // concurrent version of map[peer.ID]cid.Cid
 }
 
 // wrapRateLimiterFor wraps a rateLimiterFor function with override semantics so
@@ -121,15 +113,13 @@ func (s *Sync) addRateLimiting(bFn graphsync.OnIncomingBlockHook, rateLimiter ra
 		if !isLocalBlock {
 			limiter := rateLimiter(p)
 			if !limiter.Allow() {
-				s.isRetryingDueToRateLimit.Store(p, blockData.Link().(cidlink.Link).Cid)
-				hookActions.TerminateWithError(errors.New(hitRateLimitErrStr))
+				// We've hit a rate limit. We'll terminate this sync with a rate limit
+				// err along with the cid of the block that we didn't process. When we
+				// restart the sync after the rate limit we should continue from this
+				// block.
+				hookActions.TerminateWithError(fmt.Errorf("%s(%s)", hitRateLimitErrStr, blockData.Link().(cidlink.Link).Cid.String()))
 				return
 			}
-		}
-
-		lastFailedBlock, isRetryingDueToRateLimit := s.isRetryingDueToRateLimit.Load(p)
-		if isRetryingDueToRateLimit && lastFailedBlock == blockData.Link().(cidlink.Link).Cid {
-			s.isRetryingDueToRateLimit.Delete(p)
 		}
 
 		if bFn != nil {
@@ -224,7 +214,8 @@ func (s *Sync) signalSyncDone(k inProgressSyncKey, err error) bool {
 }
 
 type rateLimitErr struct {
-	msg string
+	msg          string
+	stoppedAtCid cid.Cid
 }
 
 func (e rateLimitErr) Error() string { return e.msg }
@@ -243,8 +234,18 @@ func (s *Sync) onEvent(event dt.Event, channelState dt.ChannelState) {
 	case dt.Failed:
 		// Communicate the error back to the waiting handler.
 		msg := channelState.Message()
-		if strings.Contains(msg, hitRateLimitErrStr) {
-			err = rateLimitErr{msg}
+		if idx := strings.Index(msg, hitRateLimitErrStr); idx != -1 {
+			// This is a rate limit error, let's pull out the cid of the block we
+			// didn't process to include it in the error.
+			stoppedAtCidStr := msg[idx+len(hitRateLimitErrStr)+1:]
+			lastParen := strings.Index(stoppedAtCidStr, ")")
+			stoppedAtCidStr = stoppedAtCidStr[:lastParen]
+
+			var stoppedAtCid cid.Cid
+			stoppedAtCid, err = cid.Decode(stoppedAtCidStr)
+			if err == nil {
+				err = rateLimitErr{msg, stoppedAtCid}
+			}
 		} else {
 			err = fmt.Errorf("datatransfer failed: %s", msg)
 		}
