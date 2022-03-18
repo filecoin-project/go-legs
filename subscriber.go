@@ -24,6 +24,7 @@ import (
 	"github.com/libp2p/go-libp2p-peerstore/pstoremem"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	"github.com/multiformats/go-multiaddr"
+	"golang.org/x/time/rate"
 )
 
 var log = logging.Logger("go-legs")
@@ -108,6 +109,9 @@ type Subscriber struct {
 	httpPeerstore peerstore.Peerstore
 
 	latestSyncHander LatestSyncHandler
+
+	// limiterFor defines the rate limits for each publisher
+	limiterFor RateLimiterFor
 }
 
 // SyncFinished notifies an OnSyncFinished reader that a specified peer
@@ -194,15 +198,23 @@ func NewSubscriber(host host.Host, ds datastore.Batching, lsys ipld.LinkSystem, 
 
 	scopedBlockHookMutex, scopedBlockHook, blockHook := wrapBlockHook(cfg.blockHook)
 
+	if cfg.rateLimiterFor == nil {
+		// Allows all events. No rate limit.
+		limiter := rate.NewLimiter(rate.Inf, 0)
+		cfg.rateLimiterFor = func(publisher peer.ID) *rate.Limiter {
+			return limiter
+		}
+	}
+
 	var dtSync *dtsync.Sync
 	if cfg.dtManager != nil {
 		if ds != nil {
 			cancelPubsub()
 			return nil, fmt.Errorf("datastore cannot be used with DtManager option")
 		}
-		dtSync, err = dtsync.NewSyncWithDT(host, cfg.dtManager, cfg.graphExchange, blockHook)
+		dtSync, err = dtsync.NewSyncWithDT(host, cfg.dtManager, cfg.graphExchange, blockHook, cfg.rateLimiterFor)
 	} else {
-		dtSync, err = dtsync.NewSync(host, ds, lsys, blockHook)
+		dtSync, err = dtsync.NewSync(host, ds, lsys, blockHook, cfg.rateLimiterFor)
 	}
 	if err != nil {
 		cancelPubsub()
@@ -246,6 +258,8 @@ func NewSubscriber(host host.Host, ds datastore.Batching, lsys ipld.LinkSystem, 
 		scopedBlockHook:      scopedBlockHook,
 
 		latestSyncHander: latestSyncHandler,
+
+		limiterFor: cfg.rateLimiterFor,
 	}
 
 	// Start watcher to read pubsub messages.
@@ -436,7 +450,15 @@ func (s *Subscriber) Sync(ctx context.Context, peerID peer.ID, nextCid cid.Cid, 
 	}
 
 	if isHttpPeerAddr {
-		syncer, err = s.httpSync.NewSyncer(peerID, peerAddr)
+		var limiter *rate.Limiter
+		if cfg.rateLimiter != nil {
+			// If we have an explicit rate limiter, we'll use it instead of the
+			// default
+			limiter = cfg.rateLimiter
+		} else {
+			limiter = s.limiterFor(peerID)
+		}
+		syncer, err = s.httpSync.NewSyncer(peerID, peerAddr, limiter)
 		if err != nil {
 			return cid.Undef, fmt.Errorf("cannot create http sync handler: %w", err)
 		}
@@ -450,7 +472,7 @@ func (s *Subscriber) Sync(ctx context.Context, peerID peer.ID, nextCid cid.Cid, 
 		if peerStore != nil && peerAddr != nil {
 			peerStore.AddAddr(peerID, peerAddr, tempAddrTTL)
 		}
-		syncer = s.dtSync.NewSyncer(peerID, s.topicName)
+		syncer = s.dtSync.NewSyncer(peerID, s.topicName, cfg.rateLimiter)
 	}
 
 	updateLatest := cfg.alwaysUpdateLatest
@@ -643,8 +665,12 @@ func (s *Subscriber) watch(ctx context.Context) {
 			}
 		}
 
-		log.Infow("Handling message", "peer", srcPeer)
+		if !s.limiterFor(srcPeer).Allow() {
+			log.Infow("Ignoring message because of rate limiting", "peer", srcPeer)
 
+		} else {
+			log.Infow("Handling message", "peer", srcPeer)
+		}
 		// Start new goroutine to handle this message instead of having
 		// persistent goroutine for each peer.
 		hnd.handleAsync(ctx, m.Cid, s.dss, watchWG)
@@ -681,7 +707,7 @@ func (h *handler) handleAsync(ctx context.Context, nextCid cid.Cid, ss ipld.Node
 			// Wait for this handler to become available.
 			// Note this only wraps the handler. This is to free up the handler in
 			// case someone else needs it while we wait to send on the events chan.
-			syncedCids, err := h.handle(ctx, c, ss, true, h.subscriber.dtSync.NewSyncer(h.peerID, h.subscriber.topicName), nil)
+			syncedCids, err := h.handle(ctx, c, ss, true, h.subscriber.dtSync.NewSyncer(h.peerID, h.subscriber.topicName, nil), nil)
 
 			if err != nil {
 				// Log error for now.

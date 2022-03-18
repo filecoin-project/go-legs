@@ -6,6 +6,8 @@ import (
 	"sync"
 	"time"
 
+	rate "golang.org/x/time/rate"
+
 	dt "github.com/filecoin-project/go-data-transfer"
 	"github.com/ipfs/go-cid"
 	"github.com/ipfs/go-graphsync"
@@ -30,6 +32,8 @@ type config struct {
 	syncRecLimit selector.RecursionLimit
 
 	latestSyncHandler LatestSyncHandler
+
+	rateLimiterFor RateLimiterFor
 }
 
 type Option func(*config) error
@@ -104,6 +108,15 @@ func SyncRecursionLimit(limit selector.RecursionLimit) Option {
 	}
 }
 
+type RateLimiterFor func(publisher peer.ID) *rate.Limiter
+
+func RateLimiter(limiterFor RateLimiterFor) Option {
+	return func(c *config) error {
+		c.rateLimiterFor = limiterFor
+		return nil
+	}
+}
+
 // LatestSyncHandler defines how to store the latest synced cid for a given peer
 // and how to fetch it. Legs gaurantees this will not be called concurrently for
 // the same peer, but it may be called concurrently for different peers.
@@ -139,6 +152,7 @@ func UseLatestSyncHandler(h LatestSyncHandler) Option {
 type syncCfg struct {
 	alwaysUpdateLatest bool
 	scopedBlockHook    BlockHookFunc
+	rateLimiter        *rate.Limiter
 }
 
 type SyncOption func(*syncCfg)
@@ -152,5 +166,11 @@ func AlwaysUpdateLatest() SyncOption {
 func ScopedBlockHook(hook BlockHookFunc) SyncOption {
 	return func(sc *syncCfg) {
 		sc.scopedBlockHook = hook
+	}
+}
+
+func ScopedRateLimiter(l *rate.Limiter) SyncOption {
+	return func(sc *syncCfg) {
+		sc.rateLimiter = l
 	}
 }

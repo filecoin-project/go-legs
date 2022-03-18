@@ -30,6 +30,7 @@ import (
 	"github.com/multiformats/go-multiaddr"
 	"github.com/multiformats/go-multicodec"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/time/rate"
 )
 
 const (
@@ -541,6 +542,59 @@ func TestHttpPeerAddrPeerstore(t *testing.T) {
 	_, err = sub.Sync(context.Background(), pubHostSys.host.ID(), cid.Undef, nil, nil)
 	if err != nil {
 		t.Fatal(err)
+	}
+
+}
+
+func TestRateLimiter(t *testing.T) {
+	type testCase struct {
+		name   string
+		isHttp bool
+	}
+
+	testCases := []testCase{
+		{"DT rate limiter", false},
+		{"HTTP rate limiter", true},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+
+			pubHostSys := newHostSystem(t)
+			subHostSys := newHostSystem(t)
+
+			tokenEvery := 100 * time.Millisecond
+			limiter := rate.NewLimiter(rate.Every(tokenEvery), 1)
+			var calledTimes int64
+			pubAddr, pub, sub := legsPubSubBuilder{
+				IsHttp: tc.isHttp,
+			}.Build(t, testTopic, pubHostSys, subHostSys, []legs.Option{
+				legs.BlockHook(func(i peer.ID, c cid.Cid) {
+					atomic.AddInt64(&calledTimes, 1)
+				}),
+				legs.RateLimiter(func(publisher peer.ID) *rate.Limiter {
+					return limiter
+				}),
+			})
+
+			llB := llBuilder{
+				Length: 5,
+			}
+			ll := llB.Build(t, pubHostSys.lsys)
+
+			err := pub.SetRoot(context.Background(), ll.(cidlink.Link).Cid)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			start := time.Now()
+			_, err = sub.Sync(context.Background(), pubHostSys.host.ID(), cid.Undef, nil, pubAddr)
+			require.NoError(t, err)
+			// Minus 1 because we start with a full bucket.
+			require.GreaterOrEqual(t, time.Since(start), tokenEvery*time.Duration(llB.Length-1))
+
+			require.Equal(t, atomic.LoadInt64(&calledTimes), int64(llB.Length))
+		})
 	}
 
 }
