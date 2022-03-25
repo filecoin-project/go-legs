@@ -7,7 +7,7 @@ import (
 	"os"
 	"path"
 
-	legs "github.com/filecoin-project/go-legs"
+	"github.com/filecoin-project/go-legs/dtsync"
 	cborgen "github.com/whyrusleeping/cbor-gen"
 )
 
@@ -16,12 +16,12 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	voucher_file := path.Clean(path.Join(wd, "..", "voucher_cbor_gen.go"))
+	voucher_file := path.Clean(path.Join(wd, "..", "dtsync", "voucher_cbor_gen.go"))
 	err = cborgen.WriteMapEncodersToFile(
 		voucher_file,
-		"legs",
-		legs.Voucher{},
-		legs.VoucherResult{},
+		"dtsync",
+		dtsync.Voucher{},
+		dtsync.VoucherResult{},
 	)
 	if err != nil {
 		panic(err)
