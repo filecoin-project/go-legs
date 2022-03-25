@@ -7,11 +7,22 @@ import (
 	"github.com/ipfs/go-cid"
 	"github.com/ipld/go-ipld-prime"
 	"github.com/libp2p/go-libp2p-core/peer"
+	cborgen "github.com/whyrusleeping/cbor-gen"
 )
 
-//go:generate go run -tags cbg ./tools
+//go:generate go run -tags cbg ../tools
 
-var _ datatransfer.RequestValidator = &legsValidator{}
+var (
+	_ datatransfer.RequestValidator = (*legsValidator)(nil)
+
+	_ datatransfer.Registerable = (*Voucher)(nil)
+	_ cborgen.CBORMarshaler     = (*Voucher)(nil)
+	_ cborgen.CBORUnmarshaler   = (*Voucher)(nil)
+
+	_ datatransfer.Registerable = (*VoucherResult)(nil)
+	_ cborgen.CBORMarshaler     = (*VoucherResult)(nil)
+	_ cborgen.CBORUnmarshaler   = (*VoucherResult)(nil)
+)
 
 // A Voucher is used to communicate a new DAG head
 type Voucher struct {
@@ -39,30 +50,29 @@ type legsValidator struct {
 }
 
 func (vl *legsValidator) ValidatePush(
-	isRestart bool,
-	chid datatransfer.ChannelID,
-	sender peer.ID,
-	voucher datatransfer.Voucher,
-	baseCid cid.Cid,
-	selector ipld.Node) (datatransfer.VoucherResult, error) {
+	_ bool,
+	_ datatransfer.ChannelID,
+	_ peer.ID,
+	_ datatransfer.Voucher,
+	_ cid.Cid,
+	_ ipld.Node) (datatransfer.VoucherResult, error) {
 
 	// This is a pull-only DT voucher.
 	return nil, errors.New("invalid")
 }
 
 func (vl *legsValidator) ValidatePull(
-	isRestart bool,
-	chid datatransfer.ChannelID,
-	receiver peer.ID,
+	_ bool,
+	_ datatransfer.ChannelID,
+	_ peer.ID,
 	voucher datatransfer.Voucher,
-	baseCid cid.Cid,
-	selector ipld.Node) (datatransfer.VoucherResult, error) {
+	_ cid.Cid,
+	_ ipld.Node) (datatransfer.VoucherResult, error) {
 
 	v := voucher.(*Voucher)
-
 	if v.Head == nil {
 		return nil, errors.New("invalid")
 	}
 
-	return &VoucherResult{0}, nil
+	return &VoucherResult{}, nil
 }

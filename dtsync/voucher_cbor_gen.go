@@ -5,6 +5,7 @@ package dtsync
 import (
 	"fmt"
 	"io"
+	"math"
 	"sort"
 
 	cid "github.com/ipfs/go-cid"
@@ -14,6 +15,7 @@ import (
 
 var _ = xerrors.Errorf
 var _ = cid.Undef
+var _ = math.E
 var _ = sort.Sort
 
 func (t *Voucher) MarshalCBOR(w io.Writer) error {
@@ -67,7 +69,7 @@ func (t *Voucher) UnmarshalCBOR(r io.Reader) error {
 	}
 
 	if extra > cbg.MaxLength {
-		return fmt.Errorf("LegsVoucher: map struct too large (%d)", extra)
+		return fmt.Errorf("Voucher: map struct too large (%d)", extra)
 	}
 
 	var name string
@@ -162,7 +164,7 @@ func (t *VoucherResult) UnmarshalCBOR(r io.Reader) error {
 	}
 
 	if extra > cbg.MaxLength {
-		return fmt.Errorf("LegsVoucherResult: map struct too large (%d)", extra)
+		return fmt.Errorf("VoucherResult: map struct too large (%d)", extra)
 	}
 
 	var name string
