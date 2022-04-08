@@ -480,7 +480,7 @@ func (s *Subscriber) Sync(ctx context.Context, peerID peer.ID, nextCid cid.Cid, 
 		// Query the peer for the latest CID
 		nextCid, err = syncer.GetHead(ctx)
 		if err != nil {
-			return cid.Undef, fmt.Errorf("cannot query head for sync: %w", err)
+			return cid.Undef, fmt.Errorf("cannot query head for sync: %w. Possibly incorrect topic configured", err)
 		}
 
 		// Check if there is a latest CID.
