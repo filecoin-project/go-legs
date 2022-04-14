@@ -270,6 +270,11 @@ func NewSubscriber(host host.Host, ds datastore.Batching, lsys ipld.LinkSystem, 
 	return s, nil
 }
 
+// HttpPeerStore returns the subscriber's HTTP peer store.
+func (s *Subscriber) HttpPeerStore() peerstore.Peerstore {
+	return s.httpPeerstore
+}
+
 // GetLatestSync returns the latest synced CID for the specified peer. If there
 // is not handler for the peer, then nil is returned.  This does not mean that
 // no data is synced with that peer, it means that the Subscriber does not know
