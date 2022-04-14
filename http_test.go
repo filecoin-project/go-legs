@@ -167,7 +167,7 @@ func TestSyncFnHttp(t *testing.T) {
 	cids, _ := test.RandomCids(1)
 	ctx, syncncl := context.WithTimeout(context.Background(), time.Second)
 	defer syncncl()
-	syncCid, err := te.sub.Sync(ctx, te.srcHost.ID(), cids[0], nil, te.pubAddr)
+	_, err := te.sub.Sync(ctx, te.srcHost.ID(), cids[0], nil, te.pubAddr)
 	if err == nil {
 		t.Fatal("expected error when no content to sync")
 	}
@@ -195,7 +195,7 @@ func TestSyncFnHttp(t *testing.T) {
 	// Sync with publisher via HTTP.
 	ctx, syncncl = context.WithTimeout(context.Background(), updateTimeout)
 	defer syncncl()
-	syncCid, err = te.sub.Sync(ctx, te.srcHost.ID(), lnk.(cidlink.Link).Cid, nil, te.pubAddr)
+	syncCid, err := te.sub.Sync(ctx, te.srcHost.ID(), lnk.(cidlink.Link).Cid, nil, te.pubAddr)
 	if err != nil {
 		t.Fatal(err)
 	}
