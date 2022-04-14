@@ -167,7 +167,9 @@ func TestSyncFnHttp(t *testing.T) {
 	cids, _ := test.RandomCids(1)
 	ctx, syncncl := context.WithTimeout(context.Background(), time.Second)
 	defer syncncl()
-	if _, err := te.sub.Sync(ctx, te.srcHost.ID(), cids[0], nil, te.pubAddr); err == nil {
+
+	var err error
+	if _, err = te.sub.Sync(ctx, te.srcHost.ID(), cids[0], nil, te.pubAddr); err == nil {
 		t.Fatal("expected error when no content to sync")
 	}
 	if !strings.Contains(err.Error(), "failed to traverse requested dag") {
@@ -183,7 +185,7 @@ func TestSyncFnHttp(t *testing.T) {
 
 	// Assert the latestSync is updated by explicit sync when cid and selector are unset.
 	newHead := chainLnks[0].(cidlink.Link).Cid
-	if err := te.pub.UpdateRoot(context.Background(), newHead); err != nil {
+	if err = te.pub.UpdateRoot(context.Background(), newHead); err != nil {
 		t.Fatal(err)
 	}
 
@@ -202,7 +204,7 @@ func TestSyncFnHttp(t *testing.T) {
 	if !syncCid.Equals(lnk.(cidlink.Link).Cid) {
 		t.Fatalf("sync'd cid unexpected %s vs %s", syncCid, lnk)
 	}
-	if _, err := te.dstStore.Get(context.Background(), datastore.NewKey(syncCid.String())); err != nil {
+	if _, err = te.dstStore.Get(context.Background(), datastore.NewKey(syncCid.String())); err != nil {
 		t.Fatalf("data not in receiver store: %v", err)
 	}
 	syncncl()
@@ -229,7 +231,7 @@ func TestSyncFnHttp(t *testing.T) {
 	if !syncCid.Equals(newHead) {
 		t.Fatalf("sync'd cid unexpected %s vs %s", syncCid, lnk)
 	}
-	if _, err := te.dstStore.Get(context.Background(), datastore.NewKey(syncCid.String())); err != nil {
+	if _, err = te.dstStore.Get(context.Background(), datastore.NewKey(syncCid.String())); err != nil {
 		t.Fatalf("data not in receiver store: %v", err)
 	}
 	syncncl()
@@ -247,8 +249,7 @@ func TestSyncFnHttp(t *testing.T) {
 	}
 	cancelWatcher()
 
-	err = assertLatestSyncEquals(te.sub, te.srcHost.ID(), newHead)
-	if err != nil {
+	if err = assertLatestSyncEquals(te.sub, te.srcHost.ID(), newHead); err != nil {
 		t.Fatal(err)
 	}
 }
