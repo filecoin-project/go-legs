@@ -167,8 +167,7 @@ func TestSyncFnHttp(t *testing.T) {
 	cids, _ := test.RandomCids(1)
 	ctx, syncncl := context.WithTimeout(context.Background(), time.Second)
 	defer syncncl()
-	_, err := te.sub.Sync(ctx, te.srcHost.ID(), cids[0], nil, te.pubAddr)
-	if err == nil {
+	if _, err := te.sub.Sync(ctx, te.srcHost.ID(), cids[0], nil, te.pubAddr); err == nil {
 		t.Fatal("expected error when no content to sync")
 	}
 	if !strings.Contains(err.Error(), "failed to traverse requested dag") {
