@@ -70,27 +70,20 @@ func TestAnnounceReplace(t *testing.T) {
 	t.Log("Sent announce for first CID", firstCid)
 	// This first announce should start the handler goroutine and clear the
 	// pending cid.
-	//
-	// Once the latestSyncMu cannot be acquired, that means that the handler is
-	// running (and blocked).
 	var i int
+	var pendingCid cid.Cid
 	for {
-		if !hnd.latestSyncMu.TryLock() {
+		time.Sleep(time.Millisecond)
+		hnd.qlock.Lock()
+		pendingCid = hnd.pendingCid
+		hnd.qlock.Unlock()
+		if pendingCid == cid.Undef {
 			break
 		}
-		hnd.latestSyncMu.Unlock()
-		time.Sleep(time.Millisecond)
 		i++
 		if i > 100 {
-			t.Fatal("handler did not start")
+			t.Fatal("timed out waiting for handler to clear pending cid")
 		}
-	}
-
-	hnd.qlock.Lock()
-	pendingCid := hnd.pendingCid
-	hnd.qlock.Unlock()
-	if pendingCid != cid.Undef {
-		t.Fatal("wrong pending cid, expected cid.Undef")
 	}
 
 	// Announce two more times.
