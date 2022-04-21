@@ -773,9 +773,11 @@ func (h *handler) handleAsync(ctx context.Context, nextCid cid.Cid, syncer Synce
 
 			// Update latest head seen.
 			log.Infow("Updating latest sync")
-			h.subscriber.latestSyncHander.SetLatestSync(h.peerID, nextCid)
-			h.subscriber.inEvents <- SyncFinished{Cid: nextCid, PeerID: h.peerID, SyncedCids: syncedCids}
+			h.subscriber.latestSyncHander.SetLatestSync(h.peerID, c)
+			h.subscriber.inEvents <- SyncFinished{Cid: c, PeerID: h.peerID, SyncedCids: syncedCids}
 		}()
+	} else {
+		log.Infow("Pending update replaced by new", "previous_cid", h.pendingCid, "new_cid", nextCid)
 	}
 	h.pendingCid = nextCid
 	h.pendingSyncer = syncer

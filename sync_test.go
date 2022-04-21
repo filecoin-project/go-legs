@@ -440,7 +440,6 @@ func newAnnounceTest(pub legs.Publisher, sub *legs.Subscriber, dstStore datastor
 		return err
 	}
 
-	// If failure. then latestSync should not be updated.
 	select {
 	case <-time.After(updateTimeout):
 		return errors.New("timed out waiting for sync to propagate")
