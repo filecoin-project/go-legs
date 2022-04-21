@@ -101,6 +101,7 @@ type Subscriber struct {
 	closeOnce sync.Once
 	// watchDone signals that the pubsub watch function exited.
 	watchDone chan struct{}
+	asyncWG   sync.WaitGroup
 
 	dtSync       *dtsync.Sync
 	httpSync     *httpsync.Sync
@@ -123,7 +124,8 @@ type SyncFinished struct {
 	Cid cid.Cid
 	// PeerID identifies the peer this SyncFinished event pertains to.
 	PeerID peer.ID
-	// A list of cids that this sync acquired. In order from latest to oldest. The latest cid will always be at the beginning.
+	// A list of cids that this sync acquired. In order from latest to
+	// oldest. The latest cid will always be at the beginning.
 	SyncedCids []cid.Cid
 }
 
@@ -146,9 +148,14 @@ type handler struct {
 	// it should grab this lock to insure no other process updates that state
 	// concurrently.
 	latestSyncMu sync.Mutex
-	msgChan      chan cid.Cid
 	// peerID is the ID of the peer this handler is responsible for.
 	peerID peer.ID
+	// pendingCid is a CID queued for async handling.
+	pendingCid cid.Cid
+	// pendingSyncer is a syncer queued for handling pendingCid.
+	pendingSyncer Syncer
+	// qlock protects the lendingCid and pendingSyncer.
+	qlock sync.Mutex
 }
 
 // wrapBlockHook wraps a possibly nil block hook func to allow a for dispatching
@@ -328,6 +335,7 @@ func (s *Subscriber) doClose() error {
 	// Cancel pubsub and Wait for pubsub watcher to exit.
 	s.psub.Cancel()
 	<-s.watchDone
+	s.asyncWG.Wait()
 
 	var err, errs error
 	if err = s.dtSync.Close(); err != nil {
@@ -604,7 +612,6 @@ func (s *Subscriber) getOrCreateHandler(peerID peer.ID, force bool) (*handler, e
 	log.Infow("Creating new handler for publisher", "peer", peerID)
 	hnd = &handler{
 		subscriber: s,
-		msgChan:    make(chan cid.Cid, 1),
 		peerID:     peerID,
 	}
 	s.handlers[peerID] = hnd
@@ -618,8 +625,6 @@ func (s *Subscriber) getOrCreateHandler(peerID peer.ID, force bool) (*handler, e
 // consulted to determine if the peer's messages are allowed.  If allowed, a
 // new handler is created.  Otherwise, the message is ignored.
 func (s *Subscriber) watch(ctx context.Context) {
-	watchWG := new(sync.WaitGroup)
-
 	for {
 		msg, err := s.psub.Next(ctx)
 		if err != nil {
@@ -638,16 +643,6 @@ func (s *Subscriber) watch(ctx context.Context) {
 			continue
 		}
 
-		hnd, err := s.getOrCreateHandler(srcPeer, false)
-		if err != nil {
-			if err == errSourceNotAllowed {
-				log.Infow("Ignored message", "reason", err, "peer", srcPeer)
-			} else {
-				log.Errorw("Cannot process message", "err", err)
-			}
-			continue
-		}
-
 		// Decode CID and originator addresses from message.
 		m := dtsync.Message{}
 		if err = m.UnmarshalCBOR(bytes.NewBuffer(msg.Data)); err != nil {
@@ -656,64 +651,120 @@ func (s *Subscriber) watch(ctx context.Context) {
 		}
 
 		// Add the message originator's address to the peerstore.  This allows
-		// a connection, back to that provider that sent the message, to
+		// a connection, back to that publisher that sent the message, to
 		// retrieve advertisements.
+		var addrs []multiaddr.Multiaddr
 		if len(m.Addrs) != 0 {
-			peerStore := s.host.Peerstore()
-			if peerStore != nil {
-				addrs, err := m.GetAddrs()
-				if err != nil {
-					log.Errorw("Could not decode pubsub message", "err", err)
-					continue
-				}
-				peerStore.AddAddrs(srcPeer, addrs, s.addrTTL)
+			addrs, err = m.GetAddrs()
+			if err != nil {
+				log.Errorw("Could not decode pubsub message", "err", err)
+				continue
 			}
 		}
 
-		if !s.limiterFor(srcPeer).Allow() {
-			log.Infow("Ignoring message because of rate limiting", "peer", srcPeer)
+		log.Infow("Handling pubsub announce", "peer", srcPeer)
 
-		} else {
-			log.Infow("Handling message", "peer", srcPeer)
+		err = s.Announce(ctx, m.Cid, srcPeer, addrs)
+		if err != nil {
+			log.Errorw("Cannot process message", "err", err)
+			continue
 		}
-		// Start new goroutine to handle this message instead of having
-		// persistent goroutine for each peer.
-		hnd.handleAsync(ctx, m.Cid, s.dss, watchWG)
 	}
 
-	watchWG.Wait()
 	close(s.watchDone)
 }
 
-// handleAsync starts a goroutine to process the latest message received over
-// pubsub.
-func (h *handler) handleAsync(ctx context.Context, nextCid cid.Cid, ss ipld.Node, watchWG *sync.WaitGroup) {
-	watchWG.Add(1)
-	// Remove any previous message and replace it with the most recent.  Only
-	// process the most recent message regardless of how many arrive while
-	// waiting for a previous sync.
-	select {
-	case prevCid := <-h.msgChan:
-		log.Infow("Pending update replaced by new", "previous_cid", prevCid, "new_cid", nextCid)
-	default:
+func (s *Subscriber) Announce(ctx context.Context, nextCid cid.Cid, peerID peer.ID, peerAddrs []multiaddr.Multiaddr) error {
+	hnd, err := s.getOrCreateHandler(peerID, false)
+	if err != nil {
+		if err == errSourceNotAllowed {
+			log.Infow("Ignored message", "reason", err, "peer", peerID)
+			return nil
+		}
+		return err
 	}
-	h.msgChan <- nextCid
 
-	go func() {
-		defer watchWG.Done()
-		// Grab the lock for the latest sync mutex so we only have one async handler
-		// updating the latestSync state
-		h.latestSyncMu.Lock()
-		defer h.latestSyncMu.Unlock()
+	limiter := s.limiterFor(peerID)
+	if !limiter.Allow() {
+		log.Infow("Ignoring message because of rate limiting", "peer", peerID)
+		return nil
+	}
 
-		select {
-		case <-ctx.Done():
-		case c := <-h.msgChan:
+	var httpAddr multiaddr.Multiaddr
+	if len(peerAddrs) == 0 {
+		// Check if we have an http url for this peer since we didn't get a peerAddr.
+		// Note that this gives a preference to use httpSync over dtsync if we have
+		// seen http address and we called sync with no explicit peerAddr.
+		possibleAddrs := s.httpPeerstore.Addrs(peerID)
+		if len(possibleAddrs) > 0 {
+			httpAddr = possibleAddrs[0]
+		}
+	} else {
+	httpFound:
+		for _, addr := range peerAddrs {
+			for _, p := range addr.Protocols() {
+				if p.Code == multiaddr.P_HTTP || p.Code == multiaddr.P_HTTPS {
+					httpAddr = addr
+					break httpFound
+				}
+			}
+		}
+	}
+
+	var syncer Syncer
+	if httpAddr != nil {
+		syncer, err = s.httpSync.NewSyncer(peerID, httpAddr, limiter)
+		if err != nil {
+			return fmt.Errorf("cannot create http sync handler: %w", err)
+		}
+	} else {
+		// Not an httpPeerAddr, so use the dtSync. We'll add it with a small TTL
+		// first, and extend it when we discover we can actually sync from it.
+		// In case the peerstore already has this address and the existing TTL is
+		// greater than this temp one, this is a no-op. In other words we never
+		// decrease the TTL here.
+		peerStore := s.host.Peerstore()
+		if peerStore != nil && len(peerAddrs) != 0 {
+			peerStore.AddAddrs(peerID, peerAddrs, s.addrTTL)
+		}
+		syncer = s.dtSync.NewSyncer(peerID, s.topicName, limiter)
+	}
+
+	// Start new goroutine to handle this message instead of having
+	// persistent goroutine for each peer.
+	hnd.handleAsync(ctx, nextCid, syncer)
+
+	return nil
+}
+
+// handleAsync starts a goroutine to process the latest announce message
+// received over pubsub or HTTP.  If there is already a goroutine handling a
+// sync, then there will be at most one more goroutine waiting to handle the
+// pending sync.
+func (h *handler) handleAsync(ctx context.Context, nextCid cid.Cid, syncer Syncer) {
+	h.qlock.Lock()
+	// If pendingSync is undef, then previous goroutine has already handled any
+	// pendingSync, so start a new go routine to handle the pending sync.  If
+	// pending sync is not undef, then there is an existing goroutine that has
+	// not yet handled the pending sync.
+	if h.pendingCid == cid.Undef {
+		h.subscriber.asyncWG.Add(1)
+		go func() {
+			h.latestSyncMu.Lock()
+			defer h.latestSyncMu.Unlock()
+			defer h.subscriber.asyncWG.Done()
+
+			h.qlock.Lock()
+			c := h.pendingCid
+			h.pendingCid = cid.Undef
+			syncer := h.pendingSyncer
+			h.pendingSyncer = nil
+			h.qlock.Unlock()
+
 			// Wait for this handler to become available.
 			// Note this only wraps the handler. This is to free up the handler in
 			// case someone else needs it while we wait to send on the events chan.
-			syncedCids, err := h.handle(ctx, c, ss, true, h.subscriber.dtSync.NewSyncer(h.peerID, h.subscriber.topicName, nil), nil)
-
+			syncedCids, err := h.handle(ctx, c, h.subscriber.dss, true, syncer, nil)
 			if err != nil {
 				// Log error for now.
 				log.Errorw("Cannot process message", "err", err, "peer", h.peerID)
@@ -722,16 +773,15 @@ func (h *handler) handleAsync(ctx context.Context, nextCid cid.Cid, ss ipld.Node
 
 			// Update latest head seen.
 			log.Infow("Updating latest sync")
-			h.subscriber.latestSyncHander.SetLatestSync(h.peerID, nextCid)
-
-			h.subscriber.inEvents <- SyncFinished{Cid: nextCid, PeerID: h.peerID, SyncedCids: syncedCids}
-		default:
-			// A previous goroutine, that had its message replaced, read the
-			// message.  Or, the message was removed and will be replaced by
-			// another message and goroutine.  Either way, nothing to do in
-			// this routine.
-		}
-	}()
+			h.subscriber.latestSyncHander.SetLatestSync(h.peerID, c)
+			h.subscriber.inEvents <- SyncFinished{Cid: c, PeerID: h.peerID, SyncedCids: syncedCids}
+		}()
+	} else {
+		log.Infow("Pending update replaced by new", "previous_cid", h.pendingCid, "new_cid", nextCid)
+	}
+	h.pendingCid = nextCid
+	h.pendingSyncer = syncer
+	h.qlock.Unlock()
 }
 
 // handle processes a message from the peer that the handler is responsible for.

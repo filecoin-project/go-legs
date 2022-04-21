@@ -16,6 +16,7 @@ import (
 	"github.com/ipld/go-ipld-prime"
 	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
 	"github.com/libp2p/go-libp2p-core/peer"
+	"github.com/multiformats/go-multiaddr"
 )
 
 func TestLatestSyncSuccess(t *testing.T) {
@@ -376,6 +377,85 @@ func TestLatestSyncFailure(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+}
+
+func TestAnnounce(t *testing.T) {
+	srcStore := dssync.MutexWrap(datastore.NewMapDatastore())
+	dstStore := dssync.MutexWrap(datastore.NewMapDatastore())
+	srcHost := test.MkTestHost()
+	srcLnkS := test.MkLinkSystem(srcStore)
+
+	dstHost := test.MkTestHost()
+
+	srcHost.Peerstore().AddAddrs(dstHost.ID(), dstHost.Addrs(), time.Hour)
+	dstHost.Peerstore().AddAddrs(srcHost.ID(), srcHost.Addrs(), time.Hour)
+	dstLnkS := test.MkLinkSystem(dstStore)
+
+	pub, err := dtsync.NewPublisher(srcHost, srcStore, srcLnkS, testTopic)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pub.Close()
+
+	sub, err := legs.NewSubscriber(dstHost, dstStore, dstLnkS, testTopic, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sub.Close()
+
+	watcher, cncl := sub.OnSyncFinished()
+	defer cncl()
+
+	// Store the whole chain in source node
+	chainLnks := test.MkChain(srcLnkS, true)
+
+	err = newAnnounceTest(pub, sub, dstStore, watcher, srcHost.ID(), srcHost.Addrs(), chainLnks[2], chainLnks[2].(cidlink.Link).Cid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = newAnnounceTest(pub, sub, dstStore, watcher, srcHost.ID(), srcHost.Addrs(), chainLnks[1], chainLnks[1].(cidlink.Link).Cid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = newAnnounceTest(pub, sub, dstStore, watcher, srcHost.ID(), srcHost.Addrs(), chainLnks[0], chainLnks[0].(cidlink.Link).Cid)
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func newAnnounceTest(pub legs.Publisher, sub *legs.Subscriber, dstStore datastore.Batching, watcher <-chan legs.SyncFinished, peerID peer.ID, peerAddrs []multiaddr.Multiaddr, lnk ipld.Link, expectedSync cid.Cid) error {
+	var err error
+	c := lnk.(cidlink.Link).Cid
+	if c != cid.Undef {
+		err = pub.SetRoot(context.Background(), c)
+		if err != nil {
+			return err
+		}
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	err = sub.Announce(ctx, c, peerID, peerAddrs)
+	if err != nil {
+		return err
+	}
+
+	select {
+	case <-time.After(updateTimeout):
+		return errors.New("timed out waiting for sync to propagate")
+	case downstream, open := <-watcher:
+		if !open {
+			return errors.New("event channle closed without receiving event")
+		}
+		if !downstream.Cid.Equals(c) {
+			return fmt.Errorf("sync returned unexpected cid %s, expected %s", downstream.Cid, c)
+		}
+		if _, err = dstStore.Get(context.Background(), datastore.NewKey(downstream.Cid.String())); err != nil {
+			return fmt.Errorf("data not in receiver store: %s", err)
+		}
+	}
+
+	return assertLatestSyncEquals(sub, peerID, expectedSync)
 }
 
 func newUpdateTest(pub legs.Publisher, sub *legs.Subscriber, dstStore datastore.Batching, watcher <-chan legs.SyncFinished, peerID peer.ID, lnk ipld.Link, withFailure bool, expectedSync cid.Cid) error {
