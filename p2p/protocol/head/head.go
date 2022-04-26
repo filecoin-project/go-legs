@@ -38,7 +38,7 @@ func NewPublisher() *Publisher {
 }
 
 func deriveProtocolID(topic string) protocol.ID {
-	return protocol.ID("/legs/head/" + topic + "/0.0.1")
+	return protocol.ID(path.Join("/legs/head", topic, "0.0.1"))
 }
 
 func (p *Publisher) Serve(host host.Host, topic string) error {
