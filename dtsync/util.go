@@ -17,24 +17,21 @@ import (
 	gsnet "github.com/ipfs/go-graphsync/network"
 	"github.com/ipld/go-ipld-prime"
 	"github.com/libp2p/go-libp2p-core/host"
+	"github.com/libp2p/go-libp2p-core/peer"
 )
 
 type dtCloseFunc func() error
 
 // configureDataTransferForLegs configures an existing data transfer instance to serve go-legs requests
 // from given linksystem (publisher only)
-func configureDataTransferForLegs(ctx context.Context, dtManager dt.Manager, lsys ipld.LinkSystem) error {
+func configureDataTransferForLegs(ctx context.Context, dtManager dt.Manager, lsys ipld.LinkSystem, allowPeer func(peer.ID) bool) error {
 	v := &Voucher{}
-	lvr := &VoucherResult{}
-	val := &legsValidator{}
+	err := registerVoucher(dtManager, v, allowPeer)
+	if err != nil {
+		return err
+	}
 	lsc := legStorageConfigration{lsys}
-	if err := dtManager.RegisterVoucherType(v, val); err != nil {
-		return fmt.Errorf("failed to register legs voucher validator type: %w", err)
-	}
-	if err := dtManager.RegisterVoucherResultType(lvr); err != nil {
-		return fmt.Errorf("failed to register legs voucher result type: %w", err)
-	}
-	if err := dtManager.RegisterTransportConfigurer(v, lsc.configureTransport); err != nil {
+	if err = dtManager.RegisterTransportConfigurer(v, lsc.configureTransport); err != nil {
 		return fmt.Errorf("failed to register datatransfer TransportConfigurer: %w", err)
 	}
 	return nil
@@ -59,22 +56,22 @@ func (lsc legStorageConfigration) configureTransport(chid dt.ChannelID, voucher 
 	}
 }
 
-func registerVoucher(dtManager dt.Manager) error {
-	v := &Voucher{}
-	lvr := &VoucherResult{}
-	val := &legsValidator{}
+func registerVoucher(dtManager dt.Manager, v *Voucher, allowPeer func(peer.ID) bool) error {
+	val := &legsValidator{
+		allowPeer: allowPeer,
+	}
 	err := dtManager.RegisterVoucherType(v, val)
 	if err != nil {
 		return fmt.Errorf("failed to register legs validator voucher type: %w", err)
 	}
+	lvr := &VoucherResult{}
 	if err = dtManager.RegisterVoucherResultType(lvr); err != nil {
-		return fmt.Errorf("failed to register legs voucher result: %w", err)
+		return fmt.Errorf("failed to register legs voucher result type: %w", err)
 	}
-
 	return nil
 }
 
-func makeDataTransfer(host host.Host, ds datastore.Batching, lsys ipld.LinkSystem) (dt.Manager, graphsync.GraphExchange, dtCloseFunc, error) {
+func makeDataTransfer(host host.Host, ds datastore.Batching, lsys ipld.LinkSystem, allowPeer func(peer.ID) bool) (dt.Manager, graphsync.GraphExchange, dtCloseFunc, error) {
 	gsNet := gsnet.NewFromLibp2pHost(host)
 	ctx, cancel := context.WithCancel(context.Background())
 	gs := gsimpl.New(ctx, gsNet, lsys)
@@ -101,7 +98,7 @@ func makeDataTransfer(host host.Host, ds datastore.Batching, lsys ipld.LinkSyste
 		return nil, nil, nil, fmt.Errorf("failed to instantiate datatransfer: %w", err)
 	}
 
-	err = registerVoucher(dtManager)
+	err = registerVoucher(dtManager, &Voucher{}, allowPeer)
 	if err != nil {
 		cancel()
 		return nil, nil, nil, fmt.Errorf("failed to register voucher: %w", err)

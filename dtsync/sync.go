@@ -64,7 +64,7 @@ func (s *Sync) wrapRateLimiterFor(limiterFor rateLimiterFor) rateLimiterFor {
 // NewSyncWithDT creates a new Sync with a datatransfer.Manager provided by the
 // caller.
 func NewSyncWithDT(host host.Host, dtManager dt.Manager, gs graphsync.GraphExchange, blockHook func(peer.ID, cid.Cid), limiterFor rateLimiterFor) (*Sync, error) {
-	registerVoucher(dtManager)
+	registerVoucher(dtManager, &Voucher{}, nil)
 	s := &Sync{
 		host:                   host,
 		dtManager:              dtManager,
@@ -85,7 +85,7 @@ type rateLimiterFor = func(publisher peer.ID) *rate.Limiter
 
 // NewSync creates a new Sync with its own datatransfer.Manager.
 func NewSync(host host.Host, ds datastore.Batching, lsys ipld.LinkSystem, blockHook func(peer.ID, cid.Cid), limiterFor rateLimiterFor) (*Sync, error) {
-	dtManager, gs, dtClose, err := makeDataTransfer(host, ds, lsys)
+	dtManager, gs, dtClose, err := makeDataTransfer(host, ds, lsys, nil)
 	if err != nil {
 		return nil, err
 	}

@@ -132,6 +132,79 @@ func TestAllowPeerAllows(t *testing.T) {
 	}
 }
 
+func TestPublisherRejectsPeer(t *testing.T) {
+	// Init legs publisher and subscriber
+	srcStore := dssync.MutexWrap(datastore.NewMapDatastore())
+	dstStore := dssync.MutexWrap(datastore.NewMapDatastore())
+
+	srcHost := test.MkTestHost()
+	dstHost := test.MkTestHost()
+
+	topics := test.WaitForMeshWithMessage(t, testTopic, srcHost, dstHost)
+
+	srcLnkS := test.MkLinkSystem(srcStore)
+
+	blockID := dstHost.ID()
+	allowPeer := func(peerID peer.ID) bool {
+		return peerID != blockID
+	}
+
+	pub, err := dtsync.NewPublisher(srcHost, srcStore, srcLnkS, testTopic, dtsync.Topic(topics[0]), dtsync.AllowPeer(allowPeer))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pub.Close()
+
+	srcHost.Peerstore().AddAddrs(dstHost.ID(), dstHost.Addrs(), time.Hour)
+	dstHost.Peerstore().AddAddrs(srcHost.ID(), srcHost.Addrs(), time.Hour)
+	dstLnkS := test.MkLinkSystem(dstStore)
+
+	sub, err := legs.NewSubscriber(dstHost, dstStore, dstLnkS, testTopic, nil, legs.Topic(topics[1]))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sub.Close()
+
+	if err := srcHost.Connect(context.Background(), dstHost.Peerstore().PeerInfo(dstHost.ID())); err != nil {
+		t.Fatal(err)
+	}
+
+	watcher, cncl := sub.OnSyncFinished()
+	defer cncl()
+
+	c := mkLnk(t, srcStore)
+
+	// Update root with item
+	err = pub.UpdateRoot(context.Background(), c)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	select {
+	case <-time.After(updateTimeout):
+		t.Log("publisher blocked", blockID)
+	case <-watcher:
+		t.Fatal("sync should not have happened with blocker ID")
+	}
+
+	blockID = peer.ID("")
+
+	c = mkLnk(t, srcStore)
+
+	// Update root with item
+	err = pub.UpdateRoot(context.Background(), c)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	select {
+	case <-time.After(updateTimeout):
+		t.Fatal("timed out waiting for SyncFinished")
+	case <-watcher:
+		t.Log("synced with allowed ID")
+	}
+}
+
 func mkLnk(t *testing.T, srcStore datastore.Batching) cid.Cid {
 	// Update root with item
 	np := basicnode.Prototype__Any{}

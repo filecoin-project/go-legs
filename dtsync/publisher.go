@@ -54,7 +54,7 @@ func NewPublisher(host host.Host, ds datastore.Batching, lsys ipld.LinkSystem, t
 		}
 	}
 
-	dtManager, _, dtClose, err := makeDataTransfer(host, ds, lsys)
+	dtManager, _, dtClose, err := makeDataTransfer(host, ds, lsys, cfg.allowPeer)
 	if err != nil {
 		if cancel != nil {
 			cancel()
@@ -112,7 +112,7 @@ func NewPublisherFromExisting(dtManager dt.Manager, host host.Host, topic string
 		}
 	}
 
-	err = configureDataTransferForLegs(context.Background(), dtManager, lsys)
+	err = configureDataTransferForLegs(context.Background(), dtManager, lsys, cfg.allowPeer)
 	if err != nil {
 		if cancel != nil {
 			cancel()
