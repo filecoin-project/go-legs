@@ -3,6 +3,7 @@ package dtsync
 import (
 	"fmt"
 
+	"github.com/libp2p/go-libp2p-core/peer"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 )
 
@@ -10,6 +11,7 @@ import (
 type config struct {
 	extraData []byte
 	topic     *pubsub.Topic
+	allowPeer func(peer.ID) bool
 }
 
 type Option func(*config) error
@@ -38,6 +40,15 @@ func WithExtraData(data []byte) Option {
 func Topic(topic *pubsub.Topic) Option {
 	return func(c *config) error {
 		c.topic = topic
+		return nil
+	}
+}
+
+// AllowPeer sets the function that determines whether to allow or reject
+// graphsync sessions from a peer.
+func AllowPeer(allowPeer func(peer.ID) bool) Option {
+	return func(c *config) error {
+		c.allowPeer = allowPeer
 		return nil
 	}
 }

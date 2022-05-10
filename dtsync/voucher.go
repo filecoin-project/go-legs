@@ -47,6 +47,7 @@ func (v *VoucherResult) Type() datatransfer.TypeIdentifier {
 type legsValidator struct {
 	//ctx context.Context
 	//ValidationsReceived chan receivedValidation
+	allowPeer func(peer.ID) bool
 }
 
 func (vl *legsValidator) ValidatePush(
@@ -64,7 +65,7 @@ func (vl *legsValidator) ValidatePush(
 func (vl *legsValidator) ValidatePull(
 	_ bool,
 	_ datatransfer.ChannelID,
-	_ peer.ID,
+	peerID peer.ID,
 	voucher datatransfer.Voucher,
 	_ cid.Cid,
 	_ ipld.Node) (datatransfer.VoucherResult, error) {
@@ -72,6 +73,10 @@ func (vl *legsValidator) ValidatePull(
 	v := voucher.(*Voucher)
 	if v.Head == nil {
 		return nil, errors.New("invalid")
+	}
+
+	if vl.allowPeer != nil && !vl.allowPeer(peerID) {
+		return nil, errors.New("peer not allowed")
 	}
 
 	return &VoucherResult{}, nil
