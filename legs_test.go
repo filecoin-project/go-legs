@@ -184,7 +184,7 @@ func TestPublisherRejectsPeer(t *testing.T) {
 	case <-time.After(updateTimeout):
 		t.Log("publisher blocked", blockID)
 	case <-watcher:
-		t.Fatal("sync should not have happened with blocker ID")
+		t.Fatal("sync should not have happened with blocked ID")
 	}
 
 	blockID = peer.ID("")
