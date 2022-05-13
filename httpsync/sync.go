@@ -165,12 +165,21 @@ func (s *Syncer) walkFetch(ctx context.Context, rootCid cid.Cid, sel selector.Se
 			return r, nil
 		}
 
-		// Did not find block read opener, so fetch block via HTTP.
+		// Did not find block read opener, so fetch block via HTTP with re-try in case rate limit is
+		// reached.
 		c := l.(cidlink.Link).Cid
-		if err := s.fetchBlock(ctx, c); err != nil {
-			log.Errorw("Failed to fetch block", "err", err, "cid", c)
-			return nil, err
+		for {
+			if err := s.fetchBlock(ctx, c); err != nil {
+				log.Errorw("Failed to fetch block", "err", err, "cid", c)
+				if _, ok := err.(rateLimitErr); ok {
+					//TODO: implement backoff to avoid potentially exhausting the HTTP source.
+					continue
+				}
+				return nil, err
+			}
+			break
 		}
+
 		return s.sync.lsys.StorageReadOpener(lc, l)
 	}
 
@@ -193,13 +202,27 @@ func (s *Syncer) walkFetch(ctx context.Context, rootCid cid.Cid, sel selector.Se
 	})
 }
 
+type rateLimitErr struct {
+	resource string
+	source   peer.ID
+	rootURL  url.URL
+}
+
+func (r rateLimitErr) Error() string {
+	return fmt.Sprintf("rate limit reached when fetching %s from %s at %s", r.resource, r.source, r.rootURL.String())
+}
+
 func (s *Syncer) fetch(ctx context.Context, rsrc string, cb func(io.Reader) error) error {
 	localURL := s.rootURL
 	localURL.Path = path.Join(s.rootURL.Path, rsrc)
 
 	err := s.limiter.Wait(ctx)
 	if err != nil {
-		return err
+		return &rateLimitErr{
+			resource: rsrc,
+			source:   s.peerID,
+			rootURL:  s.rootURL,
+		}
 	}
 
 	req, err := http.NewRequestWithContext(ctx, "GET", localURL.String(), nil)
