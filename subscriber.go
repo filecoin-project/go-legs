@@ -45,10 +45,8 @@ var errSourceNotAllowed = errors.New("message source not allowed")
 // AllowPeerFunc is the signature of a function given to Subscriber that
 // determines whether to allow or reject messages originating from a peer
 // passed into the function.  Returning true or false indicates that messages
-// from that peer are allowed rejected, respectively.  Returning an error
-// indicates that there was a problem evaluating the function, and results in
-// the messages being rejected.
-type AllowPeerFunc func(peer.ID) (bool, error)
+// from that peer are allowed rejected, respectively.
+type AllowPeerFunc func(peer.ID) bool
 
 // BlockHookFunc is the signature of a function that is called when a received.
 type BlockHookFunc func(peer.ID, cid.Cid)
@@ -594,11 +592,7 @@ func (s *Subscriber) getOrCreateHandler(peerID peer.ID, force bool) (*handler, e
 
 	// Check callback, if needed, to see if peer ID allowed.
 	if s.allowPeer != nil && !force {
-		allow, err := s.allowPeer(peerID)
-		if err != nil {
-			return nil, fmt.Errorf("error checking if peer allowed: %w", err)
-		}
-		if !allow {
+		if !s.allowPeer(peerID) {
 			return nil, errSourceNotAllowed
 		}
 	}
@@ -678,7 +672,7 @@ func (s *Subscriber) Announce(ctx context.Context, nextCid cid.Cid, peerID peer.
 	hnd, err := s.getOrCreateHandler(peerID, false)
 	if err != nil {
 		if err == errSourceNotAllowed {
-			log.Infow("Ignored message", "reason", err, "peer", peerID)
+			log.Infow("Ignored announcement", "reason", err, "peer", peerID)
 			return nil
 		}
 		return err
@@ -686,7 +680,7 @@ func (s *Subscriber) Announce(ctx context.Context, nextCid cid.Cid, peerID peer.
 
 	limiter := s.limiterFor(peerID)
 	if !limiter.Allow() {
-		log.Infow("Ignoring message because of rate limiting", "peer", peerID)
+		log.Infow("Ignoring announcement because of rate limiting", "peer", peerID)
 		return nil
 	}
 

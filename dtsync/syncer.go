@@ -3,6 +3,7 @@ package dtsync
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/filecoin-project/go-legs/p2p/protocol/head"
 	"github.com/ipfs/go-cid"
@@ -60,12 +61,19 @@ func (s *Syncer) Sync(ctx context.Context, nextCid cid.Cid, sel ipld.Node) error
 		if err, ok := err.(rateLimitErr); ok {
 			log.Infow("hit rate limit. Waiting and will retry later", "cid", nextCid, "source_peer", s.peerID)
 
-			// Wait until we've fully refilled our rate limit bucket since this is a
-			// relatively heavy operation (essentially restarting the sync).
-			waitErr := s.rateLimiter.WaitN(ctx, s.rateLimiter.Burst())
-			if waitErr != nil {
-				return err
+			// Wait until the rate limit bucket is fully refilled since this is
+			// a relatively heavy operation (essentially restarting the sync).
+			// Note, cannot use s.rateLimiter.WaitN here because that waits,
+			// but also consumes n tokens.
+			waitTime := time.Second * time.Duration(s.rateLimiter.Burst()) / time.Duration(s.rateLimiter.Limit())
+			select {
+			case <-time.After(waitTime):
+			case <-ctx.Done():
+				return ctx.Err()
 			}
+			// Need to consume one token to make up for the previous Allow that
+			// did not consume a token and triggered casued rate limit.
+			s.rateLimiter.Allow()
 
 			// Set the nextCid to be the cid that we stopped at becasuse of rate
 			// limitting. This lets us pick up where we left off
