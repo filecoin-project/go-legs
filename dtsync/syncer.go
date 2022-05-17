@@ -59,20 +59,27 @@ func (s *Syncer) Sync(ctx context.Context, nextCid cid.Cid, sel ipld.Node) error
 		// Wait for transfer finished signal.
 		err = <-syncDone
 		if err, ok := err.(rateLimitErr); ok {
-			log.Infow("hit rate limit. Waiting and will retry later", "cid", nextCid, "source_peer", s.peerID)
-
 			// Wait until the rate limit bucket is fully refilled since this is
 			// a relatively heavy operation (essentially restarting the sync).
 			// Note, cannot use s.rateLimiter.WaitN here because that waits,
 			// but also consumes n tokens.
-			waitTime := time.Second * time.Duration(s.rateLimiter.Burst()) / time.Duration(s.rateLimiter.Limit())
+			waitMsec := 1000.0 * float64(s.rateLimiter.Burst()) / float64(s.rateLimiter.Limit())
+			var waitTime time.Duration
+			waitTime = time.Duration(waitMsec) * time.Millisecond
+			if waitTime == 0 {
+				waitTime = time.Duration(1000*waitMsec) * time.Microsecond
+			}
+			log.Infow("Hit rate limit. Waiting and will retry later", "cid", nextCid, "source_peer", s.peerID, "delay", waitTime.String())
 			select {
 			case <-time.After(waitTime):
 			case <-ctx.Done():
 				return ctx.Err()
 			}
-			// Need to consume one token to make up for the previous Allow that
-			// did not consume a token and triggered casued rate limit.
+			// Need to consume one token, since the stopped to make up for the
+			// previous Allow that did not consume a token and triggered rate
+			// limiting, even though the block was still downloaded. At next
+			// restart the stopped at block will be local and will not count
+			// toward rate limiting.
 			s.rateLimiter.Allow()
 
 			// Set the nextCid to be the cid that we stopped at becasuse of rate
