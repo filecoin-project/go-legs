@@ -70,7 +70,7 @@ func TestScopedBlockHook(t *testing.T) {
 			subHost := test.MkTestHost()
 
 			var calledGeneralBlockHookTimes int64
-			sub, err := legs.NewSubscriber(subHost, subDS, subLsys, testTopic, nil, legs.BlockHook(func(i peer.ID, c cid.Cid) {
+			sub, err := legs.NewSubscriber(subHost, subDS, subLsys, testTopic, nil, legs.BlockHook(func(i peer.ID, c cid.Cid, _ legs.SegmentSyncActions) {
 				atomic.AddInt64(&calledGeneralBlockHookTimes, 1)
 			}))
 			if err != nil {
@@ -78,15 +78,15 @@ func TestScopedBlockHook(t *testing.T) {
 			}
 
 			var calledScopedBlockHookTimes int64
-			_, err = sub.Sync(context.Background(), pubHost.ID(), cid.Undef, nil, pubHost.Addrs()[0], legs.ScopedBlockHook(func(i peer.ID, c cid.Cid) {
+			_, err = sub.Sync(context.Background(), pubHost.ID(), cid.Undef, nil, pubHost.Addrs()[0], legs.ScopedBlockHook(func(i peer.ID, c cid.Cid, _ legs.SegmentSyncActions) {
 				atomic.AddInt64(&calledScopedBlockHookTimes, 1)
 			}))
 			if err != nil {
 				t.Fatal(err)
 			}
 
-			if atomic.LoadInt64(&calledGeneralBlockHookTimes) != int64(ll.Length) {
-				t.Fatalf("Should have called general block hook")
+			if atomic.LoadInt64(&calledGeneralBlockHookTimes) != 0 {
+				t.Fatalf("General block hook should not have been called when scoped block hook is set")
 			}
 			if atomic.LoadInt64(&calledScopedBlockHookTimes) != int64(ll.Length) {
 				t.Fatalf("Didn't call scoped block hook enough times")
@@ -97,14 +97,17 @@ func TestScopedBlockHook(t *testing.T) {
 				Seed:   ll.Seed + 1,
 			}.Build(t, lsys)
 
-			pub.UpdateRoot(context.Background(), anotherLL.(cidlink.Link).Cid)
+			err = pub.UpdateRoot(context.Background(), anotherLL.(cidlink.Link).Cid)
+			if err != nil {
+				t.Fatal(err)
+			}
 			_, err = sub.Sync(context.Background(), pubHost.ID(), cid.Undef, nil, pubHost.Addrs()[0])
 			if err != nil {
 				t.Fatal(err)
 			}
 
-			if atomic.LoadInt64(&calledGeneralBlockHookTimes) != int64(ll.Length)*2 {
-				t.Fatalf("Didn't call general block hook enough times")
+			if atomic.LoadInt64(&calledGeneralBlockHookTimes) != int64(ll.Length) {
+				t.Fatalf("General hook should have been called only in secod sync")
 			}
 
 		})
@@ -211,7 +214,7 @@ func TestConcurrentSync(t *testing.T) {
 			subHost := test.MkTestHost()
 
 			var calledTimes int64
-			sub, err := legs.NewSubscriber(subHost, subDS, subLsys, testTopic, nil, legs.BlockHook(func(i peer.ID, c cid.Cid) {
+			sub, err := legs.NewSubscriber(subHost, subDS, subLsys, testTopic, nil, legs.BlockHook(func(i peer.ID, c cid.Cid, _ legs.SegmentSyncActions) {
 				atomic.AddInt64(&calledTimes, 1)
 			}))
 			if err != nil {
@@ -266,7 +269,7 @@ func TestSync(t *testing.T) {
 
 			calledTimes := 0
 			pubAddr, pub, sub := lpsb.Build(t, testTopic, pubSys, subSys,
-				[]legs.Option{legs.BlockHook(func(i peer.ID, c cid.Cid) {
+				[]legs.Option{legs.BlockHook(func(i peer.ID, c cid.Cid, _ legs.SegmentSyncActions) {
 					calledTimes++
 				})},
 			)
@@ -335,7 +338,7 @@ func TestSyncWithHydratedDataStore(t *testing.T) {
 			calledTimes := 0
 			var calledWith []cid.Cid
 			pubAddr, pub, sub := lpsb.Build(t, testTopic, pubSys, subSys,
-				[]legs.Option{legs.BlockHook(func(i peer.ID, c cid.Cid) {
+				[]legs.Option{legs.BlockHook(func(i peer.ID, c cid.Cid, _ legs.SegmentSyncActions) {
 					calledWith = append(calledWith, c)
 					calledTimes++
 				})},
@@ -403,7 +406,7 @@ func TestRoundTripSimple(t *testing.T) {
 
 	select {
 	case <-time.After(updateTimeout):
-		t.Fatal("timed out waiting for sync to propogate")
+		t.Fatal("timed out waiting for sync to propagate")
 	case downstream := <-watcher:
 		if !downstream.Cid.Equals(lnk.(cidlink.Link).Cid) {
 			t.Fatalf("sync'd cid unexpected %s vs %s", downstream.Cid, lnk)
@@ -444,7 +447,7 @@ func TestRoundTrip(t *testing.T) {
 	defer pub2.Close()
 
 	blocksSeenByHook := make(map[cid.Cid]struct{})
-	blockHook := func(p peer.ID, c cid.Cid) {
+	blockHook := func(p peer.ID, c cid.Cid, _ legs.SegmentSyncActions) {
 		blocksSeenByHook[c] = struct{}{}
 		t.Log("block hook got", c, "from", p)
 	}
@@ -569,7 +572,7 @@ func TestRateLimiter(t *testing.T) {
 			pubAddr, pub, sub := legsPubSubBuilder{
 				IsHttp: tc.isHttp,
 			}.Build(t, testTopic, pubHostSys, subHostSys, []legs.Option{
-				legs.BlockHook(func(i peer.ID, c cid.Cid) {
+				legs.BlockHook(func(i peer.ID, c cid.Cid, _ legs.SegmentSyncActions) {
 					atomic.AddInt64(&calledTimes, 1)
 				}),
 				legs.RateLimiter(func(publisher peer.ID) *rate.Limiter {

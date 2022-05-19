@@ -33,8 +33,9 @@ var log = logging.Logger("go-legs")
 // pubsub messages will remain in the peerstore.  This is twice the default
 // provider poll interval.
 const (
-	defaultAddrTTL = 48 * time.Hour
-	tempAddrTTL    = 24 * time.Hour // must be long enough for ad chain to sync
+	defaultAddrTTL       = 48 * time.Hour
+	tempAddrTTL          = 24 * time.Hour // must be long enough for ad chain to sync
+	defaultSegDepthLimit = -1             // Segmented sync disabled.
 )
 
 // errSourceNotAllowed is the error returned when a message source peer's
@@ -49,7 +50,7 @@ var errSourceNotAllowed = errors.New("message source not allowed")
 type AllowPeerFunc func(peer.ID) bool
 
 // BlockHookFunc is the signature of a function that is called when a received.
-type BlockHookFunc func(peer.ID, cid.Cid)
+type BlockHookFunc func(peer.ID, cid.Cid, SegmentSyncActions)
 
 // Subscriber creates a single pubsub subscriber that receives messages from a
 // gossip pubsub topic, and creates a stateful message handler for each message
@@ -77,10 +78,11 @@ type Subscriber struct {
 	handlers      map[peer.ID]*handler
 	handlersMutex sync.Mutex
 
-	// A map of block hooks to call for a specific peer id, instead of the general
-	// block hook func.
-	scopedBlockHook      map[peer.ID]BlockHookFunc
+	// A map of block hooks to call for a specific peer id if the generalBlockHook is overridden
+	// within a sync via ScopedBlockHook sync option.
+	scopedBlockHook      map[peer.ID]func(peer.ID, cid.Cid)
 	scopedBlockHookMutex *sync.RWMutex
+	generalBlockHook     BlockHookFunc
 
 	// inEvents is used to send a SyncFinished from a peer handler to the
 	// distributeEvents goroutine.
@@ -111,6 +113,8 @@ type Subscriber struct {
 
 	// limiterFor defines the rate limits for each publisher
 	limiterFor RateLimiterFor
+
+	segDepthLimit int64
 }
 
 // SyncFinished notifies an OnSyncFinished reader that a specified peer
@@ -125,15 +129,6 @@ type SyncFinished struct {
 	// A list of cids that this sync acquired. In order from latest to
 	// oldest. The latest cid will always be at the beginning.
 	SyncedCids []cid.Cid
-}
-
-func WrapBlockHookWithSyncedCidTracker(cidsSeenSoFar *[]cid.Cid, blockHook BlockHookFunc) BlockHookFunc {
-	return func(p peer.ID, c cid.Cid) {
-		*cidsSeenSoFar = append(*cidsSeenSoFar, c)
-		if blockHook != nil {
-			blockHook(p, c)
-		}
-	}
 }
 
 // handler holds state that is specific to a peer
@@ -158,9 +153,9 @@ type handler struct {
 
 // wrapBlockHook wraps a possibly nil block hook func to allow a for dispatching
 // to a blockhook func that is scoped within a .Sync call.
-func wrapBlockHook(generalBlockHook BlockHookFunc) (*sync.RWMutex, map[peer.ID]BlockHookFunc, BlockHookFunc) {
+func wrapBlockHook() (*sync.RWMutex, map[peer.ID]func(peer.ID, cid.Cid), func(peer.ID, cid.Cid)) {
 	var scopedBlockHookMutex sync.RWMutex
-	scopedBlockHook := make(map[peer.ID]BlockHookFunc)
+	scopedBlockHook := make(map[peer.ID]func(peer.ID, cid.Cid))
 	return &scopedBlockHookMutex, scopedBlockHook, func(peerID peer.ID, cid cid.Cid) {
 		scopedBlockHookMutex.RLock()
 		f, ok := scopedBlockHook[peerID]
@@ -168,16 +163,14 @@ func wrapBlockHook(generalBlockHook BlockHookFunc) (*sync.RWMutex, map[peer.ID]B
 		if ok {
 			f(peerID, cid)
 		}
-		if generalBlockHook != nil {
-			generalBlockHook(peerID, cid)
-		}
 	}
 }
 
 // NewSubscriber creates a new Subscriber that process pubsub messages.
 func NewSubscriber(host host.Host, ds datastore.Batching, lsys ipld.LinkSystem, topic string, dss ipld.Node, options ...Option) (*Subscriber, error) {
 	cfg := config{
-		addrTTL: defaultAddrTTL,
+		addrTTL:       defaultAddrTTL,
+		segDepthLimit: defaultSegDepthLimit,
 	}
 	err := cfg.apply(options)
 	if err != nil {
@@ -201,7 +194,7 @@ func NewSubscriber(host host.Host, ds datastore.Batching, lsys ipld.LinkSystem, 
 		return nil, err
 	}
 
-	scopedBlockHookMutex, scopedBlockHook, blockHook := wrapBlockHook(cfg.blockHook)
+	scopedBlockHookMutex, scopedBlockHook, blockHook := wrapBlockHook()
 
 	if cfg.rateLimiterFor == nil {
 		// Allows all events. No rate limit.
@@ -261,10 +254,13 @@ func NewSubscriber(host host.Host, ds datastore.Batching, lsys ipld.LinkSystem, 
 
 		scopedBlockHookMutex: scopedBlockHookMutex,
 		scopedBlockHook:      scopedBlockHook,
+		generalBlockHook:     cfg.blockHook,
 
 		latestSyncHander: latestSyncHandler,
 
 		limiterFor: cfg.rateLimiterFor,
+
+		segDepthLimit: cfg.segDepthLimit,
 	}
 
 	// Start watcher to read pubsub messages.
@@ -427,7 +423,11 @@ func (s *Subscriber) OnSyncFinished() (<-chan SyncFinished, context.CancelFunc) 
 //
 // See: ExploreRecursiveWithStopNode.
 func (s *Subscriber) Sync(ctx context.Context, peerID peer.ID, nextCid cid.Cid, sel ipld.Node, peerAddr multiaddr.Multiaddr, opts ...SyncOption) (cid.Cid, error) {
-	cfg := &syncCfg{}
+	cfg := &syncCfg{
+		// Fall back on general block hook if scoped block hook is not specified.
+		scopedBlockHook: s.generalBlockHook,
+		segDepthLimit:   s.segDepthLimit,
+	}
 	for _, opt := range opts {
 		opt(cfg)
 	}
@@ -537,7 +537,7 @@ func (s *Subscriber) Sync(ctx context.Context, peerID peer.ID, nextCid cid.Cid, 
 		defer hnd.latestSyncMu.Unlock()
 	}
 
-	syncedCids, err := hnd.handle(ctx, nextCid, sel, wrapSel, syncer, cfg.scopedBlockHook)
+	syncedCids, err := hnd.handle(ctx, nextCid, sel, wrapSel, syncer, cfg.scopedBlockHook, cfg.segDepthLimit)
 	if err != nil {
 		return cid.Undef, fmt.Errorf("sync handler failed: %w", err)
 	}
@@ -758,7 +758,7 @@ func (h *handler) handleAsync(ctx context.Context, nextCid cid.Cid, syncer Synce
 			// Wait for this handler to become available.
 			// Note this only wraps the handler. This is to free up the handler in
 			// case someone else needs it while we wait to send on the events chan.
-			syncedCids, err := h.handle(ctx, c, h.subscriber.dss, true, syncer, nil)
+			syncedCids, err := h.handle(ctx, c, h.subscriber.dss, true, syncer, h.subscriber.generalBlockHook, h.subscriber.segDepthLimit)
 			if err != nil {
 				// Log error for now.
 				log.Errorw("Cannot process message", "err", err, "peer", h.peerID)
@@ -778,15 +778,74 @@ func (h *handler) handleAsync(ctx context.Context, nextCid cid.Cid, syncer Synce
 	h.qlock.Unlock()
 }
 
+var _ SegmentSyncActions = (*segmentedSync)(nil)
+
+type (
+	// SegmentSyncActions allows the user to control the flow of segmented sync by either choosing
+	// which CID should be synced in the next sync cycle or setting the error that should mark the
+	// sync as failed.
+	SegmentSyncActions interface {
+		// SetNextSyncCid sets the cid that will be synced in the next segmented sync. Note that
+		// the last call to this function during a segmented sync cycle dictates which CID will be
+		// synced in the next cycle.
+		//
+		// At least one call to this function must be made for the segmented sync cycles to continue.
+		// Because, otherwise the CID that should be used in the next segmented sync cycle cannot
+		// be known.
+		//
+		// If no calls are made to this function or next CID is set to cid.Undef, the sync will
+		// terminate and any CIDs that are synced so far will be included in a SyncFinished event.
+		SetNextSyncCid(cid.Cid)
+
+		// FailSync fails the sync and returns the given error as soon as the current segment sync
+		// finishes. Note that the last call to this function during a segmented sync cycle takes
+		// dictates the error value.
+		// Passing nil as error will cancel sync failure.
+		FailSync(error)
+	}
+	// SegmentBlockHookFunc is called for each synced block, similarly to BlockHookFunc. Except that
+	// it provides SegmentSyncActions to the hook allowing the user to contl the flow of segmented
+	// sync by determining which CID should be used in the next segmented sync cycle by decoding the
+	// synced block.
+	// SegmentSyncActions also allows the user to signal any errors that may occur during the hook
+	// execution to terminate the sync and mark it as failed.
+	SegmentBlockHookFunc func(peer.ID, cid.Cid, SegmentSyncActions)
+	segmentedSync        struct {
+		nextSyncCid *cid.Cid
+		err         error
+	}
+)
+
+func (ss *segmentedSync) SetNextSyncCid(c cid.Cid) {
+	ss.nextSyncCid = &c
+}
+
+func (ss *segmentedSync) FailSync(err error) {
+	ss.err = err
+}
+
+func (ss *segmentedSync) reset() {
+	ss.nextSyncCid = nil
+	ss.err = nil
+}
+
 // handle processes a message from the peer that the handler is responsible for.
-func (h *handler) handle(ctx context.Context, nextCid cid.Cid, sel ipld.Node, wrapSel bool, syncer Syncer, hook BlockHookFunc) ([]cid.Cid, error) {
+func (h *handler) handle(ctx context.Context, nextCid cid.Cid, sel ipld.Node, wrapSel bool, syncer Syncer, bh BlockHookFunc, segdl int64) ([]cid.Cid, error) {
 	h.syncMutex.Lock()
 	defer h.syncMutex.Unlock()
 	log := log.With("cid", nextCid, "peer", h.peerID)
 
-	// This is not set to nil so we can get a pointer.
-	syncedCids := []cid.Cid{}
-	hook = WrapBlockHookWithSyncedCidTracker(&syncedCids, hook)
+	segSync := &segmentedSync{
+		nextSyncCid: &nextCid,
+	}
+
+	var syncedCids []cid.Cid
+	hook := func(p peer.ID, c cid.Cid) {
+		syncedCids = append(syncedCids, c)
+		if bh != nil {
+			bh(p, c, segSync)
+		}
+	}
 	h.subscriber.scopedBlockHookMutex.Lock()
 	h.subscriber.scopedBlockHook[h.peerID] = hook
 	h.subscriber.scopedBlockHookMutex.Unlock()
@@ -805,17 +864,98 @@ func (h *handler) handle(ctx context.Context, nextCid cid.Cid, sel ipld.Node, wr
 		sel = ExploreRecursiveWithStopNode(h.subscriber.syncRecLimit, sel, latestSyncLink)
 	}
 
-	stopNode, ok := getStopNode(sel)
-	if ok && stopNode.(cidlink.Link).Cid == nextCid {
+	stopNode, stopNodeOK := getStopNode(sel)
+	if stopNodeOK && stopNode.(cidlink.Link).Cid == nextCid {
 		log.Infow("cid to sync to is the stop node. Nothing to do")
 		return nil, nil
 	}
 
-	err := syncer.Sync(ctx, nextCid, sel)
-	if err != nil {
-		return nil, err
+	var syncBySegment bool
+	var origLimit selector.RecursionLimit
+	// Only attempt to detect recursion limit in original selector if maximum segment depth is
+	// larger than zero and there is a block hook set; either general or scoped.
+	//
+	// Not that we need at least one block hook to let the caller decide which CID to sync in next
+	// segment. Therefore, it has to be set for segmented sync to function correctly.
+	if segdl > 0 && bh != nil {
+		origLimit, syncBySegment = getRecursionLimit(sel)
+		// If the given selector has a incursion Do not sync using segments if the depth limit in the selector is already less than the
+		// configured maximum segment depth limit.
+		if syncBySegment &&
+			origLimit.Mode() == selector.RecursionLimit_Depth &&
+			origLimit.Depth() <= segdl {
+			syncBySegment = false
+		}
 	}
-	log.Infow("Sync completed")
 
+	// Revert back to sync without segmentation if original limit was not detected, due to:
+	// - segment depth limit being negative; meaning segmentation is explicitly disabled, or
+	// - no block hook is configured; meaning we don't have a way to determine next
+	//   CID during segmented sync,
+	// - the original selector does not explore recursively, and therefore, has no top level
+	//   recursion limit, or
+	// - tje original selector has a recursion depth limit that is already less than the maximum
+	//   segment depth limit.
+	if !syncBySegment {
+		log.Debugw("Falling back on sync in one go", "segDepthLimit", segdl)
+		err := syncer.Sync(ctx, nextCid, sel)
+		if err != nil {
+			return nil, err
+		}
+		log.Infow("Sync completed")
+		return syncedCids, nil
+	}
+
+	var nextDepth = segdl
+	var depthSoFar int64
+
+SegSyncLoop:
+	for {
+		segmentSel, ok := withRecursionLimit(sel, selector.RecursionLimitDepth(nextDepth))
+		if !ok {
+			// This should not happen if we were able to extract origLimit from sel.
+			// If this happens there is likely a bug. Fail fast.
+			return nil, fmt.Errorf("failed to construct segment selector with recursion depth limit of %d", nextDepth)
+		}
+		nextCid = *segSync.nextSyncCid
+		segSync.reset()
+		err := syncer.Sync(ctx, nextCid, segmentSel)
+		if err != nil {
+			return nil, err
+		}
+		depthSoFar += nextDepth
+
+		if segSync.err != nil {
+			return nil, segSync.err
+		}
+
+		// If hook action is not called, or next CID is set to cid.Undef then break out of the
+		// segmented sync cycle.
+		if segSync.nextSyncCid == nil || segSync.nextSyncCid == &cid.Undef {
+			break
+		}
+
+		if stopNodeOK && stopNode.(cidlink.Link).Cid == *segSync.nextSyncCid {
+			log.Debugw("Reached stop node in segmented sync; stopping.")
+			break
+		}
+
+		switch origLimit.Mode() {
+		case selector.RecursionLimit_None:
+			continue
+		case selector.RecursionLimit_Depth:
+			if depthSoFar >= origLimit.Depth() {
+				break SegSyncLoop
+			}
+
+			remainingDepth := origLimit.Depth() - depthSoFar
+			if remainingDepth < segdl {
+				nextDepth = remainingDepth
+			}
+		default:
+			return nil, fmt.Errorf("unknown recursion limit mode: %v", origLimit.Mode())
+		}
+	}
+	log.Infow("Segmented sync completed")
 	return syncedCids, nil
 }

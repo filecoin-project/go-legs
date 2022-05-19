@@ -81,7 +81,7 @@ func setupPublisherSubscriber(t *testing.T, subscriberOptions []legs.Option) htt
 func TestManualSync(t *testing.T) {
 
 	blocksSeenByHook := make(map[cid.Cid]struct{})
-	blockHook := func(p peer.ID, c cid.Cid) {
+	blockHook := func(p peer.ID, c cid.Cid, _ legs.SegmentSyncActions) {
 		blocksSeenByHook[c] = struct{}{}
 		t.Log("http block hook got", c, "from", p)
 	}
@@ -150,7 +150,7 @@ func TestSyncHttpFailsUnexpectedPeer(t *testing.T) {
 func TestSyncFnHttp(t *testing.T) {
 	var blockHookCalls int
 	blocksSeenByHook := make(map[cid.Cid]struct{})
-	blockHook := func(_ peer.ID, c cid.Cid) {
+	blockHook := func(_ peer.ID, c cid.Cid, _ legs.SegmentSyncActions) {
 		blockHookCalls++
 		blocksSeenByHook[c] = struct{}{}
 	}

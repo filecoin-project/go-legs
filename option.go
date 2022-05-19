@@ -34,6 +34,8 @@ type config struct {
 	latestSyncHandler LatestSyncHandler
 
 	rateLimiterFor RateLimiterFor
+
+	segDepthLimit int64
 }
 
 type Option func(*config) error
@@ -91,10 +93,25 @@ func HttpClient(client *http.Client) Option {
 	}
 }
 
-// BlockHook adds a hook that runs when a block is received.
+// BlockHook adds a hook that is run when a block is received via Subscriber.Sync along with a
+// SegmentSyncActions to control the sync flow if segmented sync is enabled.
+// Note that if segmented sync is disabled, calls on SegmentSyncActions will have no effect.
+// See: SegmentSyncActions, SegmentDepthLimit, ScopedBlockHook.
 func BlockHook(blockHook BlockHookFunc) Option {
 	return func(c *config) error {
 		c.blockHook = blockHook
+		return nil
+	}
+}
+
+// SegmentDepthLimit sets the maximum recursion depth limit for a segmented sync.
+// Setting the depth to a value less than zero disables segmented sync completely.
+// Disabled by default.
+// Note that for segmented sync to function at least one of BlockHook or ScopedBlockHook must be
+// set.
+func SegmentDepthLimit(depth int64) Option {
+	return func(c *config) error {
+		c.segDepthLimit = depth
 		return nil
 	}
 }
@@ -118,7 +135,7 @@ func RateLimiter(limiterFor RateLimiterFor) Option {
 }
 
 // LatestSyncHandler defines how to store the latest synced cid for a given peer
-// and how to fetch it. Legs gaurantees this will not be called concurrently for
+// and how to fetch it. Legs guarantees this will not be called concurrently for
 // the same peer, but it may be called concurrently for different peers.
 type LatestSyncHandler interface {
 	SetLatestSync(peer peer.ID, cid cid.Cid)
@@ -153,6 +170,7 @@ type syncCfg struct {
 	alwaysUpdateLatest bool
 	scopedBlockHook    BlockHookFunc
 	rateLimiter        *rate.Limiter
+	segDepthLimit      int64
 }
 
 type SyncOption func(*syncCfg)
@@ -163,6 +181,13 @@ func AlwaysUpdateLatest() SyncOption {
 	}
 }
 
+// ScopedBlockHook is the equivalent of BlockHook option but only applied to a single sync.
+// If not specified, the Subscriber BlockHook option is used instead.
+// Specifying the ScopedBlockHook will override the Subscriber level BlockHook for the current
+// sync.
+// Note that calls to SegmentSyncActions from bloc hook will have no impact if segmented sync is
+// disabled.
+// See: BlockHook, SegmentDepthLimit, ScopedSegmentDepthLimit.
 func ScopedBlockHook(hook BlockHookFunc) SyncOption {
 	return func(sc *syncCfg) {
 		sc.scopedBlockHook = hook
@@ -172,5 +197,17 @@ func ScopedBlockHook(hook BlockHookFunc) SyncOption {
 func ScopedRateLimiter(l *rate.Limiter) SyncOption {
 	return func(sc *syncCfg) {
 		sc.rateLimiter = l
+	}
+}
+
+// ScopedSegmentDepthLimit is the equivalent of SegmentDepthLimit option but only applied to a
+// single sync.
+// If not specified, the Subscriber SegmentDepthLimit option is used instead.
+// Note that for segmented sync to function at least one of BlockHook or ScopedBlockHook must be
+// set.
+// See: SegmentDepthLimit.
+func ScopedSegmentDepthLimit(depth int64) SyncOption {
+	return func(sc *syncCfg) {
+		sc.segDepthLimit = depth
 	}
 }

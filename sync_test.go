@@ -85,7 +85,7 @@ func TestSyncFn(t *testing.T) {
 
 	var blockHookCalls int
 	blocksSeenByHook := make(map[cid.Cid]struct{})
-	blockHook := func(_ peer.ID, c cid.Cid) {
+	blockHook := func(_ peer.ID, c cid.Cid, _ legs.SegmentSyncActions) {
 		blockHookCalls++
 		blocksSeenByHook[c] = struct{}{}
 	}
@@ -106,7 +106,7 @@ func TestSyncFn(t *testing.T) {
 	watcher, cancelWatcher := sub.OnSyncFinished()
 	defer cancelWatcher()
 
-	// Try to sync with a non-existing cid to chack that sync returns with err,
+	// Try to sync with a non-existing cid to check that sync returns with err,
 	// and SyncFinished watcher does not get event.
 	cids, _ := test.RandomCids(1)
 	ctx, syncncl := context.WithTimeout(context.Background(), updateTimeout)
@@ -267,6 +267,7 @@ func TestPartialSync(t *testing.T) {
 		t.Fatalf("data should not be in receiver store: %v", err)
 	}
 }
+
 func TestStepByStepSync(t *testing.T) {
 	srcStore := dssync.MutexWrap(datastore.NewMapDatastore())
 	dstStore := dssync.MutexWrap(datastore.NewMapDatastore())
