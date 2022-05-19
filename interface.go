@@ -14,7 +14,7 @@ type Publisher interface {
 	SetRoot(context.Context, cid.Cid) error
 	// UpdateRoot sets the root CID and publishes its update in the pubsub channel.
 	UpdateRoot(context.Context, cid.Cid) error
-	// Publishes an update for the DAG in the pubsub channel using custom multiaddrs.
+	// UpdateRootWithAddrs publishes an update for the DAG in the pubsub channel using custom multiaddrs.
 	UpdateRootWithAddrs(context.Context, cid.Cid, []ma.Multiaddr) error
 	// Close publisher
 	Close() error
