@@ -804,7 +804,7 @@ type (
 		FailSync(error)
 	}
 	// SegmentBlockHookFunc is called for each synced block, similarly to BlockHookFunc. Except that
-	// it provides SegmentSyncActions to the hook allowing the user to contl the flow of segmented
+	// it provides SegmentSyncActions to the hook allowing the user to control the flow of segmented
 	// sync by determining which CID should be used in the next segmented sync cycle by decoding the
 	// synced block.
 	// SegmentSyncActions also allows the user to signal any errors that may occur during the hook
@@ -931,7 +931,7 @@ SegSyncLoop:
 
 		// If hook action is not called, or next CID is set to cid.Undef then break out of the
 		// segmented sync cycle.
-		if segSync.nextSyncCid == nil || segSync.nextSyncCid == &cid.Undef {
+		if segSync.nextSyncCid == nil || segSync.nextSyncCid.Equals(cid.Undef) {
 			break
 		}
 
@@ -956,6 +956,7 @@ SegSyncLoop:
 			return nil, fmt.Errorf("unknown recursion limit mode: %v", origLimit.Mode())
 		}
 	}
-	log.Infow("Segmented sync completed")
+
+	log.Infow("Segmented sync completed", "syncedCidCount", len(syncedCids))
 	return syncedCids, nil
 }
