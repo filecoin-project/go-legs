@@ -38,7 +38,7 @@ func NewPublisher() *Publisher {
 }
 
 func deriveProtocolID(topic string) protocol.ID {
-	return protocol.ID("/legs/head/" + topic + "/0.0.1")
+	return protocol.ID(path.Join("/legs/head", topic, "0.0.1"))
 }
 
 func (p *Publisher) Serve(host host.Host, topic string) error {
@@ -63,7 +63,22 @@ func QueryRootCid(ctx context.Context, host host.Host, topic string, peerID peer
 				if err != nil {
 					return nil, err
 				}
-				return gostream.Dial(ctx, host, peerID, deriveProtocolID(topic))
+				conn, err := gostream.Dial(ctx, host, peerID, deriveProtocolID(topic))
+				if err != nil {
+					// If protocol ID is wrong, then try the old "double-slashed" protocol ID.
+					//
+					// TODO: remove this code when all providers have upgraded.
+					if err.Error() != "protocol not supported" {
+						return nil, err
+					}
+					oldProtoID := protocol.ID("/legs/head/" + topic + "/0.0.1")
+					conn, err = gostream.Dial(ctx, host, peerID, oldProtoID)
+					if err != nil {
+						return nil, err
+					}
+					log.Infow("Peer head CID server uses old protocol ID", "peer", peerID)
+				}
+				return conn, err
 			},
 		},
 	}
