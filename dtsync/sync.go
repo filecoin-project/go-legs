@@ -27,9 +27,6 @@ type inProgressSyncKey struct {
 	peer peer.ID
 }
 
-// purposely a type alias
-type rateLimiterFor = func(publisher peer.ID) *rate.Limiter
-
 // Sync provides sync functionality for use with all datatransfer syncs.
 type Sync struct {
 	dtManager   dt.Manager
@@ -109,7 +106,7 @@ func (s *Sync) getRateLimiter(peerID peer.ID) *rate.Limiter {
 	return limiter
 }
 
-func (s *Sync) addRateLimiting(bFn graphsync.OnIncomingBlockHook, rateLimiter rateLimiterFor, gs graphsync.GraphExchange) graphsync.OnIncomingBlockHook {
+func (s *Sync) addRateLimiting(bFn graphsync.OnIncomingBlockHook, rateLimiter func(peer.ID) *rate.Limiter, gs graphsync.GraphExchange) graphsync.OnIncomingBlockHook {
 	return func(p peer.ID, responseData graphsync.ResponseData, blockData graphsync.BlockData, hookActions graphsync.IncomingBlockHookActions) {
 		isLocalBlock := blockData.BlockSizeOnWire() == 0
 

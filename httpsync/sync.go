@@ -29,9 +29,6 @@ const defaultHttpTimeout = 10 * time.Second
 
 var log = logging.Logger("go-legs-httpsync")
 
-// purposely a type alias
-type rateLimiterFor = func(publisher peer.ID) *rate.Limiter
-
 // Sync provides sync functionality for use with all http syncs.
 type Sync struct {
 	blockHook func(peer.ID, cid.Cid)
