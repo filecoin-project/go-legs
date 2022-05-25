@@ -42,32 +42,26 @@ type Sync struct {
 	syncDoneChans map[inProgressSyncKey]chan<- error
 	syncDoneMutex sync.Mutex
 
-	limiterFor   rateLimiterFor
-	rateMutex    sync.Mutex
 	rateLimiters map[peer.ID]*rate.Limiter
+	rateMutex    sync.Mutex
 }
 
 // NewSyncWithDT creates a new Sync with a datatransfer.Manager provided by the
 // caller.
-func NewSyncWithDT(host host.Host, dtManager dt.Manager, gs graphsync.GraphExchange, blockHook func(peer.ID, cid.Cid), limiterFor rateLimiterFor) (*Sync, error) {
+func NewSyncWithDT(host host.Host, dtManager dt.Manager, gs graphsync.GraphExchange, blockHook func(peer.ID, cid.Cid)) (*Sync, error) {
 	err := registerVoucher(dtManager, &Voucher{}, nil)
 	if err != nil {
 		return nil, err
 	}
 
 	s := &Sync{
-		host:       host,
-		dtManager:  dtManager,
-		limiterFor: limiterFor,
+		host:         host,
+		dtManager:    dtManager,
+		rateLimiters: map[peer.ID]*rate.Limiter{},
 	}
 
 	if blockHook != nil {
-		bh := addIncomingBlockHook(nil, blockHook)
-		if limiterFor != nil {
-			s.rateLimiters = map[peer.ID]*rate.Limiter{}
-			bh = s.addRateLimiting(bh, s.getRateLimiter, gs)
-		}
-		s.unregHook = gs.RegisterIncomingBlockHook(bh)
+		s.unregHook = gs.RegisterIncomingBlockHook(s.addRateLimiting(addIncomingBlockHook(nil, blockHook), s.getRateLimiter, gs))
 	}
 
 	s.unsubEvents = dtManager.SubscribeToEvents(s.onEvent)
@@ -75,26 +69,21 @@ func NewSyncWithDT(host host.Host, dtManager dt.Manager, gs graphsync.GraphExcha
 }
 
 // NewSync creates a new Sync with its own datatransfer.Manager.
-func NewSync(host host.Host, ds datastore.Batching, lsys ipld.LinkSystem, blockHook func(peer.ID, cid.Cid), limiterFor rateLimiterFor) (*Sync, error) {
+func NewSync(host host.Host, ds datastore.Batching, lsys ipld.LinkSystem, blockHook func(peer.ID, cid.Cid)) (*Sync, error) {
 	dtManager, gs, dtClose, err := makeDataTransfer(host, ds, lsys, nil)
 	if err != nil {
 		return nil, err
 	}
 
 	s := &Sync{
-		host:       host,
-		dtManager:  dtManager,
-		dtClose:    dtClose,
-		limiterFor: limiterFor,
+		host:         host,
+		dtManager:    dtManager,
+		dtClose:      dtClose,
+		rateLimiters: make(map[peer.ID]*rate.Limiter),
 	}
 
 	if blockHook != nil {
-		bh := addIncomingBlockHook(nil, blockHook)
-		if limiterFor != nil {
-			s.rateLimiters = map[peer.ID]*rate.Limiter{}
-			bh = s.addRateLimiting(bh, s.getRateLimiter, gs)
-		}
-		s.unregHook = gs.RegisterIncomingBlockHook(bh)
+		s.unregHook = gs.RegisterIncomingBlockHook(s.addRateLimiting(addIncomingBlockHook(nil, blockHook), s.getRateLimiter, gs))
 	}
 
 	s.unsubEvents = dtManager.SubscribeToEvents(s.onEvent)
@@ -107,13 +96,15 @@ func (s *Sync) clearRateLimiter(peerID peer.ID) {
 	s.rateMutex.Unlock()
 }
 
+func (s *Sync) setRateLimiter(peerID peer.ID, rateLimiter *rate.Limiter) {
+	s.rateMutex.Lock()
+	s.rateLimiters[peerID] = rateLimiter
+	s.rateMutex.Unlock()
+}
+
 func (s *Sync) getRateLimiter(peerID peer.ID) *rate.Limiter {
 	s.rateMutex.Lock()
-	limiter, ok := s.rateLimiters[peerID]
-	if !ok {
-		limiter = s.limiterFor(peerID)
-		s.rateLimiters[peerID] = limiter
-	}
+	limiter := s.rateLimiters[peerID]
 	s.rateMutex.Unlock()
 	return limiter
 }
@@ -124,7 +115,7 @@ func (s *Sync) addRateLimiting(bFn graphsync.OnIncomingBlockHook, rateLimiter ra
 
 		if !isLocalBlock {
 			limiter := rateLimiter(p)
-			if !limiter.Allow() {
+			if limiter != nil && !limiter.Allow() {
 				// We've hit a rate limit. We'll terminate this sync with a rate limit
 				// err along with the cid of the block that we didn't process. When we
 				// restart the sync after the rate limit we should continue from this
@@ -178,17 +169,13 @@ func (s *Sync) Close() error {
 }
 
 // NewSyncer creates a new Syncer to use for a single sync operation against a peer.
-func (s *Sync) NewSyncer(peerID peer.ID, topicName string) *Syncer {
-	syncer := &Syncer{
-		peerID:    peerID,
-		sync:      s,
-		topicName: topicName,
+func (s *Sync) NewSyncer(peerID peer.ID, topicName string, rateLimiter *rate.Limiter) *Syncer {
+	return &Syncer{
+		peerID:      peerID,
+		sync:        s,
+		topicName:   topicName,
+		rateLimiter: rateLimiter,
 	}
-
-	if s.limiterFor != nil {
-		syncer.rateLimiter = s.limiterFor(peerID)
-	}
-	return syncer
 }
 
 // notifyOnSyncDone returns a channel that sync done notification is sent on.

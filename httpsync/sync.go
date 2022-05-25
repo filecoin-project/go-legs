@@ -34,44 +34,37 @@ type rateLimiterFor = func(publisher peer.ID) *rate.Limiter
 
 // Sync provides sync functionality for use with all http syncs.
 type Sync struct {
-	blockHook  func(peer.ID, cid.Cid)
-	client     *http.Client
-	limiterFor rateLimiterFor
-	lsys       ipld.LinkSystem
+	blockHook func(peer.ID, cid.Cid)
+	client    *http.Client
+	lsys      ipld.LinkSystem
 }
 
-func NewSync(lsys ipld.LinkSystem, client *http.Client, blockHook func(peer.ID, cid.Cid), limiterFor rateLimiterFor) *Sync {
+func NewSync(lsys ipld.LinkSystem, client *http.Client, blockHook func(peer.ID, cid.Cid)) *Sync {
 	if client == nil {
 		client = &http.Client{
 			Timeout: defaultHttpTimeout,
 		}
 	}
 	return &Sync{
-		blockHook:  blockHook,
-		client:     client,
-		limiterFor: limiterFor,
-		lsys:       lsys,
+		blockHook: blockHook,
+		client:    client,
+		lsys:      lsys,
 	}
 }
 
 // NewSyncer creates a new Syncer to use for a single sync operation against a peer.
-func (s *Sync) NewSyncer(peerID peer.ID, peerAddr multiaddr.Multiaddr) (*Syncer, error) {
+func (s *Sync) NewSyncer(peerID peer.ID, peerAddr multiaddr.Multiaddr, rateLimiter *rate.Limiter) (*Syncer, error) {
 	rootURL, err := maurl.ToURL(peerAddr)
 	if err != nil {
 		return nil, err
 	}
 
-	syncer := &Syncer{
-		peerID:  peerID,
-		rootURL: *rootURL,
-		sync:    s,
-	}
-
-	if s.limiterFor != nil {
-		syncer.rateLimiter = s.limiterFor(peerID)
-	}
-
-	return syncer, nil
+	return &Syncer{
+		peerID:      peerID,
+		rateLimiter: rateLimiter,
+		rootURL:     *rootURL,
+		sync:        s,
+	}, nil
 }
 
 func (s *Sync) Close() {

@@ -24,6 +24,7 @@ import (
 	"github.com/libp2p/go-libp2p-peerstore/pstoremem"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	"github.com/multiformats/go-multiaddr"
+	"golang.org/x/time/rate"
 )
 
 var log = logging.Logger("go-legs")
@@ -111,6 +112,8 @@ type Subscriber struct {
 	latestSyncHander LatestSyncHandler
 
 	segDepthLimit int64
+
+	rateLimiterFor RateLimiterFor
 }
 
 // SyncFinished notifies an OnSyncFinished reader that a specified peer
@@ -198,9 +201,9 @@ func NewSubscriber(host host.Host, ds datastore.Batching, lsys ipld.LinkSystem, 
 			cancelPubsub()
 			return nil, fmt.Errorf("datastore cannot be used with DtManager option")
 		}
-		dtSync, err = dtsync.NewSyncWithDT(host, cfg.dtManager, cfg.graphExchange, blockHook, cfg.rateLimiterFor)
+		dtSync, err = dtsync.NewSyncWithDT(host, cfg.dtManager, cfg.graphExchange, blockHook)
 	} else {
-		dtSync, err = dtsync.NewSync(host, ds, lsys, blockHook, cfg.rateLimiterFor)
+		dtSync, err = dtsync.NewSync(host, ds, lsys, blockHook)
 	}
 	if err != nil {
 		cancelPubsub()
@@ -235,7 +238,7 @@ func NewSubscriber(host host.Host, ds datastore.Batching, lsys ipld.LinkSystem, 
 		inEvents:  make(chan SyncFinished, 1),
 
 		dtSync:       dtSync,
-		httpSync:     httpsync.NewSync(lsys, cfg.httpClient, blockHook, cfg.rateLimiterFor),
+		httpSync:     httpsync.NewSync(lsys, cfg.httpClient, blockHook),
 		syncRecLimit: cfg.syncRecLimit,
 
 		httpPeerstore: httpPeerstore,
@@ -246,7 +249,8 @@ func NewSubscriber(host host.Host, ds datastore.Batching, lsys ipld.LinkSystem, 
 
 		latestSyncHander: latestSyncHandler,
 
-		segDepthLimit: cfg.segDepthLimit,
+		segDepthLimit:  cfg.segDepthLimit,
+		rateLimiterFor: cfg.rateLimiterFor,
 	}
 
 	// Start watcher to read pubsub messages.
@@ -428,7 +432,7 @@ func (s *Subscriber) Sync(ctx context.Context, peerID peer.ID, nextCid cid.Cid, 
 	if peerAddr != nil {
 		peerAddrs = []multiaddr.Multiaddr{peerAddr}
 	}
-	syncer, isHttp, err := s.makeSyncer(peerID, peerAddrs, tempAddrTTL)
+	syncer, isHttp, err := s.makeSyncer(peerID, peerAddrs, tempAddrTTL, cfg.rateLimiter)
 	if err != nil {
 		return cid.Undef, err
 	}
@@ -625,7 +629,7 @@ func (s *Subscriber) Announce(ctx context.Context, nextCid cid.Cid, peerID peer.
 		return err
 	}
 
-	syncer, _, err := s.makeSyncer(peerID, peerAddrs, s.addrTTL)
+	syncer, _, err := s.makeSyncer(peerID, peerAddrs, s.addrTTL, nil)
 	if err != nil {
 		return err
 	}
@@ -637,7 +641,7 @@ func (s *Subscriber) Announce(ctx context.Context, nextCid cid.Cid, peerID peer.
 	return nil
 }
 
-func (s *Subscriber) makeSyncer(peerID peer.ID, peerAddrs []multiaddr.Multiaddr, addrTTL time.Duration) (Syncer, bool, error) {
+func (s *Subscriber) makeSyncer(peerID peer.ID, peerAddrs []multiaddr.Multiaddr, addrTTL time.Duration, rateLimiter *rate.Limiter) (Syncer, bool, error) {
 	var httpAddr multiaddr.Multiaddr
 	if len(peerAddrs) == 0 {
 		// Check for an http URL for this peer since no peerAddr was given.
@@ -652,8 +656,14 @@ func (s *Subscriber) makeSyncer(peerID peer.ID, peerAddrs []multiaddr.Multiaddr,
 		httpAddr = firstHTTPAddr(peerAddrs)
 	}
 
+	// If there was no rate limiter for this sync, then use the normal rate
+	// limiter for the peer.
+	if rateLimiter == nil && s.rateLimiterFor != nil {
+		rateLimiter = s.rateLimiterFor(peerID)
+	}
+
 	if httpAddr != nil {
-		syncer, err := s.httpSync.NewSyncer(peerID, httpAddr)
+		syncer, err := s.httpSync.NewSyncer(peerID, httpAddr, rateLimiter)
 		if err != nil {
 			return nil, false, fmt.Errorf("cannot create http sync handler: %w", err)
 		}
@@ -670,7 +680,7 @@ func (s *Subscriber) makeSyncer(peerID peer.ID, peerAddrs []multiaddr.Multiaddr,
 		peerStore.AddAddrs(peerID, peerAddrs, addrTTL)
 	}
 
-	return s.dtSync.NewSyncer(peerID, s.topicName), false, nil
+	return s.dtSync.NewSyncer(peerID, s.topicName, rateLimiter), false, nil
 }
 
 func firstHTTPAddr(peerAddrs []multiaddr.Multiaddr) multiaddr.Multiaddr {
@@ -689,7 +699,7 @@ func firstHTTPAddr(peerAddrs []multiaddr.Multiaddr) multiaddr.Multiaddr {
 
 // handleAsync starts a goroutine to process the latest announce message
 // received over pubsub or HTTP. If there is already a goroutine handling a
-// sync, then the will be at most one more goroutine waiting to handle the
+// sync, then there will be at most one more goroutine waiting to handle the
 // pending sync.
 func (h *handler) handleAsync(ctx context.Context, nextCid cid.Cid, syncer Syncer) {
 	h.qlock.Lock()
