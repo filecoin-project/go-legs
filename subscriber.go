@@ -429,6 +429,9 @@ func (s *Subscriber) Sync(ctx context.Context, peerID peer.ID, nextCid cid.Cid, 
 		peerAddrs = []multiaddr.Multiaddr{peerAddr}
 	}
 	syncer, isHttp, err := s.makeSyncer(peerID, peerAddrs, tempAddrTTL)
+	if err != nil {
+		return cid.Undef, err
+	}
 
 	updateLatest := cfg.alwaysUpdateLatest
 	if nextCid == cid.Undef {

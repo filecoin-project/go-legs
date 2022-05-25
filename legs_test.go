@@ -65,10 +65,12 @@ func TestAllowPeerReject(t *testing.T) {
 	// Init legs publisher and subscriber
 	srcStore := dssync.MutexWrap(datastore.NewMapDatastore())
 	dstStore := dssync.MutexWrap(datastore.NewMapDatastore())
-	_, dstHost, pub, sub, err := initPubSub(t, srcStore, dstStore)
+	srcHost, dstHost, pub, sub, err := initPubSub(t, srcStore, dstStore)
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer srcHost.Close()
+	defer dstHost.Close()
 	defer pub.Close()
 	defer sub.Close()
 
@@ -90,7 +92,7 @@ func TestAllowPeerReject(t *testing.T) {
 	}
 
 	select {
-	case <-time.After(time.Second * 3):
+	case <-time.After(3 * time.Second):
 	case _, open := <-watcher:
 		if open {
 			t.Fatal("something was exchanged, and that is wrong")
@@ -102,15 +104,17 @@ func TestAllowPeerAllows(t *testing.T) {
 	// Init legs publisher and subscriber
 	srcStore := dssync.MutexWrap(datastore.NewMapDatastore())
 	dstStore := dssync.MutexWrap(datastore.NewMapDatastore())
-	_, _, pub, sub, err := initPubSub(t, srcStore, dstStore)
+	srcHost, dstHost, pub, sub, err := initPubSub(t, srcStore, dstStore)
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer srcHost.Close()
+	defer dstHost.Close()
 	defer pub.Close()
 	defer sub.Close()
 
 	// Set function to allow any peer.
-	sub.SetAllowPeer(func(peerID peer.ID) bool {
+	sub.SetAllowPeer(func(_ peer.ID) bool {
 		return true
 	})
 
@@ -139,6 +143,8 @@ func TestPublisherRejectsPeer(t *testing.T) {
 
 	srcHost := test.MkTestHost()
 	dstHost := test.MkTestHost()
+	defer srcHost.Close()
+	defer dstHost.Close()
 
 	topics := test.WaitForMeshWithMessage(t, testTopic, srcHost, dstHost)
 

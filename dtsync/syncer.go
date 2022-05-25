@@ -29,6 +29,8 @@ func (s *Syncer) GetHead(ctx context.Context) (cid.Cid, error) {
 // from the provider.
 func (s *Syncer) Sync(ctx context.Context, nextCid cid.Cid, sel ipld.Node) error {
 	if s.rateLimiter != nil {
+		// Remove peer rate limiter set in call to getRateLimiter, called from
+		// wrapped block hook.
 		defer s.sync.clearRateLimiter(s.peerID)
 	}
 

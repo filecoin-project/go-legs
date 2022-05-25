@@ -50,7 +50,11 @@ type Sync struct {
 // NewSyncWithDT creates a new Sync with a datatransfer.Manager provided by the
 // caller.
 func NewSyncWithDT(host host.Host, dtManager dt.Manager, gs graphsync.GraphExchange, blockHook func(peer.ID, cid.Cid), limiterFor rateLimiterFor) (*Sync, error) {
-	registerVoucher(dtManager, &Voucher{}, nil)
+	err := registerVoucher(dtManager, &Voucher{}, nil)
+	if err != nil {
+		return nil, err
+	}
+
 	s := &Sync{
 		host:       host,
 		dtManager:  dtManager,

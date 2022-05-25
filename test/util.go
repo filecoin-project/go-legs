@@ -106,7 +106,10 @@ func WaitForMeshWithMessage(t *testing.T, topic string, hosts ...host.Host) []*p
 			// Wait until someone else picks up this topic and sends a message before
 			// we cancel. This way the topic isn't unsubscribed to before we start
 			// the test.
-			s.Next(context.Background())
+			_, err = s.Next(context.Background())
+			if err != nil {
+				fmt.Println("error getting next message on subscription:", err)
+			}
 			s.Cancel()
 		}(s)
 	}

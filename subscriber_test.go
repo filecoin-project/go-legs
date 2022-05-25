@@ -266,6 +266,8 @@ func TestSync(t *testing.T) {
 		return t.Run("Quickcheck", func(t *testing.T) {
 			pubSys := newHostSystem(t)
 			subSys := newHostSystem(t)
+			defer pubSys.close()
+			defer subSys.close()
 
 			calledTimes := 0
 			pubAddr, pub, sub := lpsb.Build(t, testTopic, pubSys, subSys,
@@ -383,10 +385,12 @@ func TestRoundTripSimple(t *testing.T) {
 	// Init legs publisher and subscriber
 	srcStore := dssync.MutexWrap(datastore.NewMapDatastore())
 	dstStore := dssync.MutexWrap(datastore.NewMapDatastore())
-	_, _, pub, sub, err := initPubSub(t, srcStore, dstStore)
+	srcHost, dstHost, pub, sub, err := initPubSub(t, srcStore, dstStore)
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer srcHost.Close()
+	defer dstHost.Close()
 	defer pub.Close()
 	defer sub.Close()
 
@@ -421,15 +425,17 @@ func TestRoundTrip(t *testing.T) {
 	// Init legs publisher and subscriber
 	srcStore1 := dssync.MutexWrap(datastore.NewMapDatastore())
 	srcHost1 := test.MkTestHost()
+	defer srcHost1.Close()
 	srcLnkS1 := test.MkLinkSystem(srcStore1)
 
 	srcStore2 := dssync.MutexWrap(datastore.NewMapDatastore())
 	srcHost2 := test.MkTestHost()
+	defer srcHost2.Close()
 	srcLnkS2 := test.MkLinkSystem(srcStore2)
 
 	dstStore := dssync.MutexWrap(datastore.NewMapDatastore())
 	dstHost := test.MkTestHost()
-
+	defer dstHost.Close()
 	dstLnkS := test.MkLinkSystem(dstStore)
 
 	topics := test.WaitForMeshWithMessage(t, "testTopic", srcHost1, srcHost2, dstHost)
@@ -506,6 +512,8 @@ func TestRoundTrip(t *testing.T) {
 func TestHttpPeerAddrPeerstore(t *testing.T) {
 	pubHostSys := newHostSystem(t)
 	subHostSys := newHostSystem(t)
+	defer pubHostSys.close()
+	defer subHostSys.close()
 
 	pubAddr, pub, sub := legsPubSubBuilder{
 		IsHttp: true,
@@ -565,6 +573,8 @@ func TestRateLimiter(t *testing.T) {
 
 			pubHostSys := newHostSystem(t)
 			subHostSys := newHostSystem(t)
+			defer pubHostSys.close()
+			defer subHostSys.close()
 
 			tokenEvery := 100 * time.Millisecond
 			limiter := rate.NewLimiter(rate.Every(tokenEvery), 1)
@@ -605,6 +615,8 @@ func TestRateLimiter(t *testing.T) {
 func TestBackpressureDoesntDeadlock(t *testing.T) {
 	pubHostSys := newHostSystem(t)
 	subHostSys := newHostSystem(t)
+	defer pubHostSys.close()
+	defer subHostSys.close()
 
 	pubAddr, pub, sub := legsPubSubBuilder{}.Build(t, testTopic, pubHostSys, subHostSys, nil)
 
@@ -790,6 +802,10 @@ func newHostSystem(t *testing.T) hostSystem {
 		ds:      ds,
 		lsys:    test.MkLinkSystem(ds),
 	}
+}
+
+func (h *hostSystem) close() {
+	h.host.Close()
 }
 
 func (b legsPubSubBuilder) Build(t *testing.T, topicName string, pubSys hostSystem, subSys hostSystem, subOpts []legs.Option) (multiaddr.Multiaddr, legs.Publisher, *legs.Subscriber) {
