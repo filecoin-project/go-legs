@@ -24,7 +24,6 @@ import (
 	"github.com/libp2p/go-libp2p-peerstore/pstoremem"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	"github.com/multiformats/go-multiaddr"
-	"golang.org/x/time/rate"
 )
 
 var log = logging.Logger("go-legs")
@@ -111,9 +110,6 @@ type Subscriber struct {
 
 	latestSyncHander LatestSyncHandler
 
-	// limiterFor defines the rate limits for each publisher
-	limiterFor RateLimiterFor
-
 	segDepthLimit int64
 }
 
@@ -196,14 +192,6 @@ func NewSubscriber(host host.Host, ds datastore.Batching, lsys ipld.LinkSystem, 
 
 	scopedBlockHookMutex, scopedBlockHook, blockHook := wrapBlockHook()
 
-	if cfg.rateLimiterFor == nil {
-		// Allows all events. No rate limit.
-		limiter := rate.NewLimiter(rate.Inf, 0)
-		cfg.rateLimiterFor = func(publisher peer.ID) *rate.Limiter {
-			return limiter
-		}
-	}
-
 	var dtSync *dtsync.Sync
 	if cfg.dtManager != nil {
 		if ds != nil {
@@ -247,7 +235,7 @@ func NewSubscriber(host host.Host, ds datastore.Batching, lsys ipld.LinkSystem, 
 		inEvents:  make(chan SyncFinished, 1),
 
 		dtSync:       dtSync,
-		httpSync:     httpsync.NewSync(lsys, cfg.httpClient, blockHook),
+		httpSync:     httpsync.NewSync(lsys, cfg.httpClient, blockHook, cfg.rateLimiterFor),
 		syncRecLimit: cfg.syncRecLimit,
 
 		httpPeerstore: httpPeerstore,
@@ -257,8 +245,6 @@ func NewSubscriber(host host.Host, ds datastore.Batching, lsys ipld.LinkSystem, 
 		generalBlockHook:     cfg.blockHook,
 
 		latestSyncHander: latestSyncHandler,
-
-		limiterFor: cfg.rateLimiterFor,
 
 		segDepthLimit: cfg.segDepthLimit,
 	}
@@ -438,53 +424,11 @@ func (s *Subscriber) Sync(ctx context.Context, peerID peer.ID, nextCid cid.Cid, 
 
 	log := log.With("peer", peerID)
 
-	var err error
-	var syncer Syncer
-
-	isHttpPeerAddr := false
+	var peerAddrs []multiaddr.Multiaddr
 	if peerAddr != nil {
-		for _, p := range peerAddr.Protocols() {
-			if p.Code == multiaddr.P_HTTP || p.Code == multiaddr.P_HTTPS {
-				isHttpPeerAddr = true
-				break
-			}
-		}
-	} else {
-		// Check if we have an http url for this peer since we didn't get a peerAddr.
-		// Note that this gives a preference to use httpSync over dtsync if we have
-		// seen http address and we called sync with no explicit peerAddr.
-		possibleAddrs := s.httpPeerstore.Addrs(peerID)
-		if len(possibleAddrs) > 0 {
-			peerAddr = possibleAddrs[0]
-			isHttpPeerAddr = true
-		}
+		peerAddrs = []multiaddr.Multiaddr{peerAddr}
 	}
-
-	if isHttpPeerAddr {
-		var limiter *rate.Limiter
-		if cfg.rateLimiter != nil {
-			// If we have an explicit rate limiter, we'll use it instead of the
-			// default
-			limiter = cfg.rateLimiter
-		} else {
-			limiter = s.limiterFor(peerID)
-		}
-		syncer, err = s.httpSync.NewSyncer(peerID, peerAddr, limiter)
-		if err != nil {
-			return cid.Undef, fmt.Errorf("cannot create http sync handler: %w", err)
-		}
-	} else {
-		// Not an httpPeerAddr, so use the dtSync. We'll add it with a small TTL
-		// first, and extend it when we discover we can actually sync from it.
-		// In case the peerstore already has this address and the existing TTL is
-		// greater than this temp one, this is a no-op. In other words we never
-		// decrease the TTL here.
-		peerStore := s.host.Peerstore()
-		if peerStore != nil && peerAddr != nil {
-			peerStore.AddAddr(peerID, peerAddr, tempAddrTTL)
-		}
-		syncer = s.dtSync.NewSyncer(peerID, s.topicName, cfg.rateLimiter)
-	}
+	syncer, isHttp, err := s.makeSyncer(peerID, peerAddrs, tempAddrTTL)
 
 	updateLatest := cfg.alwaysUpdateLatest
 	if nextCid == cid.Undef {
@@ -552,7 +496,7 @@ func (s *Subscriber) Sync(ctx context.Context, peerID peer.ID, nextCid cid.Cid, 
 	// peerstore. If the address was already in the peerstore, this will extend
 	// its ttl.
 	if peerAddr != nil {
-		if isHttpPeerAddr {
+		if isHttp {
 			// Store this http address so that future calls to sync will work without a
 			// peerAddr (given that it happens within the TTL)
 			s.httpPeerstore.AddAddr(peerID, peerAddr, s.addrTTL)
@@ -678,66 +622,71 @@ func (s *Subscriber) Announce(ctx context.Context, nextCid cid.Cid, peerID peer.
 		return err
 	}
 
-	limiter := s.limiterFor(peerID)
-	if !limiter.Allow() {
-		log.Infow("Ignoring announcement because of rate limiting", "peer", peerID)
-		return nil
+	syncer, _, err := s.makeSyncer(peerID, peerAddrs, s.addrTTL)
+	if err != nil {
+		return err
 	}
 
-	var httpAddr multiaddr.Multiaddr
-	if len(peerAddrs) == 0 {
-		// Check if we have an http url for this peer since we didn't get a peerAddr.
-		// Note that this gives a preference to use httpSync over dtsync if we have
-		// seen http address and we called sync with no explicit peerAddr.
-		possibleAddrs := s.httpPeerstore.Addrs(peerID)
-		if len(possibleAddrs) > 0 {
-			httpAddr = possibleAddrs[0]
-		}
-	} else {
-	httpFound:
-		for _, addr := range peerAddrs {
-			for _, p := range addr.Protocols() {
-				if p.Code == multiaddr.P_HTTP || p.Code == multiaddr.P_HTTPS {
-					httpAddr = addr
-					break httpFound
-				}
-			}
-		}
-	}
-
-	var syncer Syncer
-	if httpAddr != nil {
-		// Store this http address so that future calls to sync will work without a
-		// peerAddr (given that it happens within the TTL)
-		s.httpPeerstore.AddAddr(peerID, httpAddr, s.addrTTL)
-
-		syncer, err = s.httpSync.NewSyncer(peerID, httpAddr, limiter)
-		if err != nil {
-			return fmt.Errorf("cannot create http sync handler: %w", err)
-		}
-	} else {
-		// Not an httpPeerAddr, so use the dtSync. We'll add it with a small TTL
-		// first, and extend it when we discover we can actually sync from it.
-		// In case the peerstore already has this address and the existing TTL is
-		// greater than this temp one, this is a no-op. In other words we never
-		// decrease the TTL here.
-		peerStore := s.host.Peerstore()
-		if peerStore != nil && len(peerAddrs) != 0 {
-			peerStore.AddAddrs(peerID, peerAddrs, s.addrTTL)
-		}
-		syncer = s.dtSync.NewSyncer(peerID, s.topicName, limiter)
-	}
-
-	// Start new goroutine to handle this message instead of having
+	// Start a new goroutine to handle this message instead of having a
 	// persistent goroutine for each peer.
 	hnd.handleAsync(ctx, nextCid, syncer)
 
 	return nil
 }
 
+func (s *Subscriber) makeSyncer(peerID peer.ID, peerAddrs []multiaddr.Multiaddr, addrTTL time.Duration) (Syncer, bool, error) {
+	var httpAddr multiaddr.Multiaddr
+	if len(peerAddrs) == 0 {
+		// Check for an http URL for this peer since no peerAddr was given.
+		// Note that this gives a preference to use httpSync over dtsync if
+		// there is an HTTP address for this peer and sync was called with no
+		// explicit peerAddr.
+		possibleAddrs := s.httpPeerstore.Addrs(peerID)
+		if len(possibleAddrs) > 0 {
+			httpAddr = possibleAddrs[0]
+		}
+	} else {
+		httpAddr = firstHTTPAddr(peerAddrs)
+	}
+
+	if httpAddr != nil {
+		syncer, err := s.httpSync.NewSyncer(peerID, httpAddr)
+		if err != nil {
+			return nil, false, fmt.Errorf("cannot create http sync handler: %w", err)
+		}
+		return syncer, true, nil
+	}
+
+	// Not an httpPeerAddr, so use the dtSync. Add it to peerstore with a small
+	// TTL first, and extend it if/when sync with it completes. In case the
+	// peerstore already has this address and the existing TTL is greater than
+	// this temp one, this is a no-op. In other words, the TTL is never
+	// decreased here.
+	peerStore := s.host.Peerstore()
+	if peerStore != nil && len(peerAddrs) != 0 {
+		peerStore.AddAddrs(peerID, peerAddrs, addrTTL)
+	}
+
+	return s.dtSync.NewSyncer(peerID, s.topicName), false, nil
+}
+
+func firstHTTPAddr(peerAddrs []multiaddr.Multiaddr) multiaddr.Multiaddr {
+	for _, addr := range peerAddrs {
+		if addr == nil {
+			continue
+		}
+		for _, p := range addr.Protocols() {
+			if p.Code == multiaddr.P_HTTP || p.Code == multiaddr.P_HTTPS {
+				return addr
+			}
+		}
+	}
+	return nil
+}
+
 // handleAsync starts a goroutine to process the latest announce message
-// received over pubsub or HTTP.  If there is already a goroutine handling a
-// sync, then there will be at most one more goroutine waiting to handle the
+// received over pubsub or HTTP. If there is already a goroutine handling a
+// sync, then the will be at most one more goroutine waiting to handle the
 // pending sync.
 func (h *handler) handleAsync(ctx context.Context, nextCid cid.Cid, syncer Syncer) {
 	h.qlock.Lock()
@@ -748,10 +697,12 @@ func (h *handler) handleAsync(ctx context.Context, nextCid cid.Cid, syncer Synce
 	if h.pendingCid == cid.Undef {
 		h.subscriber.asyncWG.Add(1)
 		go func() {
+			// Wait for any previous handler goroutine to finish.
 			h.latestSyncMu.Lock()
 			defer h.latestSyncMu.Unlock()
 			defer h.subscriber.asyncWG.Done()
 
+			// Wait for the parent goroutine to assign pending CID and unlock.
 			h.qlock.Lock()
 			c := h.pendingCid
 			h.pendingCid = cid.Undef
@@ -777,6 +728,7 @@ func (h *handler) handleAsync(ctx context.Context, nextCid cid.Cid, syncer Synce
 	} else {
 		log.Infow("Pending update replaced by new", "previous_cid", h.pendingCid, "new_cid", nextCid)
 	}
+	// Set the CID to be handled by the waiting goroutine.
 	h.pendingCid = nextCid
 	h.pendingSyncer = syncer
 	h.qlock.Unlock()

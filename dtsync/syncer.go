@@ -9,15 +9,15 @@ import (
 	"github.com/ipfs/go-cid"
 	"github.com/ipld/go-ipld-prime"
 	"github.com/libp2p/go-libp2p-core/peer"
-	rate "golang.org/x/time/rate"
+	"golang.org/x/time/rate"
 )
 
 // Syncer handles a single sync with a provider.
 type Syncer struct {
 	peerID      peer.ID
+	rateLimiter *rate.Limiter
 	sync        *Sync
 	topicName   string
-	rateLimiter *rate.Limiter
 }
 
 // GetHead queries a provider for the latest CID.
@@ -29,17 +29,7 @@ func (s *Syncer) GetHead(ctx context.Context) (cid.Cid, error) {
 // from the provider.
 func (s *Syncer) Sync(ctx context.Context, nextCid cid.Cid, sel ipld.Node) error {
 	if s.rateLimiter != nil {
-		// We were passed in a specific rate limiter, let's use it instead of the default one.
-		s.sync.overrideRateLimiterForMu.Lock()
-		// In case there was a previous rate limiter override.
-		originalOverrideRateLimiter := s.sync.overrideRateLimiterFor[s.peerID]
-		s.sync.overrideRateLimiterFor[s.peerID] = s.rateLimiter
-		s.sync.overrideRateLimiterForMu.Unlock()
-		defer func() {
-			s.sync.overrideRateLimiterForMu.Lock()
-			s.sync.overrideRateLimiterFor[s.peerID] = originalOverrideRateLimiter
-			s.sync.overrideRateLimiterForMu.Unlock()
-		}()
+		defer s.sync.clearRateLimiter(s.peerID)
 	}
 
 	for {

@@ -6,14 +6,13 @@ import (
 	"sync"
 	"time"
 
-	rate "golang.org/x/time/rate"
-
 	dt "github.com/filecoin-project/go-data-transfer"
 	"github.com/ipfs/go-cid"
 	"github.com/ipfs/go-graphsync"
 	"github.com/ipld/go-ipld-prime/traversal/selector"
 	"github.com/libp2p/go-libp2p-core/peer"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
+	"golang.org/x/time/rate"
 )
 
 // config contains all options for configuring Subscriber.
@@ -127,6 +126,8 @@ func SyncRecursionLimit(limit selector.RecursionLimit) Option {
 
 type RateLimiterFor func(publisher peer.ID) *rate.Limiter
 
+// RateLimiter configures a function that is called for each sync to get the
+// rate limiter for a specific peer.
 func RateLimiter(limiterFor RateLimiterFor) Option {
 	return func(c *config) error {
 		c.rateLimiterFor = limiterFor
@@ -169,7 +170,6 @@ func UseLatestSyncHandler(h LatestSyncHandler) Option {
 type syncCfg struct {
 	alwaysUpdateLatest bool
 	scopedBlockHook    BlockHookFunc
-	rateLimiter        *rate.Limiter
 	segDepthLimit      int64
 }
 
@@ -191,12 +191,6 @@ func AlwaysUpdateLatest() SyncOption {
 func ScopedBlockHook(hook BlockHookFunc) SyncOption {
 	return func(sc *syncCfg) {
 		sc.scopedBlockHook = hook
-	}
-}
-
-func ScopedRateLimiter(l *rate.Limiter) SyncOption {
-	return func(sc *syncCfg) {
-		sc.rateLimiter = l
 	}
 }
 
