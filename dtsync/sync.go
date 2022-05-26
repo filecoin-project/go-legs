@@ -6,8 +6,6 @@ import (
 	"strings"
 	"sync"
 
-	rate "golang.org/x/time/rate"
-
 	dt "github.com/filecoin-project/go-data-transfer"
 	"github.com/ipfs/go-cid"
 	"github.com/ipfs/go-datastore"
@@ -17,6 +15,7 @@ import (
 	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
 	"github.com/libp2p/go-libp2p-core/host"
 	"github.com/libp2p/go-libp2p-core/peer"
+	"golang.org/x/time/rate"
 )
 
 var log = logging.Logger("go-legs-dtsync")
@@ -40,79 +39,80 @@ type Sync struct {
 	syncDoneChans map[inProgressSyncKey]chan<- error
 	syncDoneMutex sync.Mutex
 
-	limiterFor rateLimiterFor
-
-	// overrideRateLimiterFor let's a specific sync define its own rate limiter
-	overrideRateLimiterFor   map[peer.ID]*rate.Limiter
-	overrideRateLimiterForMu sync.RWMutex
-}
-
-// wrapRateLimiterFor wraps a rateLimiterFor function with override semantics so
-// that a manual Sync can use a different rate limiter
-func (s *Sync) wrapRateLimiterFor(limiterFor rateLimiterFor) rateLimiterFor {
-	return func(p peer.ID) *rate.Limiter {
-		s.overrideRateLimiterForMu.RLock()
-		defer s.overrideRateLimiterForMu.RUnlock()
-		if s.overrideRateLimiterFor[p] != nil {
-			return s.overrideRateLimiterFor[p]
-		}
-
-		return limiterFor(p)
-	}
+	rateLimiters map[peer.ID]*rate.Limiter
+	rateMutex    sync.Mutex
 }
 
 // NewSyncWithDT creates a new Sync with a datatransfer.Manager provided by the
 // caller.
-func NewSyncWithDT(host host.Host, dtManager dt.Manager, gs graphsync.GraphExchange, blockHook func(peer.ID, cid.Cid), limiterFor rateLimiterFor) (*Sync, error) {
-	registerVoucher(dtManager, &Voucher{}, nil)
+func NewSyncWithDT(host host.Host, dtManager dt.Manager, gs graphsync.GraphExchange, blockHook func(peer.ID, cid.Cid)) (*Sync, error) {
+	err := registerVoucher(dtManager, &Voucher{}, nil)
+	if err != nil {
+		return nil, err
+	}
+
 	s := &Sync{
-		host:                   host,
-		dtManager:              dtManager,
-		overrideRateLimiterFor: make(map[peer.ID]*rate.Limiter),
-		limiterFor:             limiterFor,
+		host:         host,
+		dtManager:    dtManager,
+		rateLimiters: map[peer.ID]*rate.Limiter{},
 	}
 
 	if blockHook != nil {
-		s.unregHook = gs.RegisterIncomingBlockHook(s.addRateLimiting(addIncomingBlockHook(nil, blockHook), s.wrapRateLimiterFor(limiterFor), gs))
+		s.unregHook = gs.RegisterIncomingBlockHook(s.addRateLimiting(addIncomingBlockHook(nil, blockHook), s.getRateLimiter, gs))
 	}
 
 	s.unsubEvents = dtManager.SubscribeToEvents(s.onEvent)
 	return s, nil
 }
 
-// purposely a type alias
-type rateLimiterFor = func(publisher peer.ID) *rate.Limiter
-
 // NewSync creates a new Sync with its own datatransfer.Manager.
-func NewSync(host host.Host, ds datastore.Batching, lsys ipld.LinkSystem, blockHook func(peer.ID, cid.Cid), limiterFor rateLimiterFor) (*Sync, error) {
+func NewSync(host host.Host, ds datastore.Batching, lsys ipld.LinkSystem, blockHook func(peer.ID, cid.Cid)) (*Sync, error) {
 	dtManager, gs, dtClose, err := makeDataTransfer(host, ds, lsys, nil)
 	if err != nil {
 		return nil, err
 	}
 
 	s := &Sync{
-		host:                   host,
-		dtManager:              dtManager,
-		dtClose:                dtClose,
-		overrideRateLimiterFor: make(map[peer.ID]*rate.Limiter),
-		limiterFor:             limiterFor,
+		host:         host,
+		dtManager:    dtManager,
+		dtClose:      dtClose,
+		rateLimiters: make(map[peer.ID]*rate.Limiter),
 	}
 
 	if blockHook != nil {
-		s.unregHook = gs.RegisterIncomingBlockHook(s.addRateLimiting(addIncomingBlockHook(nil, blockHook), s.wrapRateLimiterFor(limiterFor), gs))
+		s.unregHook = gs.RegisterIncomingBlockHook(s.addRateLimiting(addIncomingBlockHook(nil, blockHook), s.getRateLimiter, gs))
 	}
 
 	s.unsubEvents = dtManager.SubscribeToEvents(s.onEvent)
 	return s, nil
 }
 
-func (s *Sync) addRateLimiting(bFn graphsync.OnIncomingBlockHook, rateLimiter rateLimiterFor, gs graphsync.GraphExchange) graphsync.OnIncomingBlockHook {
+func (s *Sync) clearRateLimiter(peerID peer.ID) {
+	s.rateMutex.Lock()
+	delete(s.rateLimiters, peerID)
+	s.rateMutex.Unlock()
+}
+
+func (s *Sync) setRateLimiter(peerID peer.ID, rateLimiter *rate.Limiter) {
+	s.rateMutex.Lock()
+	s.rateLimiters[peerID] = rateLimiter
+	s.rateMutex.Unlock()
+}
+
+func (s *Sync) getRateLimiter(peerID peer.ID) *rate.Limiter {
+	s.rateMutex.Lock()
+	limiter := s.rateLimiters[peerID]
+	s.rateMutex.Unlock()
+	return limiter
+}
+
+func (s *Sync) addRateLimiting(bFn graphsync.OnIncomingBlockHook, rateLimiter func(peer.ID) *rate.Limiter, gs graphsync.GraphExchange) graphsync.OnIncomingBlockHook {
 	return func(p peer.ID, responseData graphsync.ResponseData, blockData graphsync.BlockData, hookActions graphsync.IncomingBlockHookActions) {
 		isLocalBlock := blockData.BlockSizeOnWire() == 0
 
 		if !isLocalBlock {
 			limiter := rateLimiter(p)
-			if !limiter.Allow() {
+			if limiter != nil && !limiter.Allow() {
 				// We've hit a rate limit. We'll terminate this sync with a rate limit
 				// err along with the cid of the block that we didn't process. When we
 				// restart the sync after the rate limit we should continue from this
@@ -171,7 +171,7 @@ func (s *Sync) NewSyncer(peerID peer.ID, topicName string, rateLimiter *rate.Lim
 		peerID:      peerID,
 		sync:        s,
 		topicName:   topicName,
-		rateLimiter: s.limiterFor(peerID),
+		rateLimiter: rateLimiter,
 	}
 }
 

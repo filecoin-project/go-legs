@@ -6,14 +6,13 @@ import (
 	"sync"
 	"time"
 
-	rate "golang.org/x/time/rate"
-
 	dt "github.com/filecoin-project/go-data-transfer"
 	"github.com/ipfs/go-cid"
 	"github.com/ipfs/go-graphsync"
 	"github.com/ipld/go-ipld-prime/traversal/selector"
 	"github.com/libp2p/go-libp2p-core/peer"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
+	"golang.org/x/time/rate"
 )
 
 // config contains all options for configuring Subscriber.
@@ -127,6 +126,8 @@ func SyncRecursionLimit(limit selector.RecursionLimit) Option {
 
 type RateLimiterFor func(publisher peer.ID) *rate.Limiter
 
+// RateLimiter configures a function that is called for each sync to get the
+// rate limiter for a specific peer.
 func RateLimiter(limiterFor RateLimiterFor) Option {
 	return func(c *config) error {
 		c.rateLimiterFor = limiterFor
@@ -168,8 +169,8 @@ func UseLatestSyncHandler(h LatestSyncHandler) Option {
 
 type syncCfg struct {
 	alwaysUpdateLatest bool
-	scopedBlockHook    BlockHookFunc
 	rateLimiter        *rate.Limiter
+	scopedBlockHook    BlockHookFunc
 	segDepthLimit      int64
 }
 
@@ -181,31 +182,35 @@ func AlwaysUpdateLatest() SyncOption {
 	}
 }
 
-// ScopedBlockHook is the equivalent of BlockHook option but only applied to a single sync.
-// If not specified, the Subscriber BlockHook option is used instead.
-// Specifying the ScopedBlockHook will override the Subscriber level BlockHook for the current
-// sync.
-// Note that calls to SegmentSyncActions from bloc hook will have no impact if segmented sync is
-// disabled.
-// See: BlockHook, SegmentDepthLimit, ScopedSegmentDepthLimit.
+// ScopedBlockHook is the equivalent of BlockHook option but only applied to a
+// single sync. If not specified, the Subscriber BlockHook option is used
+// instead. Specifying the ScopedBlockHook will override the Subscriber level
+// BlockHook for the current sync.
+//
+// Note that calls to SegmentSyncActions from bloc hook will have no impact if
+// segmented sync is disabled. See: BlockHook, SegmentDepthLimit,
+// ScopedSegmentDepthLimit.
 func ScopedBlockHook(hook BlockHookFunc) SyncOption {
 	return func(sc *syncCfg) {
 		sc.scopedBlockHook = hook
 	}
 }
 
+// ScopedRateLimiter set a rate limiter to use for a singel sync. If not
+// specified, the Subscriber rateLimiterFor function is used to get a rate
+// limiter for the sync.
 func ScopedRateLimiter(l *rate.Limiter) SyncOption {
 	return func(sc *syncCfg) {
 		sc.rateLimiter = l
 	}
 }
 
-// ScopedSegmentDepthLimit is the equivalent of SegmentDepthLimit option but only applied to a
-// single sync.
-// If not specified, the Subscriber SegmentDepthLimit option is used instead.
-// Note that for segmented sync to function at least one of BlockHook or ScopedBlockHook must be
-// set.
-// See: SegmentDepthLimit.
+// ScopedSegmentDepthLimit is the equivalent of SegmentDepthLimit option but
+// only applied to a single sync. If not specified, the Subscriber
+// SegmentDepthLimit option is used instead.
+//
+// Note that for segmented sync to function at least one of BlockHook or
+// ScopedBlockHook must be set. See: SegmentDepthLimit.
 func ScopedSegmentDepthLimit(depth int64) SyncOption {
 	return func(sc *syncCfg) {
 		sc.segDepthLimit = depth

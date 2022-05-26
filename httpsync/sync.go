@@ -31,9 +31,9 @@ var log = logging.Logger("go-legs-httpsync")
 
 // Sync provides sync functionality for use with all http syncs.
 type Sync struct {
+	blockHook func(peer.ID, cid.Cid)
 	client    *http.Client
 	lsys      ipld.LinkSystem
-	blockHook func(peer.ID, cid.Cid)
 }
 
 func NewSync(lsys ipld.LinkSystem, client *http.Client, blockHook func(peer.ID, cid.Cid)) *Sync {
@@ -43,24 +43,24 @@ func NewSync(lsys ipld.LinkSystem, client *http.Client, blockHook func(peer.ID, 
 		}
 	}
 	return &Sync{
+		blockHook: blockHook,
 		client:    client,
 		lsys:      lsys,
-		blockHook: blockHook,
 	}
 }
 
 // NewSyncer creates a new Syncer to use for a single sync operation against a peer.
-func (s *Sync) NewSyncer(peerID peer.ID, peerAddr multiaddr.Multiaddr, limiter *rate.Limiter) (*Syncer, error) {
+func (s *Sync) NewSyncer(peerID peer.ID, peerAddr multiaddr.Multiaddr, rateLimiter *rate.Limiter) (*Syncer, error) {
 	rootURL, err := maurl.ToURL(peerAddr)
 	if err != nil {
 		return nil, err
 	}
 
 	return &Syncer{
-		sync:    s,
-		rootURL: *rootURL,
-		peerID:  peerID,
-		limiter: limiter,
+		peerID:      peerID,
+		rateLimiter: rateLimiter,
+		rootURL:     *rootURL,
+		sync:        s,
 	}, nil
 }
 
@@ -71,11 +71,10 @@ func (s *Sync) Close() {
 var errHeadFromUnexpectedPeer = errors.New("found head signed from an unexpected peer")
 
 type Syncer struct {
-	sync    *Sync
-	rootURL url.URL
-	peerID  peer.ID
-
-	limiter *rate.Limiter
+	peerID      peer.ID
+	rateLimiter *rate.Limiter
+	rootURL     url.URL
+	sync        *Sync
 }
 
 func (s *Syncer) GetHead(ctx context.Context) (cid.Cid, error) {
@@ -204,8 +203,8 @@ func (s *Syncer) walkFetch(ctx context.Context, rootCid cid.Cid, sel selector.Se
 
 type rateLimitErr struct {
 	resource string
-	source   peer.ID
 	rootURL  url.URL
+	source   peer.ID
 }
 
 func (r rateLimitErr) Error() string {
@@ -216,12 +215,14 @@ func (s *Syncer) fetch(ctx context.Context, rsrc string, cb func(io.Reader) erro
 	localURL := s.rootURL
 	localURL.Path = path.Join(s.rootURL.Path, rsrc)
 
-	err := s.limiter.Wait(ctx)
-	if err != nil {
-		return &rateLimitErr{
-			resource: rsrc,
-			source:   s.peerID,
-			rootURL:  s.rootURL,
+	if s.rateLimiter != nil {
+		err := s.rateLimiter.Wait(ctx)
+		if err != nil {
+			return &rateLimitErr{
+				resource: rsrc,
+				rootURL:  s.rootURL,
+				source:   s.peerID,
+			}
 		}
 	}
 

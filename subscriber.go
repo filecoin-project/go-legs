@@ -30,7 +30,7 @@ import (
 var log = logging.Logger("go-legs")
 
 // defaultAddrTTL is the default amount of time that addresses discovered from
-// pubsub messages will remain in the peerstore.  This is twice the default
+// pubsub messages will remain in the peerstore. This is twice the default
 // provider poll interval.
 const (
 	defaultAddrTTL       = 48 * time.Hour
@@ -39,13 +39,13 @@ const (
 )
 
 // errSourceNotAllowed is the error returned when a message source peer's
-// messages is not allowed to be processed.  This is only used internally, and
+// messages is not allowed to be processed. This is only used internally, and
 // pre-allocated here as it may occur frequently.
 var errSourceNotAllowed = errors.New("message source not allowed")
 
 // AllowPeerFunc is the signature of a function given to Subscriber that
 // determines whether to allow or reject messages originating from a peer
-// passed into the function.  Returning true or false indicates that messages
+// passed into the function. Returning true or false indicates that messages
 // from that peer are allowed rejected, respectively.
 type AllowPeerFunc func(peer.ID) bool
 
@@ -54,14 +54,14 @@ type BlockHookFunc func(peer.ID, cid.Cid, SegmentSyncActions)
 
 // Subscriber creates a single pubsub subscriber that receives messages from a
 // gossip pubsub topic, and creates a stateful message handler for each message
-// source peer.  An optional externally-defined AllowPeerFunc determines
-// whether to allow or deny messages from specific peers.
+// source peer. An optional externally-defined AllowPeerFunc determines whether
+// to allow or deny messages from specific peers.
 //
 // Messages from separate peers are handled concurrently, and multiple messages
-// from the same peer are handled serially.  If a handler is busy handling a
+// from the same peer are handled serially. If a handler is busy handling a
 // message, and more messages arrive from the same peer, then the last message
 // replaces the previous unhandled message to avoid having to maintain queues
-// of messages.  Handlers do not have persistent goroutines, but start a new
+// of messages. Handlers do not have persistent goroutines, but start a new
 // goroutine to handle a single message.
 type Subscriber struct {
 	// dss captures the default selector sequence passed to
@@ -78,8 +78,9 @@ type Subscriber struct {
 	handlers      map[peer.ID]*handler
 	handlersMutex sync.Mutex
 
-	// A map of block hooks to call for a specific peer id if the generalBlockHook is overridden
-	// within a sync via ScopedBlockHook sync option.
+	// A map of block hooks to call for a specific peer id if the
+	// generalBlockHook is overridden within a sync via ScopedBlockHook sync
+	// option.
 	scopedBlockHook      map[peer.ID]func(peer.ID, cid.Cid)
 	scopedBlockHookMutex *sync.RWMutex
 	generalBlockHook     BlockHookFunc
@@ -107,18 +108,23 @@ type Subscriber struct {
 	httpSync     *httpsync.Sync
 	syncRecLimit selector.RecursionLimit
 
+	// A separate peerstore is used to store HTTP addresses. This is necessary
+	// when peers have both libp2p and HTTP addresses, and a sync is requested
+	// over a libp2p transport. Since libp2p transports do not use an explicit
+	// multiaddr and depend on the libp2p peerstore, the HTTP addresses cannot
+	// be stored in the libp2p peerstore as those are not usable by the libp2p
+	// transport.
 	httpPeerstore peerstore.Peerstore
 
 	latestSyncHander LatestSyncHandler
 
-	// limiterFor defines the rate limits for each publisher
-	limiterFor RateLimiterFor
-
 	segDepthLimit int64
+
+	rateLimiterFor RateLimiterFor
 }
 
 // SyncFinished notifies an OnSyncFinished reader that a specified peer
-// completed a sync.  The channel receives events from providers that are
+// completed a sync. The channel receives events from providers that are
 // manually synced to the latest, as well as those auto-discovered.
 type SyncFinished struct {
 	// Cid is the CID identifying the link that finished and is now the latest
@@ -126,8 +132,8 @@ type SyncFinished struct {
 	Cid cid.Cid
 	// PeerID identifies the peer this SyncFinished event pertains to.
 	PeerID peer.ID
-	// A list of cids that this sync acquired. In order from latest to
-	// oldest. The latest cid will always be at the beginning.
+	// A list of cids that this sync acquired. In order from latest to oldest.
+	// The latest cid will always be at the beginning.
 	SyncedCids []cid.Cid
 }
 
@@ -151,8 +157,8 @@ type handler struct {
 	qlock sync.Mutex
 }
 
-// wrapBlockHook wraps a possibly nil block hook func to allow a for dispatching
-// to a blockhook func that is scoped within a .Sync call.
+// wrapBlockHook wraps a possibly nil block hook func to allow a for
+// dispatching to a blockhook func that is scoped within a .Sync call.
 func wrapBlockHook() (*sync.RWMutex, map[peer.ID]func(peer.ID, cid.Cid), func(peer.ID, cid.Cid)) {
 	var scopedBlockHookMutex sync.RWMutex
 	scopedBlockHook := make(map[peer.ID]func(peer.ID, cid.Cid))
@@ -196,23 +202,15 @@ func NewSubscriber(host host.Host, ds datastore.Batching, lsys ipld.LinkSystem, 
 
 	scopedBlockHookMutex, scopedBlockHook, blockHook := wrapBlockHook()
 
-	if cfg.rateLimiterFor == nil {
-		// Allows all events. No rate limit.
-		limiter := rate.NewLimiter(rate.Inf, 0)
-		cfg.rateLimiterFor = func(publisher peer.ID) *rate.Limiter {
-			return limiter
-		}
-	}
-
 	var dtSync *dtsync.Sync
 	if cfg.dtManager != nil {
 		if ds != nil {
 			cancelPubsub()
 			return nil, fmt.Errorf("datastore cannot be used with DtManager option")
 		}
-		dtSync, err = dtsync.NewSyncWithDT(host, cfg.dtManager, cfg.graphExchange, blockHook, cfg.rateLimiterFor)
+		dtSync, err = dtsync.NewSyncWithDT(host, cfg.dtManager, cfg.graphExchange, blockHook)
 	} else {
-		dtSync, err = dtsync.NewSync(host, ds, lsys, blockHook, cfg.rateLimiterFor)
+		dtSync, err = dtsync.NewSync(host, ds, lsys, blockHook)
 	}
 	if err != nil {
 		cancelPubsub()
@@ -258,9 +256,8 @@ func NewSubscriber(host host.Host, ds datastore.Batching, lsys ipld.LinkSystem, 
 
 		latestSyncHander: latestSyncHandler,
 
-		limiterFor: cfg.rateLimiterFor,
-
-		segDepthLimit: cfg.segDepthLimit,
+		segDepthLimit:  cfg.segDepthLimit,
+		rateLimiterFor: cfg.rateLimiterFor,
 	}
 
 	// Start watcher to read pubsub messages.
@@ -277,9 +274,9 @@ func (s *Subscriber) HttpPeerStore() peerstore.Peerstore {
 }
 
 // GetLatestSync returns the latest synced CID for the specified peer. If there
-// is not handler for the peer, then nil is returned.  This does not mean that
+// is not handler for the peer, then nil is returned. This does not mean that
 // no data is synced with that peer, it means that the Subscriber does not know
-// about it.  Calling Sync() first may be necessary.
+// about it. Calling Sync() first may be necessary.
 func (s *Subscriber) GetLatestSync(peerID peer.ID) ipld.Link {
 	v, ok := s.latestSyncHander.GetLatestSync(peerID)
 	if !ok || v == cid.Undef {
@@ -288,7 +285,7 @@ func (s *Subscriber) GetLatestSync(peerID peer.ID) ipld.Link {
 	return cidlink.Link{Cid: v}
 }
 
-// SetLatestSync sets the latest synced CID for a specified peer.  If there is
+// SetLatestSync sets the latest synced CID for a specified peer. If there is
 // no handler for the peer, then one is created without consulting any
 // AllowPeerFunc.
 func (s *Subscriber) SetLatestSync(peerID peer.ID, latestSync cid.Cid) error {
@@ -307,9 +304,9 @@ func (s *Subscriber) SetLatestSync(peerID peer.ID, latestSync cid.Cid) error {
 }
 
 // SetAllowPeer configures Subscriber with a function to evaluate whether to
-// allow or reject messages from a peer.  Setting nil removes any filtering and
-// allows messages from all peers.  Calling SetAllowPeer replaces any
-// previously configured AllowPeerFunc.
+// allow or reject messages from a peer. Setting nil removes any filtering and
+// allows messages from all peers. Calling SetAllowPeer replaces any previously
+// configured AllowPeerFunc.
 func (s *Subscriber) SetAllowPeer(allowPeer AllowPeerFunc) {
 	s.handlersMutex.Lock()
 	defer s.handlersMutex.Unlock()
@@ -394,7 +391,7 @@ func (s *Subscriber) OnSyncFinished() (<-chan SyncFinished, context.CancelFunc) 
 }
 
 // Sync performs a one-off explicit sync with the given peer for a specific CID
-// and updates the latest synced link to it.  Completing sync may take a
+// and updates the latest synced link to it. Completing sync may take a
 // significant amount of time, so Sync should generally be run in its own
 // goroutine.
 //
@@ -403,10 +400,10 @@ func (s *Subscriber) OnSyncFinished() (<-chan SyncFinished, context.CancelFunc) 
 // querying the latest CID returns cid.Undef, this function returns cid.Undef
 // with nil error.
 //
-// The latest synced CID is returned when this sync is complete.  Any
+// The latest synced CID is returned when this sync is complete. Any
 // OnSyncFinished readers will also get a SyncFinished when the sync succeeds,
 // but only if syncing to the latest, using `cid.Undef`, and using the default
-// selector.  This is because when specifying a CID, it is usually for an
+// selector. This is because when specifying a CID, it is usually for an
 // entries sync, not an advertisements sync.
 //
 // It is the responsibility of the caller to make sure the given CID appears
@@ -414,7 +411,7 @@ func (s *Subscriber) OnSyncFinished() (<-chan SyncFinished, context.CancelFunc) 
 // previously been synced.
 //
 // The selector sequence, sel, can optionally be specified to customize the
-// selection sequence during traversal.  If unspecified, the default selector
+// selection sequence during traversal. If unspecified, the default selector
 // sequence is used.
 //
 // Note that the selector sequence is wrapped with a selector logic that will
@@ -438,52 +435,13 @@ func (s *Subscriber) Sync(ctx context.Context, peerID peer.ID, nextCid cid.Cid, 
 
 	log := log.With("peer", peerID)
 
-	var err error
-	var syncer Syncer
-
-	isHttpPeerAddr := false
+	var peerAddrs []multiaddr.Multiaddr
 	if peerAddr != nil {
-		for _, p := range peerAddr.Protocols() {
-			if p.Code == multiaddr.P_HTTP || p.Code == multiaddr.P_HTTPS {
-				isHttpPeerAddr = true
-				break
-			}
-		}
-	} else {
-		// Check if we have an http url for this peer since we didn't get a peerAddr.
-		// Note that this gives a preference to use httpSync over dtsync if we have
-		// seen http address and we called sync with no explicit peerAddr.
-		possibleAddrs := s.httpPeerstore.Addrs(peerID)
-		if len(possibleAddrs) > 0 {
-			peerAddr = possibleAddrs[0]
-			isHttpPeerAddr = true
-		}
+		peerAddrs = []multiaddr.Multiaddr{peerAddr}
 	}
-
-	if isHttpPeerAddr {
-		var limiter *rate.Limiter
-		if cfg.rateLimiter != nil {
-			// If we have an explicit rate limiter, we'll use it instead of the
-			// default
-			limiter = cfg.rateLimiter
-		} else {
-			limiter = s.limiterFor(peerID)
-		}
-		syncer, err = s.httpSync.NewSyncer(peerID, peerAddr, limiter)
-		if err != nil {
-			return cid.Undef, fmt.Errorf("cannot create http sync handler: %w", err)
-		}
-	} else {
-		// Not an httpPeerAddr, so use the dtSync. We'll add it with a small TTL
-		// first, and extend it when we discover we can actually sync from it.
-		// In case the peerstore already has this address and the existing TTL is
-		// greater than this temp one, this is a no-op. In other words we never
-		// decrease the TTL here.
-		peerStore := s.host.Peerstore()
-		if peerStore != nil && peerAddr != nil {
-			peerStore.AddAddr(peerID, peerAddr, tempAddrTTL)
-		}
-		syncer = s.dtSync.NewSyncer(peerID, s.topicName, cfg.rateLimiter)
+	syncer, isHttp, err := s.makeSyncer(peerID, peerAddrs, tempAddrTTL, cfg.rateLimiter)
+	if err != nil {
+		return cid.Undef, err
 	}
 
 	updateLatest := cfg.alwaysUpdateLatest
@@ -517,22 +475,23 @@ func (s *Subscriber) Sync(ctx context.Context, peerID peer.ID, nextCid cid.Cid, 
 
 	var wrapSel bool
 	if sel == nil {
-		// Fall back onto the default selector sequence if one is not
-		// given.  Note that if selector is specified it is used as is
-		// without any wrapping.
+		// Fall back onto the default selector sequence if one is not given.
+		// Note that if selector is specified it is used as is without any
+		// wrapping.
 		sel = s.dss
 		wrapSel = true
 	}
 
-	// Check for existing handler.  If none, create one if allowed.
+	// Check for existing handler. If none, create one if allowed.
 	hnd, err := s.getOrCreateHandler(peerID, true)
 	if err != nil {
 		return cid.Undef, err
 	}
 
 	if updateLatest {
-		// Grab the latestSyncMu lock so that an async handler doesn't update the
-		// latestSync between when we call hnd.handle and when we actually updateLatest.
+		// Grab the latestSyncMu lock so that an async handler doesn't update
+		// the latestSync between when we call hnd.handle and when we actually
+		// updateLatest.
 		hnd.latestSyncMu.Lock()
 		defer hnd.latestSyncMu.Unlock()
 	}
@@ -552,9 +511,9 @@ func (s *Subscriber) Sync(ctx context.Context, peerID peer.ID, nextCid cid.Cid, 
 	// peerstore. If the address was already in the peerstore, this will extend
 	// its ttl.
 	if peerAddr != nil {
-		if isHttpPeerAddr {
-			// Store this http address so that future calls to sync will work without a
-			// peerAddr (given that it happens within the TTL)
+		if isHttp {
+			// Store this http address so that future calls to sync will work
+			// without a peerAddr (given that it happens within the TTL)
 			s.httpPeerstore.AddAddr(peerID, peerAddr, s.addrTTL)
 		} else {
 			// Not an http address, so add to the host's libp2p peerstore.
@@ -569,7 +528,7 @@ func (s *Subscriber) Sync(ctx context.Context, peerID peer.ID, nextCid cid.Cid, 
 }
 
 // distributeEvents reads a SyncFinished, sent by a peer handler, and copies
-// the even to all channels in outEventsChans.  This delivers the SyncFinished
+// the even to all channels in outEventsChans. This delivers the SyncFinished
 // to all OnSyncFinished channel readers.
 func (s *Subscriber) distributeEvents() {
 	for event := range s.inEvents {
@@ -615,9 +574,9 @@ func (s *Subscriber) getOrCreateHandler(peerID peer.ID, force bool) (*handler, e
 
 // watch reads messages from a pubsub topic subscription and passes the message
 // to the handler that is responsible for the peer that originally sent the
-// message.  If the handler does not yet exist, then the allowPeer callback is
-// consulted to determine if the peer's messages are allowed.  If allowed, a
-// new handler is created.  Otherwise, the message is ignored.
+// message. If the handler does not yet exist, then the allowPeer callback is
+// consulted to determine if the peer's messages are allowed. If allowed, a new
+// handler is created. Otherwise, the message is ignored.
 func (s *Subscriber) watch(ctx context.Context) {
 	for {
 		msg, err := s.psub.Next(ctx)
@@ -644,8 +603,8 @@ func (s *Subscriber) watch(ctx context.Context) {
 			continue
 		}
 
-		// Add the message originator's address to the peerstore.  This allows
-		// a connection, back to that publisher that sent the message, to
+		// Add the message originator's address to the peerstore. This allows a
+		// connection, back to that publisher that sent the message, to
 		// retrieve advertisements.
 		var addrs []multiaddr.Multiaddr
 		if len(m.Addrs) != 0 {
@@ -678,80 +637,95 @@ func (s *Subscriber) Announce(ctx context.Context, nextCid cid.Cid, peerID peer.
 		return err
 	}
 
-	limiter := s.limiterFor(peerID)
-	if !limiter.Allow() {
-		log.Infow("Ignoring announcement because of rate limiting", "peer", peerID)
-		return nil
+	syncer, _, err := s.makeSyncer(peerID, peerAddrs, s.addrTTL, nil)
+	if err != nil {
+		return err
 	}
 
-	var httpAddr multiaddr.Multiaddr
-	if len(peerAddrs) == 0 {
-		// Check if we have an http url for this peer since we didn't get a peerAddr.
-		// Note that this gives a preference to use httpSync over dtsync if we have
-		// seen http address and we called sync with no explicit peerAddr.
-		possibleAddrs := s.httpPeerstore.Addrs(peerID)
-		if len(possibleAddrs) > 0 {
-			httpAddr = possibleAddrs[0]
-		}
-	} else {
-	httpFound:
-		for _, addr := range peerAddrs {
-			for _, p := range addr.Protocols() {
-				if p.Code == multiaddr.P_HTTP || p.Code == multiaddr.P_HTTPS {
-					httpAddr = addr
-					break httpFound
-				}
-			}
-		}
-	}
-
-	var syncer Syncer
-	if httpAddr != nil {
-		// Store this http address so that future calls to sync will work without a
-		// peerAddr (given that it happens within the TTL)
-		s.httpPeerstore.AddAddr(peerID, httpAddr, s.addrTTL)
-
-		syncer, err = s.httpSync.NewSyncer(peerID, httpAddr, limiter)
-		if err != nil {
-			return fmt.Errorf("cannot create http sync handler: %w", err)
-		}
-	} else {
-		// Not an httpPeerAddr, so use the dtSync. We'll add it with a small TTL
-		// first, and extend it when we discover we can actually sync from it.
-		// In case the peerstore already has this address and the existing TTL is
-		// greater than this temp one, this is a no-op. In other words we never
-		// decrease the TTL here.
-		peerStore := s.host.Peerstore()
-		if peerStore != nil && len(peerAddrs) != 0 {
-			peerStore.AddAddrs(peerID, peerAddrs, s.addrTTL)
-		}
-		syncer = s.dtSync.NewSyncer(peerID, s.topicName, limiter)
-	}
-
-	// Start new goroutine to handle this message instead of having
+	// Start a new goroutine to handle this message instead of having a
 	// persistent goroutine for each peer.
 	hnd.handleAsync(ctx, nextCid, syncer)
 
 	return nil
 }
 
+func (s *Subscriber) makeSyncer(peerID peer.ID, peerAddrs []multiaddr.Multiaddr, addrTTL time.Duration, rateLimiter *rate.Limiter) (Syncer, bool, error) {
+	// Check for an HTTP address in peerAddrs, or if not given, in the http
+	// peerstore. This gives a preference to use httpsync over dtsync.
+	var httpAddr multiaddr.Multiaddr
+	if len(peerAddrs) == 0 {
+		possibleAddrs := s.httpPeerstore.Addrs(peerID)
+		if len(possibleAddrs) > 0 {
+			httpAddr = possibleAddrs[0]
+		}
+	} else {
+		httpAddr = firstHTTPAddr(peerAddrs)
+	}
+
+	// If there was no rate limiter for this sync, then use the normal rate
+	// limiter for the peer.
+	if rateLimiter == nil && s.rateLimiterFor != nil {
+		rateLimiter = s.rateLimiterFor(peerID)
+	}
+
+	if httpAddr != nil {
+		// Store this http address so that future calls to sync will work without a
+		// peerAddr (given that it happens within the TTL)
+		s.httpPeerstore.AddAddr(peerID, httpAddr, addrTTL)
+
+		syncer, err := s.httpSync.NewSyncer(peerID, httpAddr, rateLimiter)
+		if err != nil {
+			return nil, false, fmt.Errorf("cannot create http sync handler: %w", err)
+		}
+		return syncer, true, nil
+	}
+
+	// Not an httpPeerAddr, so use the dtSync. Add it to peerstore with a small
+	// TTL first, and extend it if/when sync with it completes. In case the
+	// peerstore already has this address and the existing TTL is greater than
+	// this temp one, this is a no-op. In other words, the TTL is never
+	// decreased here.
+	peerStore := s.host.Peerstore()
+	if peerStore != nil && len(peerAddrs) != 0 {
+		peerStore.AddAddrs(peerID, peerAddrs, addrTTL)
+	}
+
+	return s.dtSync.NewSyncer(peerID, s.topicName, rateLimiter), false, nil
+}
+
+func firstHTTPAddr(peerAddrs []multiaddr.Multiaddr) multiaddr.Multiaddr {
+	for _, addr := range peerAddrs {
+		if addr == nil {
+			continue
+		}
+		for _, p := range addr.Protocols() {
+			if p.Code == multiaddr.P_HTTP || p.Code == multiaddr.P_HTTPS {
+				return addr
+			}
+		}
+	}
+	return nil
+}
+
 // handleAsync starts a goroutine to process the latest announce message
-// received over pubsub or HTTP.  If there is already a goroutine handling a
+// received over pubsub or HTTP. If there is already a goroutine handling a
 // sync, then there will be at most one more goroutine waiting to handle the
 // pending sync.
 func (h *handler) handleAsync(ctx context.Context, nextCid cid.Cid, syncer Syncer) {
 	h.qlock.Lock()
 	// If pendingSync is undef, then previous goroutine has already handled any
-	// pendingSync, so start a new go routine to handle the pending sync.  If
+	// pendingSync, so start a new go routine to handle the pending sync. If
 	// pending sync is not undef, then there is an existing goroutine that has
 	// not yet handled the pending sync.
 	if h.pendingCid == cid.Undef {
 		h.subscriber.asyncWG.Add(1)
 		go func() {
+			// Wait for any previous handler goroutine to finish.
 			h.latestSyncMu.Lock()
 			defer h.latestSyncMu.Unlock()
 			defer h.subscriber.asyncWG.Done()
 
+			// Wait for the parent goroutine to assign pending CID and unlock.
 			h.qlock.Lock()
 			c := h.pendingCid
 			h.pendingCid = cid.Undef
@@ -759,9 +733,9 @@ func (h *handler) handleAsync(ctx context.Context, nextCid cid.Cid, syncer Synce
 			h.pendingSyncer = nil
 			h.qlock.Unlock()
 
-			// Wait for this handler to become available.
-			// Note this only wraps the handler. This is to free up the handler in
-			// case someone else needs it while we wait to send on the events chan.
+			// Wait for this handler to become available. This only wraps the
+			// handler. This is to free up the handler in case someone else
+			// needs it while we wait to send on the events chan.
 			syncedCids, err := h.handle(ctx, c, h.subscriber.dss, true, syncer, h.subscriber.generalBlockHook, h.subscriber.segDepthLimit)
 			if err != nil {
 				// Log error for now.
@@ -777,6 +751,7 @@ func (h *handler) handleAsync(ctx context.Context, nextCid cid.Cid, syncer Synce
 	} else {
 		log.Infow("Pending update replaced by new", "previous_cid", h.pendingCid, "new_cid", nextCid)
 	}
+	// Set the CID to be handled by the waiting goroutine.
 	h.pendingCid = nextCid
 	h.pendingSyncer = syncer
 	h.qlock.Unlock()
@@ -785,34 +760,39 @@ func (h *handler) handleAsync(ctx context.Context, nextCid cid.Cid, syncer Synce
 var _ SegmentSyncActions = (*segmentedSync)(nil)
 
 type (
-	// SegmentSyncActions allows the user to control the flow of segmented sync by either choosing
-	// which CID should be synced in the next sync cycle or setting the error that should mark the
-	// sync as failed.
+	// SegmentSyncActions allows the user to control the flow of segmented sync
+	// by either choosing which CID should be synced in the next sync cycle or
+	// setting the error that should mark the sync as failed.
 	SegmentSyncActions interface {
-		// SetNextSyncCid sets the cid that will be synced in the next segmented sync. Note that
-		// the last call to this function during a segmented sync cycle dictates which CID will be
-		// synced in the next cycle.
+		// SetNextSyncCid sets the cid that will be synced in the next
+		// segmented sync. Note that the last call to this function during a
+		// segmented sync cycle dictates which CID will be synced in the next
+		// cycle.
 		//
-		// At least one call to this function must be made for the segmented sync cycles to continue.
-		// Because, otherwise the CID that should be used in the next segmented sync cycle cannot
-		// be known.
+		// At least one call to this function must be made for the segmented
+		// sync cycles to continue. Because, otherwise the CID that should be
+		// used in the next segmented sync cycle cannot be known.
 		//
-		// If no calls are made to this function or next CID is set to cid.Undef, the sync will
-		// terminate and any CIDs that are synced so far will be included in a SyncFinished event.
+		// If no calls are made to this function or next CID is set to
+		// cid.Undef, the sync will terminate and any CIDs that are synced so
+		// far will be included in a SyncFinished event.
 		SetNextSyncCid(cid.Cid)
 
-		// FailSync fails the sync and returns the given error as soon as the current segment sync
-		// finishes. Note that the last call to this function during a segmented sync cycle takes
-		// dictates the error value.
-		// Passing nil as error will cancel sync failure.
+		// FailSync fails the sync and returns the given error as soon as the
+		// current segment sync finishes. The last call to this function during
+		// a segmented sync cycle dictates the error value. Passing nil as
+		// error will cancel sync failure.
 		FailSync(error)
 	}
-	// SegmentBlockHookFunc is called for each synced block, similarly to BlockHookFunc. Except that
-	// it provides SegmentSyncActions to the hook allowing the user to control the flow of segmented
-	// sync by determining which CID should be used in the next segmented sync cycle by decoding the
-	// synced block.
-	// SegmentSyncActions also allows the user to signal any errors that may occur during the hook
-	// execution to terminate the sync and mark it as failed.
+	// SegmentBlockHookFunc is called for each synced block, similarly to
+	// BlockHookFunc. Except that it provides SegmentSyncActions to the hook
+	// allowing the user to control the flow of segmented sync by determining
+	// which CID should be used in the next segmented sync cycle by decoding
+	// the synced block.
+	//
+	// SegmentSyncActions also allows the user to signal any errors that may
+	// occur during the hook execution to terminate the sync and mark it as
+	// failed.
 	SegmentBlockHookFunc func(peer.ID, cid.Cid, SegmentSyncActions)
 	segmentedSync        struct {
 		nextSyncCid *cid.Cid
