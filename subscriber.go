@@ -663,6 +663,10 @@ func (s *Subscriber) makeSyncer(peerID peer.ID, peerAddrs []multiaddr.Multiaddr,
 	}
 
 	if httpAddr != nil {
+		// Store this http address so that future calls to sync will work without a
+		// peerAddr (given that it happens within the TTL)
+		s.httpPeerstore.AddAddr(peerID, httpAddr, addrTTL)
+
 		syncer, err := s.httpSync.NewSyncer(peerID, httpAddr, rateLimiter)
 		if err != nil {
 			return nil, false, fmt.Errorf("cannot create http sync handler: %w", err)
