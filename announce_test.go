@@ -6,11 +6,17 @@ import (
 	"time"
 
 	"github.com/filecoin-project/go-legs/dtsync"
+	"github.com/filecoin-project/go-legs/httpsync"
 	"github.com/filecoin-project/go-legs/test"
 	"github.com/ipfs/go-cid"
 	"github.com/ipfs/go-datastore"
 	dssync "github.com/ipfs/go-datastore/sync"
+	"github.com/ipld/go-ipld-prime"
 	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
+	basicnode "github.com/ipld/go-ipld-prime/node/basic"
+	"github.com/libp2p/go-libp2p"
+	"github.com/multiformats/go-multiaddr"
+	"github.com/stretchr/testify/require"
 )
 
 const (
@@ -118,7 +124,7 @@ func TestAnnounceReplace(t *testing.T) {
 	// Unblock the first handler goroutine
 	hnd.syncMutex.Unlock()
 
-	// Validate that sink for first CID happend.
+	// Validate that sink for first CID happened.
 	select {
 	case <-time.After(updateTimeout):
 		t.Fatal("timed out waiting for sync to propagate")
@@ -135,7 +141,7 @@ func TestAnnounceReplace(t *testing.T) {
 		t.Log("Received sync notification for first CID:", firstCid)
 	}
 
-	// Validate that sink for last CID happend.
+	// Validate that sink for last CID happened.
 	select {
 	case <-time.After(updateTimeout):
 		t.Fatal("timed out waiting for sync to propagate")
@@ -161,4 +167,58 @@ func TestAnnounceReplace(t *testing.T) {
 				changeEvent.PeerID, changeEvent.Cid)
 		}
 	}
+}
+
+func TestAnnounce_LearnsHttpPublisherAddr(t *testing.T) {
+	// Instantiate a HTTP publisher
+	pubh, err := libp2p.New()
+	require.NoError(t, err)
+	defer pubh.Close()
+	pubds := dssync.MutexWrap(datastore.NewMapDatastore())
+	publs := test.MkLinkSystem(pubds)
+	pub, err := httpsync.NewPublisher("0.0.0.0:0", publs, pubh.ID(), pubh.Peerstore().PrivKey(pubh.ID()))
+	require.NoError(t, err)
+	defer pub.Close()
+
+	// Store one CID at publisher
+	wantOneMsg := "fish"
+	oneLink, err := test.Store(pubds, basicnode.NewString(wantOneMsg))
+	require.NoError(t, err)
+	oneC := oneLink.(cidlink.Link).Cid
+
+	// Store another CID at publisher
+	wantAnotherMsg := "lobster"
+	anotherLink, err := test.Store(pubds, basicnode.NewString(wantAnotherMsg))
+	require.NoError(t, err)
+	anotherC := anotherLink.(cidlink.Link).Cid
+
+	// Instantiate a subscriber
+	subh, err := libp2p.New()
+	require.NoError(t, err)
+	defer pubh.Close()
+	subds := dssync.MutexWrap(datastore.NewMapDatastore())
+	subls := test.MkLinkSystem(subds)
+	sub, err := NewSubscriber(subh, subds, subls, testTopic, nil)
+	require.NoError(t, err)
+	defer sub.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	// Announce one CID to the subscriber. Note that announce does a sync in the background.
+	// That's why we use one cid here and another for sync so that we can concretely assert that
+	// data was synced via the sync call and not via the earlier background sync via announce.
+	err = sub.Announce(ctx, oneC, pubh.ID(), []multiaddr.Multiaddr{pub.Address()})
+	require.NoError(t, err)
+
+	// Now assert that we can sync another CID because, the subscriber should have learned the
+	// address of publisher via earlier announce.
+	gotc, err := sub.Sync(ctx, pubh.ID(), anotherC, nil, nil)
+	require.NoError(t, err)
+	require.Equal(t, anotherC, gotc)
+	gotNode, err := subls.Load(ipld.LinkContext{Ctx: ctx}, anotherLink, basicnode.Prototype.String)
+	require.NoError(t, err)
+	gotAnotherMsg, err := gotNode.AsString()
+	require.NoError(t, err)
+	require.Equal(t, wantAnotherMsg, gotAnotherMsg)
 }
