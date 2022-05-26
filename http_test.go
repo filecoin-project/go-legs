@@ -37,7 +37,7 @@ type httpTestEnv struct {
 func setupPublisherSubscriber(t *testing.T, subscriberOptions []legs.Option) httpTestEnv {
 	srcPrivKey, _, err := ic.GenerateECDSAKeyPair(rand.Reader)
 	if err != nil {
-		t.Fatal("Err generarting private key", err)
+		t.Fatal("Err generating private key", err)
 	}
 
 	srcHost = test.MkTestHost(libp2p.Identity(srcPrivKey))
@@ -63,8 +63,6 @@ func setupPublisherSubscriber(t *testing.T, subscriberOptions []legs.Option) htt
 	t.Cleanup(func() {
 		sub.Close()
 	})
-
-	httpPub.Address()
 
 	return httpTestEnv{
 		srcHost:    srcHost,

@@ -707,6 +707,10 @@ func (s *Subscriber) Announce(ctx context.Context, nextCid cid.Cid, peerID peer.
 
 	var syncer Syncer
 	if httpAddr != nil {
+		// Store this http address so that future calls to sync will work without a
+		// peerAddr (given that it happens within the TTL)
+		s.httpPeerstore.AddAddr(peerID, httpAddr, s.addrTTL)
+
 		syncer, err = s.httpSync.NewSyncer(peerID, httpAddr, limiter)
 		if err != nil {
 			return fmt.Errorf("cannot create http sync handler: %w", err)
