@@ -2,6 +2,7 @@ package head
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io/ioutil"
 	"net"
@@ -10,13 +11,13 @@ import (
 	"sync"
 	"time"
 
-	logging "github.com/ipfs/go-log/v2"
-
 	"github.com/ipfs/go-cid"
+	logging "github.com/ipfs/go-log/v2"
 	"github.com/libp2p/go-libp2p-core/host"
 	peer "github.com/libp2p/go-libp2p-core/peer"
 	"github.com/libp2p/go-libp2p-core/protocol"
 	gostream "github.com/libp2p/go-libp2p-gostream"
+	multistream "github.com/multiformats/go-multistream"
 )
 
 const closeTimeout = 30 * time.Second
@@ -68,7 +69,7 @@ func QueryRootCid(ctx context.Context, host host.Host, topic string, peerID peer
 					// If protocol ID is wrong, then try the old "double-slashed" protocol ID.
 					//
 					// TODO: remove this code when all providers have upgraded.
-					if err.Error() != "protocol not supported" {
+					if !errors.Is(err, multistream.ErrNotSupported) {
 						return nil, err
 					}
 					oldProtoID := protocol.ID("/legs/head/" + topic + "/0.0.1")
@@ -76,7 +77,7 @@ func QueryRootCid(ctx context.Context, host host.Host, topic string, peerID peer
 					if err != nil {
 						return nil, err
 					}
-					log.Infow("Peer head CID server uses old protocol ID", "peer", peerID)
+					log.Infow("Peer head CID server uses old protocol ID", "peer", peerID, "proto", oldProtoID)
 				}
 				return conn, err
 			},
