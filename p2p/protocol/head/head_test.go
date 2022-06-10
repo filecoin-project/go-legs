@@ -1,4 +1,4 @@
-package head
+package head_test
 
 import (
 	"context"
@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/filecoin-project/go-legs/p2p/protocol/head"
 	"github.com/filecoin-project/go-legs/test"
 	"github.com/ipfs/go-cid"
 	"github.com/ipfs/go-datastore"
@@ -47,14 +48,14 @@ func TestFetchLatestHead(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	p := NewPublisher()
+	p := head.NewPublisher()
 	go p.Serve(publisher, "test")
 	defer p.Close()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	c, err := QueryRootCid(ctx, client, "test", publisher.ID())
+	c, err := head.QueryRootCid(ctx, client, "test", publisher.ID())
 	if err != nil && c != cid.Undef {
 		t.Fatal("Expected to get a nil error and a cid undef because there is no root")
 	}
@@ -63,19 +64,12 @@ func TestFetchLatestHead(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	c, err = QueryRootCid(ctx, client, "test", publisher.ID())
+	c, err = head.QueryRootCid(ctx, client, "test", publisher.ID())
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	if !c.Equals(rootLnk.(cidlink.Link).Cid) {
 		t.Fatalf("didn't get expected cid. expected %s, got %s", rootLnk, c)
-	}
-}
-
-func TestDeriveProtocolID(t *testing.T) {
-	protoID := deriveProtocolID("/mainnet")
-	if strings.Contains(string(protoID), "//") {
-		t.Fatalf("Derived protocol ID %q should not contain \"//\"", protoID)
 	}
 }
