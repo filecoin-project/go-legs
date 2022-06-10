@@ -17,6 +17,7 @@ require (
 	github.com/libp2p/go-libp2p-pubsub v0.6.1
 	github.com/multiformats/go-multiaddr v0.5.0
 	github.com/multiformats/go-multicodec v0.4.0
+	github.com/multiformats/go-multistream v0.2.2
 	github.com/stretchr/testify v1.7.1
 	github.com/whyrusleeping/cbor-gen v0.0.0-20220302191723-37c43cae8e14
 	golang.org/x/crypto v0.0.0-20211117183948-ae814b36b871
@@ -122,7 +123,6 @@ require (
 	github.com/multiformats/go-multiaddr-fmt v0.1.0 // indirect
 	github.com/multiformats/go-multibase v0.0.3 // indirect
 	github.com/multiformats/go-multihash v0.1.0 // indirect
-	github.com/multiformats/go-multistream v0.2.2 // indirect
 	github.com/multiformats/go-varint v0.0.6 // indirect
 	github.com/nxadm/tail v1.4.8 // indirect
 	github.com/onsi/ginkgo v1.16.4 // indirect
