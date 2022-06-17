@@ -615,8 +615,8 @@ func (s *Subscriber) watch(ctx context.Context) {
 			}
 		}
 
-		republish := bytes.HasPrefix(m.ExtraData, []byte("republish"))
-		if republish {
+		// If message has original peer set, then this is a republished message.
+		if m.OrigPeer != "" {
 			// Ignore re-published announce from this host.
 			if srcPeer == s.host.ID() {
 				log.Debug("Ignored rebuplished announce from self")
@@ -625,7 +625,7 @@ func (s *Subscriber) watch(ctx context.Context) {
 
 			// Read the original publisher.
 			relayPeer := srcPeer
-			srcPeer, err = peer.Decode(string(m.ExtraData[len("republish"):]))
+			srcPeer, err = peer.Decode(m.OrigPeer)
 			if err != nil {
 				log.Errorw("Cannot read peerID from republished announce", "err", err)
 				continue
@@ -689,14 +689,9 @@ func (s *Subscriber) announce(ctx context.Context, nextCid cid.Cid, peerID peer.
 }
 
 func (s *Subscriber) republish(ctx context.Context, nextCid cid.Cid, peerID peer.ID, addrs []multiaddr.Multiaddr) error {
-	pidStr := peerID.String()
-	buf := bytes.NewBuffer(nil)
-	buf.Grow(len("republish") + len(pidStr))
-	buf.WriteString("republish")
-	buf.WriteString(pidStr)
 	msg := dtsync.Message{
-		Cid:       nextCid,
-		ExtraData: buf.Bytes(),
+		Cid:      nextCid,
+		OrigPeer: peerID.String(),
 	}
 	msg.SetAddrs(addrs)
 	msgBuf := bytes.NewBuffer(nil)

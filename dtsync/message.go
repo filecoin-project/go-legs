@@ -12,7 +12,8 @@ var ErrBadEncoding = errors.New("invalid message encoding")
 type Message struct {
 	Cid       cid.Cid
 	Addrs     [][]byte
-	ExtraData []byte `json:",omitempty"`
+	ExtraData []byte
+	OrigPeer  string
 }
 
 func (m *Message) SetAddrs(addrs []multiaddr.Multiaddr) {

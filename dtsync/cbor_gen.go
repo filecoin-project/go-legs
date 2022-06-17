@@ -18,15 +18,22 @@ var _ = cid.Undef
 var _ = math.E
 var _ = sort.Sort
 
-var lengthBufMessage = []byte{131}
-
 func (t *Message) MarshalCBOR(w io.Writer) error {
 	if t == nil {
 		_, err := w.Write(cbg.CborNull)
 		return err
 	}
-	if _, err := w.Write(lengthBufMessage); err != nil {
-		return err
+	if t.OrigPeer == "" {
+		var lengthBufMessage = []byte{131}
+		if _, err := w.Write(lengthBufMessage); err != nil {
+			return err
+		}
+	} else {
+		var lengthBufMessage = []byte{132}
+
+		if _, err := w.Write(lengthBufMessage); err != nil {
+			return err
+		}
 	}
 
 	scratch := make([]byte, 9)
@@ -71,6 +78,22 @@ func (t *Message) MarshalCBOR(w io.Writer) error {
 	if _, err := w.Write(t.ExtraData[:]); err != nil {
 		return err
 	}
+
+	if len(t.OrigPeer) == 0 {
+		return nil
+	}
+
+	// t.OrigPeer (string) (string)
+	if len(t.OrigPeer) > cbg.MaxLength {
+		return xerrors.Errorf("Value in field t.OrigPeer was too long")
+	}
+
+	if err := cbg.WriteMajorTypeHeaderBuf(scratch, w, cbg.MajTextString, uint64(len(t.OrigPeer))); err != nil {
+		return err
+	}
+	if _, err := io.WriteString(w, string(t.OrigPeer)); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -88,8 +111,15 @@ func (t *Message) UnmarshalCBOR(r io.Reader) error {
 		return fmt.Errorf("cbor input should be of type array")
 	}
 
-	if extra != 3 {
-		return fmt.Errorf("cbor input had wrong number of fields")
+	if extra > 4 {
+		return fmt.Errorf("cbor input had too many fields")
+	}
+	if extra < 3 {
+		return fmt.Errorf("cbor input had too few fields")
+	}
+	var skipOrigPeer bool
+	if extra == 3 {
+		skipOrigPeer = true
 	}
 
 	// t.Cid (cid.Cid) (struct)
@@ -172,5 +202,16 @@ func (t *Message) UnmarshalCBOR(r io.Reader) error {
 	if _, err := io.ReadFull(br, t.ExtraData[:]); err != nil {
 		return err
 	}
+
+	// t.OrigPeer (string) (string)
+	if !skipOrigPeer {
+		sval, err := cbg.ReadStringBuf(br, scratch)
+		if err != nil {
+			return err
+		}
+
+		t.OrigPeer = string(sval)
+	}
+
 	return nil
 }
