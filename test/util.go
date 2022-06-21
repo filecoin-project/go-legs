@@ -28,9 +28,20 @@ const (
 	publishTimeout     = 100 * time.Millisecond
 )
 
+func WaitForMeshWithMessage(t *testing.T, topic string, hosts ...host.Host) []*pubsub.Topic {
+	retries := 2
+	for {
+		topics := waitForMeshWithMessage(t, retries, topic, hosts...)
+		if topics != nil {
+			return topics
+		}
+		retries--
+	}
+}
+
 // WaitForMeshWithMessage sets up a gossipsub network and sends a test message.
 // Blocks until all other hosts see the first host's message.
-func WaitForMeshWithMessage(t *testing.T, topic string, hosts ...host.Host) []*pubsub.Topic {
+func waitForMeshWithMessage(t *testing.T, retries int, topic string, hosts ...host.Host) []*pubsub.Topic {
 	now := time.Now()
 	meshFormed := false
 	defer func() {
@@ -39,9 +50,9 @@ func WaitForMeshWithMessage(t *testing.T, topic string, hosts ...host.Host) []*p
 		}
 	}()
 
-	addrInfos := make([]peer.AddrInfo, 0, len(hosts))
-	for _, h := range hosts {
-		addrInfos = append(addrInfos, *host.InfoFromHost(h))
+	addrInfos := make([]peer.AddrInfo, len(hosts))
+	for i, h := range hosts {
+		addrInfos[i] = *host.InfoFromHost(h)
 	}
 
 	for _, h := range hosts {
@@ -57,9 +68,9 @@ func WaitForMeshWithMessage(t *testing.T, topic string, hosts ...host.Host) []*p
 		}
 	}
 
-	pubsubs := make([]*pubsub.PubSub, 0, len(hosts))
-	topics := make([]*pubsub.Topic, 0, len(hosts))
-	for _, h := range hosts {
+	pubsubs := make([]*pubsub.PubSub, len(hosts))
+	topics := make([]*pubsub.Topic, len(hosts))
+	for i, h := range hosts {
 		addrInfosWithoutSelf := make([]peer.AddrInfo, 0, len(addrInfos)-1)
 		for _, ai := range addrInfos {
 			if ai.ID != h.ID() {
@@ -77,8 +88,8 @@ func WaitForMeshWithMessage(t *testing.T, topic string, hosts ...host.Host) []*p
 			t.Fatalf("Failed to join topic: %v", err)
 		}
 
-		pubsubs = append(pubsubs, pubsub)
-		topics = append(topics, tpc)
+		pubsubs[i] = pubsub
+		topics[i] = tpc
 	}
 
 	if len(pubsubs) == 1 {
@@ -88,10 +99,10 @@ func WaitForMeshWithMessage(t *testing.T, topic string, hosts ...host.Host) []*p
 	restTopics := topics[1:]
 	wg := sync.WaitGroup{}
 
-	for _, tpc := range restTopics {
+	for i := range restTopics {
 		wg.Add(1)
 
-		s, err := tpc.Subscribe()
+		s, err := restTopics[i].Subscribe()
 		if err != nil {
 			t.Fatalf("Failed to subscribe: %v", err)
 		}
@@ -139,8 +150,13 @@ func WaitForMeshWithMessage(t *testing.T, topic string, hosts ...host.Host) []*p
 			meshFormed = true
 			return topics
 		case <-timeout.C:
-			t.Fatalf("Mesh failed to startup")
-			return nil
+			msg := "Mesh failed to startup"
+			if retries != 0 {
+				t.Log(msg + " retrying")
+				return nil
+			} else {
+				t.Fatalf(msg)
+			}
 		case <-pubTimeout.C:
 			err := tpc.Publish(context.Background(), []byte("hi"))
 			if err != nil {
