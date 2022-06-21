@@ -19,24 +19,25 @@ func (t *Message) MarshalCBOR(w io.Writer) error {
 		_, err = w.Write(cbg.CborNull)
 		return err
 	}
+
+	var lengthBufMessage []byte
 	if t.OrigPeer == "" {
-		var lengthBufMessage = []byte{131}
-		if _, err = w.Write(lengthBufMessage); err != nil {
-			return err
-		}
+		lengthBufMessage = []byte{131}
 	} else {
-		var lengthBufMessage = []byte{132}
-		if _, err = w.Write(lengthBufMessage); err != nil {
-			return err
-		}
+		lengthBufMessage = []byte{132}
+	}
+	if _, err = w.Write(lengthBufMessage); err != nil {
+		return err
 	}
 
 	scratch := make([]byte, 9)
 
+	// Encode t.Cid.
 	if err = cbg.WriteCidBuf(scratch, w, t.Cid); err != nil {
 		return fmt.Errorf("failed to write cid field t.Cid: %w", err)
 	}
 
+	// Encode t.Addrs.
 	if len(t.Addrs) > cbg.MaxLength {
 		return fmt.Errorf("Slice value in field t.Addrs was too long")
 	}
@@ -70,10 +71,12 @@ func (t *Message) MarshalCBOR(w io.Writer) error {
 		return err
 	}
 
+	// OrigPeer is empty so do not encode it.
 	if len(t.OrigPeer) == 0 {
 		return nil
 	}
 
+	// Encode t.OrigPeer.
 	if len(t.OrigPeer) > cbg.MaxLength {
 		return fmt.Errorf("Value in field t.OrigPeer was too long")
 	}
@@ -113,11 +116,13 @@ func (t *Message) UnmarshalCBOR(r io.Reader) error {
 		hasOrigPeer = true
 	}
 
+	// Decode t.Cid.
 	t.Cid, err = cbg.ReadCid(br)
 	if err != nil {
 		return fmt.Errorf("failed to read cid field t.Cid: %w", err)
 	}
 
+	// Decode t.Addrs.
 	maj, extra, err = cbg.CborReadHeaderBuf(br, scratch)
 	if err != nil {
 		return err
@@ -157,6 +162,7 @@ func (t *Message) UnmarshalCBOR(r io.Reader) error {
 		}
 	}
 
+	// Decode t.ExtraData.
 	maj, extra, err = cbg.CborReadHeaderBuf(br, scratch)
 	if err != nil {
 		return err
@@ -177,10 +183,12 @@ func (t *Message) UnmarshalCBOR(r io.Reader) error {
 		return err
 	}
 
+	// OrigPeer field does not exist, so nothing more to do.
 	if !hasOrigPeer {
 		return nil
 	}
 
+	// Decode t.OrigPeer.
 	sval, err := cbg.ReadStringBuf(br, scratch)
 	if err != nil {
 		return err
