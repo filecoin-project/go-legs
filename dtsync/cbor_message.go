@@ -39,7 +39,7 @@ func (t *Message) MarshalCBOR(w io.Writer) error {
 
 	// Encode t.Addrs.
 	if len(t.Addrs) > cbg.MaxLength {
-		return fmt.Errorf("Slice value in field t.Addrs was too long")
+		return fmt.Errorf("slice value in field t.Addrs was too long")
 	}
 
 	if err = cbg.WriteMajorTypeHeaderBuf(scratch, w, cbg.MajArray, uint64(len(t.Addrs))); err != nil {
@@ -47,7 +47,7 @@ func (t *Message) MarshalCBOR(w io.Writer) error {
 	}
 	for _, v := range t.Addrs {
 		if len(v) > cbg.ByteArrayMaxLen {
-			return fmt.Errorf("Byte array in field v was too long")
+			return fmt.Errorf("byte array in field v was too long")
 		}
 
 		if err = cbg.WriteMajorTypeHeaderBuf(scratch, w, cbg.MajByteString, uint64(len(v))); err != nil {
@@ -60,7 +60,7 @@ func (t *Message) MarshalCBOR(w io.Writer) error {
 	}
 
 	if len(t.ExtraData) > cbg.ByteArrayMaxLen {
-		return fmt.Errorf("Byte array in field t.ExtraData was too long")
+		return fmt.Errorf("byte array in field t.ExtraData was too long")
 	}
 
 	if err = cbg.WriteMajorTypeHeaderBuf(scratch, w, cbg.MajByteString, uint64(len(t.ExtraData))); err != nil {
@@ -78,7 +78,7 @@ func (t *Message) MarshalCBOR(w io.Writer) error {
 
 	// Encode t.OrigPeer.
 	if len(t.OrigPeer) > cbg.MaxLength {
-		return fmt.Errorf("Value in field t.OrigPeer was too long")
+		return fmt.Errorf("value in field t.OrigPeer was too long")
 	}
 
 	if err = cbg.WriteMajorTypeHeaderBuf(scratch, w, cbg.MajTextString, uint64(len(t.OrigPeer))); err != nil {
@@ -147,7 +147,7 @@ func (t *Message) UnmarshalCBOR(r io.Reader) error {
 		}
 
 		if extra > cbg.ByteArrayMaxLen {
-			return fmt.Errorf("t.Addrs[i]: byte array too large (%d)", extra)
+			return fmt.Errorf("byte array too large (%d) for Addrs[%d]", extra, i)
 		}
 		if maj != cbg.MajByteString {
 			return fmt.Errorf("expected byte array")
@@ -169,7 +169,7 @@ func (t *Message) UnmarshalCBOR(r io.Reader) error {
 	}
 
 	if extra > cbg.ByteArrayMaxLen {
-		return fmt.Errorf("t.ExtraData: byte array too large (%d)", extra)
+		return fmt.Errorf("byte array too large (%d) for ExtraData", extra)
 	}
 	if maj != cbg.MajByteString {
 		return fmt.Errorf("expected byte array")
