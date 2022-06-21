@@ -17,20 +17,20 @@ type Message struct {
 }
 
 func (m *Message) SetAddrs(addrs []multiaddr.Multiaddr) {
-	m.Addrs = make([][]byte, 0, len(addrs))
-	for _, a := range addrs {
-		m.Addrs = append(m.Addrs, a.Bytes())
+	m.Addrs = make([][]byte, len(addrs))
+	for i, a := range addrs {
+		m.Addrs[i] = a.Bytes()
 	}
 }
 
 func (m *Message) GetAddrs() ([]multiaddr.Multiaddr, error) {
-	addrs := make([]multiaddr.Multiaddr, 0, len(m.Addrs))
-	for _, a := range m.Addrs {
-		p, err := multiaddr.NewMultiaddrBytes(a)
+	addrs := make([]multiaddr.Multiaddr, len(m.Addrs))
+	for i := range m.Addrs {
+		var err error
+		addrs[i], err = multiaddr.NewMultiaddrBytes(m.Addrs[i])
 		if err != nil {
 			return nil, err
 		}
-		addrs = append(addrs, p)
 	}
 	return addrs, nil
 }
