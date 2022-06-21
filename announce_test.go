@@ -289,8 +289,8 @@ func TestAnnounceRepublish(t *testing.T) {
 		if !downstream.Cid.Equals(firstCid) {
 			t.Fatalf("sync returned unexpected first cid %s, expected %s", downstream.Cid, firstCid)
 		}
-		if _, err = dstStore.Get(context.Background(), datastore.NewKey(downstream.Cid.String())); err != nil {
-			t.Fatalf("data not in receiver store: %s", err)
+		if _, err = dstStore2.Get(context.Background(), datastore.NewKey(downstream.Cid.String())); err != nil {
+			t.Fatalf("data not in second receiver store: %s", err)
 		}
 		t.Log("Received sync notification for first CID:", firstCid)
 	}
