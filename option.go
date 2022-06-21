@@ -33,6 +33,7 @@ type config struct {
 	latestSyncHandler LatestSyncHandler
 
 	rateLimiterFor RateLimiterFor
+	resendAnnounce bool
 
 	segDepthLimit int64
 }
@@ -120,6 +121,15 @@ func SegmentDepthLimit(depth int64) Option {
 func SyncRecursionLimit(limit selector.RecursionLimit) Option {
 	return func(c *config) error {
 		c.syncRecLimit = limit
+		return nil
+	}
+}
+
+// ResendAnnounce determines whether to resend the direct announce mesages
+// (those that are not received via pubsub) over pubsub.
+func ResendAnnounce(enable bool) Option {
+	return func(c *config) error {
+		c.resendAnnounce = enable
 		return nil
 	}
 }

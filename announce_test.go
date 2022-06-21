@@ -222,3 +222,76 @@ func TestAnnounce_LearnsHttpPublisherAddr(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, wantAnotherMsg, gotAnotherMsg)
 }
+
+func TestAnnounceRepublish(t *testing.T) {
+	srcStore := dssync.MutexWrap(datastore.NewMapDatastore())
+	dstStore := dssync.MutexWrap(datastore.NewMapDatastore())
+	srcHost := test.MkTestHost()
+	srcLnkS := test.MkLinkSystem(srcStore)
+
+	dstHost := test.MkTestHost()
+
+	srcHost.Peerstore().AddAddrs(dstHost.ID(), dstHost.Addrs(), time.Hour)
+	dstHost.Peerstore().AddAddrs(srcHost.ID(), srcHost.Addrs(), time.Hour)
+	dstLnkS := test.MkLinkSystem(dstStore)
+
+	dstStore2 := dssync.MutexWrap(datastore.NewMapDatastore())
+	dstLnkS2 := test.MkLinkSystem(dstStore2)
+	dstHost2 := test.MkTestHost()
+
+	topics := test.WaitForMeshWithMessage(t, testTopic, dstHost, dstHost2)
+
+	pub, err := dtsync.NewPublisher(srcHost, srcStore, srcLnkS, testTopic)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pub.Close()
+
+	sub1, err := NewSubscriber(dstHost, dstStore, dstLnkS, testTopic, nil, Topic(topics[0]), ResendAnnounce(true))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sub1.Close()
+
+	sub2, err := NewSubscriber(dstHost2, dstStore2, dstLnkS2, testTopic, nil, Topic(topics[1]))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sub2.Close()
+
+	watcher2, cncl := sub2.OnSyncFinished()
+	defer cncl()
+
+	// Store the whole chain in source node
+	chainLnks := test.MkChain(srcLnkS, true)
+
+	firstCid := chainLnks[2].(cidlink.Link).Cid
+	err = pub.SetRoot(context.Background(), firstCid)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Announce one CID to subscriber1.
+	err = sub1.Announce(context.Background(), firstCid, srcHost.ID(), srcHost.Addrs())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Log("Sent announce for first CID", firstCid)
+
+	// Validate that sink for first CID happened on subscriber2.
+	select {
+	case <-time.After(updateTimeout):
+		t.Fatal("timed out waiting for sync to propagate")
+	case downstream, open := <-watcher2:
+		if !open {
+			t.Fatal("event channel closed without receiving event")
+		}
+		if !downstream.Cid.Equals(firstCid) {
+			t.Fatalf("sync returned unexpected first cid %s, expected %s", downstream.Cid, firstCid)
+		}
+		if _, err = dstStore.Get(context.Background(), datastore.NewKey(downstream.Cid.String())); err != nil {
+			t.Fatalf("data not in receiver store: %s", err)
+		}
+		t.Log("Received sync notification for first CID:", firstCid)
+	}
+}

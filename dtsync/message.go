@@ -9,27 +9,36 @@ import (
 
 var ErrBadEncoding = errors.New("invalid message encoding")
 
+// Message is the payload of a gossip pubsub message.
 type Message struct {
 	Cid       cid.Cid
 	Addrs     [][]byte
-	ExtraData []byte `json:",omitempty"`
+	ExtraData []byte
+	// The OrigPeer field may or may not be present in the serialized data, and
+	// the CBOR serializer/deserializer is able to detect that. Only messages
+	// that are re-published by an indexer, for consumption by othen indexers,
+	// contain this field.
+	OrigPeer string
 }
 
+// SetAddrs writes a slice of Multiaddr into the Message as a slice of []byte.
 func (m *Message) SetAddrs(addrs []multiaddr.Multiaddr) {
-	m.Addrs = make([][]byte, 0, len(addrs))
-	for _, a := range addrs {
-		m.Addrs = append(m.Addrs, a.Bytes())
+	m.Addrs = make([][]byte, len(addrs))
+	for i, a := range addrs {
+		m.Addrs[i] = a.Bytes()
 	}
 }
 
+// GetAddrs reads the slice of Multiaddr that is stored in the Message as a
+// slice of []byte.
 func (m *Message) GetAddrs() ([]multiaddr.Multiaddr, error) {
-	addrs := make([]multiaddr.Multiaddr, 0, len(m.Addrs))
-	for _, a := range m.Addrs {
-		p, err := multiaddr.NewMultiaddrBytes(a)
+	addrs := make([]multiaddr.Multiaddr, len(m.Addrs))
+	for i := range m.Addrs {
+		var err error
+		addrs[i], err = multiaddr.NewMultiaddrBytes(m.Addrs[i])
 		if err != nil {
 			return nil, err
 		}
-		addrs = append(addrs, p)
 	}
 	return addrs, nil
 }

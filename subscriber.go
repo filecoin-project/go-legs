@@ -121,6 +121,7 @@ type Subscriber struct {
 	segDepthLimit int64
 
 	rateLimiterFor RateLimiterFor
+	resendAnnounce bool
 }
 
 // SyncFinished notifies an OnSyncFinished reader that a specified peer
@@ -258,6 +259,7 @@ func NewSubscriber(host host.Host, ds datastore.Batching, lsys ipld.LinkSystem, 
 
 		segDepthLimit:  cfg.segDepthLimit,
 		rateLimiterFor: cfg.rateLimiterFor,
+		resendAnnounce: cfg.resendAnnounce,
 	}
 
 	// Start watcher to read pubsub messages.
@@ -603,9 +605,7 @@ func (s *Subscriber) watch(ctx context.Context) {
 			continue
 		}
 
-		// Add the message originator's address to the peerstore. This allows a
-		// connection, back to that publisher that sent the message, to
-		// retrieve advertisements.
+		// Read publisher addresses from message.
 		var addrs []multiaddr.Multiaddr
 		if len(m.Addrs) != 0 {
 			addrs, err = m.GetAddrs()
@@ -615,9 +615,27 @@ func (s *Subscriber) watch(ctx context.Context) {
 			}
 		}
 
-		log.Infow("Handling pubsub announce", "peer", srcPeer)
+		// If message has original peer set, then this is a republished message.
+		if m.OrigPeer != "" {
+			// Ignore re-published announce from this host.
+			if srcPeer == s.host.ID() {
+				log.Debug("Ignored rebuplished announce from self")
+				continue
+			}
 
-		err = s.Announce(ctx, m.Cid, srcPeer, addrs)
+			// Read the original publisher.
+			relayPeer := srcPeer
+			srcPeer, err = peer.Decode(m.OrigPeer)
+			if err != nil {
+				log.Errorw("Cannot read peerID from republished announce", "err", err)
+				continue
+			}
+			log.Infow("Handling re-published pubsub announce", "originPeer", srcPeer, "relayPeer", relayPeer)
+		} else {
+			log.Infow("Handling pubsub announce", "peer", srcPeer)
+		}
+
+		err = s.announce(ctx, m.Cid, srcPeer, addrs)
 		if err != nil {
 			log.Errorw("Cannot process message", "err", err)
 			continue
@@ -627,7 +645,28 @@ func (s *Subscriber) watch(ctx context.Context) {
 	close(s.watchDone)
 }
 
+// Announce handles a direct announce message, that has not arrived over
+// pubsub. If resendAnnounce is enabled, then the message is resent over pubsub
+// with the original peerID encoded into the message extra data.
 func (s *Subscriber) Announce(ctx context.Context, nextCid cid.Cid, peerID peer.ID, peerAddrs []multiaddr.Multiaddr) error {
+	err := s.announce(ctx, nextCid, peerID, peerAddrs)
+	if err != nil {
+		return err
+	}
+
+	if s.resendAnnounce {
+		err = s.republish(ctx, nextCid, peerID, peerAddrs)
+		if err != nil {
+			log.Errorw("Cannot republish announce", "err", err)
+			return nil
+		}
+		log.Infow("Re-published direct announce message in pubsub channel", "cid", nextCid, "originPeer", peerID)
+	}
+
+	return nil
+}
+
+func (s *Subscriber) announce(ctx context.Context, nextCid cid.Cid, peerID peer.ID, peerAddrs []multiaddr.Multiaddr) error {
 	hnd, err := s.getOrCreateHandler(peerID, false)
 	if err != nil {
 		if err == errSourceNotAllowed {
@@ -647,6 +686,19 @@ func (s *Subscriber) Announce(ctx context.Context, nextCid cid.Cid, peerID peer.
 	hnd.handleAsync(ctx, nextCid, syncer)
 
 	return nil
+}
+
+func (s *Subscriber) republish(ctx context.Context, nextCid cid.Cid, peerID peer.ID, addrs []multiaddr.Multiaddr) error {
+	msg := dtsync.Message{
+		Cid:      nextCid,
+		OrigPeer: peerID.String(),
+	}
+	msg.SetAddrs(addrs)
+	msgBuf := bytes.NewBuffer(nil)
+	if err := msg.MarshalCBOR(msgBuf); err != nil {
+		return err
+	}
+	return s.topic.Publish(ctx, msgBuf.Bytes())
 }
 
 func (s *Subscriber) makeSyncer(peerID peer.ID, peerAddrs []multiaddr.Multiaddr, addrTTL time.Duration, rateLimiter *rate.Limiter) (Syncer, bool, error) {
