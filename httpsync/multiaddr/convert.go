@@ -68,7 +68,20 @@ func ToURL(ma multiaddr.Multiaddr) (*url.URL, error) {
 	scheme := "http"
 	if _, ok := pm[multiaddr.P_HTTPS]; ok {
 		scheme = "https"
-	} // todo: ws/wss
+	} else if _, ok = pm[multiaddr.P_HTTP]; ok {
+		// /tls/http == /https
+		if _, ok = pm[multiaddr.P_TLS]; ok {
+			scheme = "https"
+		}
+	} else if _, ok = pm[multiaddr.P_WSS]; ok {
+		scheme = "wss"
+	} else if _, ok = pm[multiaddr.P_WS]; ok {
+		scheme = "ws"
+		// /tls/ws == /wss
+		if _, ok = pm[multiaddr.P_TLS]; ok {
+			scheme = "wss"
+		}
+	}
 
 	path := ""
 	if pb, ok := pm[protoHTTPath.Code]; ok {
@@ -86,9 +99,9 @@ func ToURL(ma multiaddr.Multiaddr) (*url.URL, error) {
 	return &out, nil
 }
 
-// ToMA takes a url and converts it into a multiaddr.
+// ToMultiaddr takes a url and converts it into a multiaddr.
 // converts scheme://host:port/path -> /ip/host/tcp/port/scheme/urlescape{path}
-func ToMA(u *url.URL) (*multiaddr.Multiaddr, error) {
+func ToMultiaddr(u *url.URL) (multiaddr.Multiaddr, error) {
 	h := u.Hostname()
 	var addr *multiaddr.Multiaddr
 	if n := net.ParseIP(h); n != nil {
@@ -130,5 +143,5 @@ func ToMA(u *url.URL) (*multiaddr.Multiaddr, error) {
 		joint = multiaddr.Join(joint, httpath)
 	}
 
-	return &joint, nil
+	return joint, nil
 }
