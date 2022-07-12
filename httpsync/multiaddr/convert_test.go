@@ -64,6 +64,9 @@ func TestTLSProtos(t *testing.T) {
 		}
 
 		u, err := ToURL(m)
+		if err != nil {
+			t.Fatal(err)
+		}
 		if u.String() != expect[i] {
 			t.Fatalf("expected %s to convert to url %s, got %s", m.String(), expect[i], u.String())
 		}
