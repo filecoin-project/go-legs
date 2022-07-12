@@ -57,7 +57,7 @@ func TestTLSProtos(t *testing.T) {
 		"ws://protocol.ai",
 	}
 
-	for i, _ := range samples {
+	for i := range samples {
 		m, err := multiaddr.NewMultiaddr(samples[i])
 		if err != nil {
 			t.Fatal(err)
