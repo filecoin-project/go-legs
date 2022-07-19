@@ -77,7 +77,6 @@ func setupPublisherSubscriber(t *testing.T, subscriberOptions []legs.Option) htt
 }
 
 func TestManualSync(t *testing.T) {
-
 	blocksSeenByHook := make(map[cid.Cid]struct{})
 	blockHook := func(p peer.ID, c cid.Cid, _ legs.SegmentSyncActions) {
 		blocksSeenByHook[c] = struct{}{}

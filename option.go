@@ -30,6 +30,7 @@ type config struct {
 
 	syncRecLimit selector.RecursionLimit
 
+	idleHandlerTTL    time.Duration
 	latestSyncHandler LatestSyncHandler
 
 	rateLimiterFor RateLimiterFor
@@ -100,6 +101,14 @@ func HttpClient(client *http.Client) Option {
 func BlockHook(blockHook BlockHookFunc) Option {
 	return func(c *config) error {
 		c.blockHook = blockHook
+		return nil
+	}
+}
+
+// IdleHandlerTTL configures the time after which idle handlers are removed.
+func IdleHandlerTTL(ttl time.Duration) Option {
+	return func(c *config) error {
+		c.idleHandlerTTL = ttl
 		return nil
 	}
 }
