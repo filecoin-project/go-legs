@@ -627,6 +627,7 @@ func (s *Subscriber) idleHandlerCleaner() {
 			s.handlersMutex.Unlock()
 			t.Reset(s.idleHandlerTTL)
 		case <-s.closing:
+			t.Stop()
 			return
 		}
 	}
