@@ -36,6 +36,10 @@ const (
 	defaultAddrTTL       = 48 * time.Hour
 	tempAddrTTL          = 24 * time.Hour // must be long enough for ad chain to sync
 	defaultSegDepthLimit = -1             // Segmented sync disabled.
+
+	// defaultIdleHandlerTTL is the default time after which idle publisher
+	// handlers are removed.
+	defaultIdleHandlerTTL = time.Hour
 )
 
 // errSourceNotAllowed is the error returned when a message source peer's
@@ -116,6 +120,7 @@ type Subscriber struct {
 	// transport.
 	httpPeerstore peerstore.Peerstore
 
+	idleHandlerTTL   time.Duration
 	latestSyncHander LatestSyncHandler
 
 	segDepthLimit int64
@@ -154,8 +159,10 @@ type handler struct {
 	pendingCid cid.Cid
 	// pendingSyncer is a syncer queued for handling pendingCid.
 	pendingSyncer Syncer
-	// qlock protects the lendingCid and pendingSyncer.
+	// qlock protects the pendingCid and pendingSyncer.
 	qlock sync.Mutex
+	// expires is the time the handler is removed if it remains idle.
+	expires time.Time
 }
 
 // wrapBlockHook wraps a possibly nil block hook func to allow a for
@@ -176,8 +183,9 @@ func wrapBlockHook() (*sync.RWMutex, map[peer.ID]func(peer.ID, cid.Cid), func(pe
 // NewSubscriber creates a new Subscriber that process pubsub messages.
 func NewSubscriber(host host.Host, ds datastore.Batching, lsys ipld.LinkSystem, topic string, dss ipld.Node, options ...Option) (*Subscriber, error) {
 	cfg := config{
-		addrTTL:       defaultAddrTTL,
-		segDepthLimit: defaultSegDepthLimit,
+		addrTTL:        defaultAddrTTL,
+		idleHandlerTTL: defaultIdleHandlerTTL,
+		segDepthLimit:  defaultSegDepthLimit,
 	}
 	err := cfg.apply(options)
 	if err != nil {
@@ -255,6 +263,7 @@ func NewSubscriber(host host.Host, ds datastore.Batching, lsys ipld.LinkSystem, 
 		scopedBlockHook:      scopedBlockHook,
 		generalBlockHook:     cfg.blockHook,
 
+		idleHandlerTTL:   cfg.idleHandlerTTL,
 		latestSyncHander: latestSyncHandler,
 
 		segDepthLimit:  cfg.segDepthLimit,
@@ -266,6 +275,8 @@ func NewSubscriber(host host.Host, ds datastore.Batching, lsys ipld.LinkSystem, 
 	go s.watch(ctx)
 	// Start distributor to send SyncFinished messages to interested parties.
 	go s.distributeEvents()
+	// Start goroutine to remove idle publisher handlers.
+	go s.idleHandlerCleaner()
 
 	return s, nil
 }
@@ -325,6 +336,9 @@ func (s *Subscriber) Close() error {
 }
 
 func (s *Subscriber) doClose() error {
+	// Cancel idle handler cleaner.
+	close(s.closing)
+
 	// Cancel pubsub and Wait for pubsub watcher to exit.
 	s.psub.Cancel()
 	<-s.watchDone
@@ -390,6 +404,22 @@ func (s *Subscriber) OnSyncFinished() (<-chan SyncFinished, context.CancelFunc) 
 		}
 	}
 	return ch, cncl
+}
+
+// RemoveHandler removes a handler for a publisher.
+func (s *Subscriber) RemoveHandler(peerID peer.ID) bool {
+	s.handlersMutex.Lock()
+	defer s.handlersMutex.Unlock()
+
+	// Check for existing handler, remove if found.
+	if _, ok := s.handlers[peerID]; !ok {
+		return false
+	}
+
+	log.Infow("Removing handler for publisher", "peer", peerID)
+	delete(s.handlers, peerID)
+
+	return true
 }
 
 // Sync performs a one-off explicit sync with the given peer for a specific CID
@@ -558,9 +588,12 @@ func (s *Subscriber) getOrCreateHandler(peerID peer.ID, force bool) (*handler, e
 		}
 	}
 
+	expires := time.Now().Add(s.idleHandlerTTL)
+
 	// Check for existing handler, return if found.
 	hnd, ok := s.handlers[peerID]
 	if ok {
+		hnd.expires = expires
 		return hnd, nil
 	}
 
@@ -568,10 +601,36 @@ func (s *Subscriber) getOrCreateHandler(peerID peer.ID, force bool) (*handler, e
 	hnd = &handler{
 		subscriber: s,
 		peerID:     peerID,
+		expires:    expires,
 	}
 	s.handlers[peerID] = hnd
 
 	return hnd, nil
+}
+
+// idleHandlerCleaner periodically looks for idle handlers to remove. This
+// prevents accumulation of handlers that are no longer in use.
+func (s *Subscriber) idleHandlerCleaner() {
+	t := time.NewTimer(s.idleHandlerTTL)
+
+	for {
+		select {
+		case <-t.C:
+			now := time.Now()
+			s.handlersMutex.Lock()
+			for pid, hnd := range s.handlers {
+				if now.After(hnd.expires) {
+					delete(s.handlers, pid)
+					log.Debugw("Removed idle handler", "publisherID", pid)
+				}
+			}
+			s.handlersMutex.Unlock()
+			t.Reset(s.idleHandlerTTL)
+		case <-s.closing:
+			t.Stop()
+			return
+		}
+	}
 }
 
 // watch reads messages from a pubsub topic subscription and passes the message

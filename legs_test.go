@@ -211,6 +211,51 @@ func TestPublisherRejectsPeer(t *testing.T) {
 	}
 }
 
+func TestIdleHandlerCleaner(t *testing.T) {
+	blocksSeenByHook := make(map[cid.Cid]struct{})
+	blockHook := func(p peer.ID, c cid.Cid, _ legs.SegmentSyncActions) {
+		blocksSeenByHook[c] = struct{}{}
+	}
+
+	ttl := time.Second
+	te := setupPublisherSubscriber(t, []legs.Option{legs.BlockHook(blockHook), legs.IdleHandlerTTL(ttl)})
+
+	rootLnk, err := test.Store(te.srcStore, basicnode.NewString("hello world"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := te.pub.UpdateRoot(context.Background(), rootLnk.(cidlink.Link).Cid); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	// Do a sync to create the handler.
+	_, err = te.sub.Sync(ctx, te.srcHost.ID(), cid.Undef, nil, te.pubAddr)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Check that the handler is preeent by seeing if it can be removed.
+	if !te.sub.RemoveHandler(te.srcHost.ID()) {
+		t.Fatal("Expected handler to be present")
+	}
+
+	// Do another sync to re-create the handler.
+	_, err = te.sub.Sync(ctx, te.srcHost.ID(), cid.Undef, nil, te.pubAddr)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// For long enough for the idle cleaner to remove the handler, and check
+	// that it was removed.
+	time.Sleep(3 * ttl)
+	if te.sub.RemoveHandler(te.srcHost.ID()) {
+		t.Fatal("Expected handler to already be removed")
+	}
+}
+
 func mkLnk(t *testing.T, srcStore datastore.Batching) cid.Cid {
 	// Update root with item
 	np := basicnode.Prototype__Any{}
