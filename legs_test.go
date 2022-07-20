@@ -250,7 +250,7 @@ func TestIdleHandlerCleaner(t *testing.T) {
 
 	// For long enough for the idle cleaner to remove the handler, and check
 	// that it was removed.
-	time.Sleep(2 * ttl)
+	time.Sleep(3 * ttl)
 	if te.sub.RemoveHandler(te.srcHost.ID()) {
 		t.Fatal("Expected handler to already be removed")
 	}
