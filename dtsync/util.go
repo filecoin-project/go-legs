@@ -3,6 +3,7 @@ package dtsync
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	dt "github.com/filecoin-project/go-data-transfer"
@@ -30,7 +31,7 @@ func configureDataTransferForLegs(ctx context.Context, dtManager dt.Manager, lsy
 	if err != nil {
 		return err
 	}
-	lsc := legStorageConfigration{lsys}
+	lsc := legStorageConfiguration{lsys}
 	if err = dtManager.RegisterTransportConfigurer(v, lsc.configureTransport); err != nil {
 		return fmt.Errorf("failed to register datatransfer TransportConfigurer: %w", err)
 	}
@@ -41,18 +42,18 @@ type storeConfigurableTransport interface {
 	UseStore(dt.ChannelID, ipld.LinkSystem) error
 }
 
-type legStorageConfigration struct {
+type legStorageConfiguration struct {
 	linkSystem ipld.LinkSystem
 }
 
-func (lsc legStorageConfigration) configureTransport(chid dt.ChannelID, voucher dt.Voucher, transport dt.Transport) {
+func (lsc legStorageConfiguration) configureTransport(chid dt.ChannelID, voucher dt.Voucher, transport dt.Transport) {
 	storeConfigurableTransport, ok := transport.(storeConfigurableTransport)
 	if !ok {
 		return
 	}
 	err := storeConfigurableTransport.UseStore(chid, lsc.linkSystem)
 	if err != nil {
-		log.Errorw("Failed to configure trasnport to use data store", "err", err)
+		log.Errorw("Failed to configure transport to use data store", "err", err)
 	}
 }
 
@@ -62,6 +63,13 @@ func registerVoucher(dtManager dt.Manager, v *Voucher, allowPeer func(peer.ID) b
 	}
 	err := dtManager.RegisterVoucherType(v, val)
 	if err != nil {
+		// This can happen if a host is both a publisher and a subscriber.
+		if strings.Contains(err.Error(), "identifier already registered: "+string(v.Type())) {
+			// Matching the error string is the best we can do until datatransfer exposes some handles
+			// to either check for types or re-register vouchers.
+			log.Warn("voucher type already registered; skipping datatrasfer voucher registration", "type", v.Type())
+			return nil
+		}
 		return fmt.Errorf("failed to register legs validator voucher type: %w", err)
 	}
 	lvr := &VoucherResult{}
