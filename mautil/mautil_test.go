@@ -39,4 +39,9 @@ func TestFilterPrivateIPs(t *testing.T) {
 			t.Fatalf("unexpected multiaddrs %s, expected %s", filtered[i], expected[i])
 		}
 	}
+
+	filtered = FilterPrivateIPs(nil)
+	if filtered != nil {
+		t.Fatal("expected nil")
+	}
 }
