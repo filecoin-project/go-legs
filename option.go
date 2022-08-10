@@ -19,6 +19,7 @@ import (
 type config struct {
 	addrTTL   time.Duration
 	allowPeer AllowPeerFunc
+	filterIPs bool
 
 	topic *pubsub.Topic
 
@@ -101,6 +102,15 @@ func HttpClient(client *http.Client) Option {
 func BlockHook(blockHook BlockHookFunc) Option {
 	return func(c *config) error {
 		c.blockHook = blockHook
+		return nil
+	}
+}
+
+// FilterIPs removes any private, loopback, or unspecified IP multiaddrs from
+// addresses supplied in announce messages.
+func FilterIPs(enable bool) Option {
+	return func(c *config) error {
+		c.filterIPs = enable
 		return nil
 	}
 }

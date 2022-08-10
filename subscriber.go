@@ -11,6 +11,7 @@ import (
 	"github.com/filecoin-project/go-legs/dtsync"
 	"github.com/filecoin-project/go-legs/gpubsub"
 	"github.com/filecoin-project/go-legs/httpsync"
+	"github.com/filecoin-project/go-legs/mautil"
 	"github.com/hashicorp/go-multierror"
 	"github.com/ipfs/go-cid"
 	"github.com/ipfs/go-datastore"
@@ -74,6 +75,7 @@ type Subscriber struct {
 	host host.Host
 
 	addrTTL   time.Duration
+	filterIPs bool
 	psub      *pubsub.Subscription
 	topic     *pubsub.Topic
 	topicName string
@@ -694,6 +696,9 @@ func (s *Subscriber) watch(ctx context.Context) {
 			log.Infow("Handling pubsub announce", "peer", srcPeer)
 		}
 
+		if s.filterIPs {
+			addrs = mautil.FilterPrivateIPs(addrs)
+		}
 		err = s.announce(ctx, m.Cid, srcPeer, addrs)
 		if err != nil {
 			log.Errorw("Cannot process message", "err", err)
@@ -708,6 +713,10 @@ func (s *Subscriber) watch(ctx context.Context) {
 // pubsub. If resendAnnounce is enabled, then the message is resent over pubsub
 // with the original peerID encoded into the message extra data.
 func (s *Subscriber) Announce(ctx context.Context, nextCid cid.Cid, peerID peer.ID, peerAddrs []multiaddr.Multiaddr) error {
+	if s.filterIPs {
+		peerAddrs = mautil.FilterPrivateIPs(peerAddrs)
+	}
+
 	err := s.announce(ctx, nextCid, peerID, peerAddrs)
 	if err != nil {
 		return err
