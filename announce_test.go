@@ -242,21 +242,15 @@ func TestAnnounceRepublish(t *testing.T) {
 	topics := test.WaitForMeshWithMessage(t, testTopic, dstHost, dstHost2)
 
 	pub, err := dtsync.NewPublisher(srcHost, srcStore, srcLnkS, testTopic)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	defer pub.Close()
 
 	sub1, err := NewSubscriber(dstHost, dstStore, dstLnkS, testTopic, nil, Topic(topics[0]), ResendAnnounce(true))
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	defer sub1.Close()
 
 	sub2, err := NewSubscriber(dstHost2, dstStore2, dstLnkS2, testTopic, nil, Topic(topics[1]))
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	defer sub2.Close()
 
 	watcher2, cncl := sub2.OnSyncFinished()
@@ -267,15 +261,11 @@ func TestAnnounceRepublish(t *testing.T) {
 
 	firstCid := chainLnks[2].(cidlink.Link).Cid
 	err = pub.SetRoot(context.Background(), firstCid)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 
 	// Announce one CID to subscriber1.
 	err = sub1.Announce(context.Background(), firstCid, srcHost.ID(), srcHost.Addrs())
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	t.Log("Sent announce for first CID", firstCid)
 
 	// Validate that sink for first CID happened on subscriber2.
@@ -283,15 +273,10 @@ func TestAnnounceRepublish(t *testing.T) {
 	case <-time.After(updateTimeout):
 		t.Fatal("timed out waiting for sync to propagate")
 	case downstream, open := <-watcher2:
-		if !open {
-			t.Fatal("event channel closed without receiving event")
-		}
-		if !downstream.Cid.Equals(firstCid) {
-			t.Fatalf("sync returned unexpected first cid %s, expected %s", downstream.Cid, firstCid)
-		}
-		if _, err = dstStore2.Get(context.Background(), datastore.NewKey(downstream.Cid.String())); err != nil {
-			t.Fatalf("data not in second receiver store: %s", err)
-		}
+		require.True(t, open, "event channel closed without receiving event")
+		require.True(t, downstream.Cid.Equals(firstCid), "sync returned unexpected first cid %s, expected %s", downstream.Cid, firstCid)
+		_, err = dstStore2.Get(context.Background(), datastore.NewKey(downstream.Cid.String()))
+		require.NoError(t, err, "data not in second receiver store: %s", err)
 		t.Log("Received sync notification for first CID:", firstCid)
 	}
 }
