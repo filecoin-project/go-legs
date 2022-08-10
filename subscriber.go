@@ -244,6 +244,7 @@ func NewSubscriber(host host.Host, ds datastore.Batching, lsys ipld.LinkSystem, 
 		host: host,
 
 		addrTTL:   cfg.addrTTL,
+		filterIPs: cfg.filterIPs,
 		psub:      psub,
 		topic:     cfg.topic,
 		topicName: cfg.topic.String(),
