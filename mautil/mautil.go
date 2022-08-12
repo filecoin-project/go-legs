@@ -12,6 +12,9 @@ import (
 func FilterPrivateIPs(maddrs []multiaddr.Multiaddr) []multiaddr.Multiaddr {
 	var pvt []int
 	for i, maddr := range maddrs {
+		if maddr == nil {
+			continue
+		}
 		ip, err := manet.ToIP(maddr)
 		if err != nil {
 			continue

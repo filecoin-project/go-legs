@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/multiformats/go-multiaddr"
+	"github.com/stretchr/testify/require"
 )
 
 func TestFilterPrivateIPs(t *testing.T) {
@@ -44,4 +45,11 @@ func TestFilterPrivateIPs(t *testing.T) {
 	if filtered != nil {
 		t.Fatal("expected nil")
 	}
+}
+
+func TestFilterPrivateIPs_DoesNotPanicOnNilAddr(t *testing.T) {
+	original := []multiaddr.Multiaddr{nil}
+	got := FilterPrivateIPs(original)
+	// According to the function documentation, it should return the original slice.
+	require.Equal(t, original, got)
 }
