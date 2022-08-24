@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/ipfs/go-cid"
-	ic "github.com/libp2p/go-libp2p-core/crypto"
+	ic "github.com/libp2p/go-libp2p/core/crypto"
 )
 
 func TestRoundTripSignedHead(t *testing.T) {

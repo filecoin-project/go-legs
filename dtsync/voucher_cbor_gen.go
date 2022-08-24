@@ -78,7 +78,7 @@ func (t *Voucher) UnmarshalCBOR(r io.Reader) error {
 	for i := uint64(0); i < n; i++ {
 
 		{
-			sval, err := cbg.ReadStringBuf(br, scratch)
+			sval, err := cbg.ReadString(br)
 			if err != nil {
 				return err
 			}
@@ -173,7 +173,7 @@ func (t *VoucherResult) UnmarshalCBOR(r io.Reader) error {
 	for i := uint64(0); i < n; i++ {
 
 		{
-			sval, err := cbg.ReadStringBuf(br, scratch)
+			sval, err := cbg.ReadString(br)
 			if err != nil {
 				return err
 			}
