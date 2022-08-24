@@ -718,8 +718,6 @@ github.com/libp2p/go-libp2p-peerstore v0.2.6/go.mod h1:ss/TWTgHZTMpsU/oKVVPQCGuD
 github.com/libp2p/go-libp2p-peerstore v0.2.7/go.mod h1:ss/TWTgHZTMpsU/oKVVPQCGuDHItOpf2W8RxAi50P2s=
 github.com/libp2p/go-libp2p-peerstore v0.4.0/go.mod h1:rDJUFyzEWPpXpEwywkcTYYzDHlwza8riYMaUzaN6hX0=
 github.com/libp2p/go-libp2p-peerstore v0.6.0/go.mod h1:DGEmKdXrcYpK9Jha3sS7MhqYdInxJy84bIPtSu65bKc=
-github.com/libp2p/go-libp2p-peerstore v0.8.0 h1:bzTG693TA1Ju/zKmUCQzDLSqiJnyRFVwPpuloZ/OZtI=
-github.com/libp2p/go-libp2p-peerstore v0.8.0/go.mod h1:9geHWmNA3YDlQBjL/uPEJD6vpDK12aDNlUNHJ6kio/s=
 github.com/libp2p/go-libp2p-pnet v0.2.0/go.mod h1:Qqvq6JH/oMZGwqs3N1Fqhv8NVhrdYcO0BW4wssv21LA=
 github.com/libp2p/go-libp2p-pubsub v0.7.1 h1:e2CPBP5uxvDkE0FiS0obZGZPzt+xuBOc6PpG+50pIAo=
 github.com/libp2p/go-libp2p-pubsub v0.7.1/go.mod h1:EuyBJFtF8qF67IEA98biwK8Xnw5MNJpJ/Z+8iWCMFwc=

@@ -189,7 +189,7 @@ func (t *Message) UnmarshalCBOR(r io.Reader) error {
 	}
 
 	// Decode t.OrigPeer.
-	sval, err := cbg.ReadStringBuf(br, scratch)
+	sval, err := cbg.ReadString(br)
 	if err != nil {
 		return err
 	}
