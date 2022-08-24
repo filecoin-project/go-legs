@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
+	"io/ioutil"
 	"net"
 	"net/http"
 	"path"
@@ -13,10 +13,10 @@ import (
 
 	"github.com/ipfs/go-cid"
 	logging "github.com/ipfs/go-log/v2"
+	"github.com/libp2p/go-libp2p-core/host"
+	peer "github.com/libp2p/go-libp2p-core/peer"
+	"github.com/libp2p/go-libp2p-core/protocol"
 	gostream "github.com/libp2p/go-libp2p-gostream"
-	"github.com/libp2p/go-libp2p/core/host"
-	peer "github.com/libp2p/go-libp2p/core/peer"
-	"github.com/libp2p/go-libp2p/core/protocol"
 	multistream "github.com/multiformats/go-multistream"
 )
 
@@ -93,7 +93,7 @@ func QueryRootCid(ctx context.Context, host host.Host, topic string, peerID peer
 	}
 	defer resp.Body.Close()
 
-	cidStr, err := io.ReadAll(resp.Body)
+	cidStr, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
 		return cid.Undef, fmt.Errorf("cannot fully read response body: %w", err)
 	}

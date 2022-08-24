@@ -10,7 +10,7 @@ import (
 	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
 	"github.com/ipld/go-ipld-prime/node/bindnode"
 	"github.com/ipld/go-ipld-prime/schema"
-	ic "github.com/libp2p/go-libp2p/core/crypto"
+	ic "github.com/libp2p/go-libp2p-core/crypto"
 )
 
 var typeSystem *schema.TypeSystem = createTypeSystem()
