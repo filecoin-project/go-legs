@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net"
 	"net/http"
 	"path"
@@ -93,7 +93,7 @@ func QueryRootCid(ctx context.Context, host host.Host, topic string, peerID peer
 	}
 	defer resp.Body.Close()
 
-	cidStr, err := ioutil.ReadAll(resp.Body)
+	cidStr, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return cid.Undef, fmt.Errorf("cannot fully read response body: %w", err)
 	}
