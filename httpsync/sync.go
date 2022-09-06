@@ -110,11 +110,26 @@ func (s *Syncer) Sync(ctx context.Context, nextCid cid.Cid, sel ipld.Node) error
 		return errors.New(msg)
 	}
 
-	err = s.walkFetch(ctx, nextCid, xsel)
+	cids, err := s.walkFetch(ctx, nextCid, xsel)
 	if err != nil {
 		msg := "failed to traverse requested dag"
 		log.Errorw(msg, "err", err, "root", nextCid)
 		return errors.New(msg)
+	}
+
+	// We run the block hook to emulate the behavior of graphsync's
+	// `OnIncomingBlockHook` callback (gets called even if block is already stored
+	// locally).
+	//
+	// We are purposefully not doing this in the StorageReadOpener because the
+	// hook can do anything, including deleting the block from the block store. If
+	// it did that then we would not be able to continue our traversal. So instead
+	// we remember the blocks seen during traversal and then call the hook at the
+	// end when we no longer care what it does with the blocks.
+	if s.sync.blockHook != nil {
+		for _, c := range cids {
+			s.sync.blockHook(s.peerID, c)
+		}
 	}
 
 	s.sync.client.CloseIdleConnections()
@@ -126,52 +141,31 @@ func (s *Syncer) Sync(ctx context.Context, nextCid cid.Cid, sel ipld.Node) error
 // local data store. If it cannot, it will then go and get it over HTTP.  This
 // emulates way libp2p/graphsync fetches data, but the actual fetch of data is
 // done over HTTP.
-func (s *Syncer) walkFetch(ctx context.Context, rootCid cid.Cid, sel selector.Selector) (err error) {
-	// We run the block hook to emulate the behavior of graphsync's
-	// `OnIncomingBlockHook` callback (gets called even if block is already stored
-	// locally).
-
+func (s *Syncer) walkFetch(ctx context.Context, rootCid cid.Cid, sel selector.Selector) ([]cid.Cid, error) {
 	// Track the order of cids we've seen during our traversal so we can call the
 	// block hook function in the same order. We emulate the behavior of
 	// graphsync's `OnIncomingBlockHook`, this means we call the blockhook even if
 	// we have the block locally.
-	// We are purposefully not doing this in the StorageReadOpener because the
-	// hook can do anything, including deleting the block from the block store. If
-	// it did that then we would not be able to continue our traversal. So instead
-	// we remember the blocks seen during traversal and then call the hook at the
-	// end when we no longer care what it does with the blocks.
 	var traversalOrder []cid.Cid
-	defer func() {
-		if err == nil && s.sync.blockHook != nil {
-			for _, c := range traversalOrder {
-				s.sync.blockHook(s.peerID, c)
-			}
-		}
-	}()
 	getMissingLs := cidlink.DefaultLinkSystem()
 	// trusted because it'll be hashed/verified on the way into the link system when fetched.
 	getMissingLs.TrustedStorage = true
-	getMissingLs.StorageReadOpener = func(lc ipld.LinkContext, l ipld.Link) (r io.Reader, err error) {
-		defer func() {
-			if err == nil && s.sync.blockHook != nil {
-				traversalOrder = append(traversalOrder, l.(cidlink.Link).Cid)
-			}
-		}()
-
-		r, err = s.sync.lsys.StorageReadOpener(lc, l)
+	getMissingLs.StorageReadOpener = func(lc ipld.LinkContext, l ipld.Link) (io.Reader, error) {
+		c := l.(cidlink.Link).Cid
+		r, err := s.sync.lsys.StorageReadOpener(lc, l)
 		if err == nil {
 			// Found block read opener, so return it.
+			traversalOrder = append(traversalOrder, c)
 			return r, nil
 		}
 
 		// Did not find block read opener, so fetch block via HTTP with re-try in case rate limit is
 		// reached.
-		c := l.(cidlink.Link).Cid
 		for {
-			if err := s.fetchBlock(ctx, c); err != nil {
+			if err = s.fetchBlock(ctx, c); err != nil {
 				log.Errorw("Failed to fetch block", "err", err, "cid", c)
 				if _, ok := err.(rateLimitErr); ok {
-					//TODO: implement backoff to avoid potentially exhausting the HTTP source.
+					// TODO: implement backoff to avoid potentially exhausting the HTTP source.
 					continue
 				}
 				return nil, err
@@ -179,7 +173,11 @@ func (s *Syncer) walkFetch(ctx context.Context, rootCid cid.Cid, sel selector.Se
 			break
 		}
 
-		return s.sync.lsys.StorageReadOpener(lc, l)
+		r, err = s.sync.lsys.StorageReadOpener(lc, l)
+		if err == nil {
+			traversalOrder = append(traversalOrder, c)
+		}
+		return r, err
 	}
 
 	progress := traversal.Progress{
@@ -194,11 +192,14 @@ func (s *Syncer) walkFetch(ctx context.Context, rootCid cid.Cid, sel selector.Se
 	rootNode, err := getMissingLs.Load(ipld.LinkContext{}, cidlink.Link{Cid: rootCid}, basicnode.Prototype.Any)
 	if err != nil {
 		log.Errorw("Failed to load node", "root", rootCid)
-		return err
+		return nil, err
 	}
-	return progress.WalkMatching(rootNode, sel, func(p traversal.Progress, n datamodel.Node) error {
+	if err := progress.WalkMatching(rootNode, sel, func(p traversal.Progress, n datamodel.Node) error {
 		return nil
-	})
+	}); err != nil {
+		return nil, err
+	}
+	return traversalOrder, nil
 }
 
 type rateLimitErr struct {
