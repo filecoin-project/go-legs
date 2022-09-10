@@ -3,11 +3,17 @@ package dtsync
 import (
 	"context"
 	"fmt"
+	"io"
 	"time"
 
 	"github.com/filecoin-project/go-legs/p2p/protocol/head"
 	"github.com/ipfs/go-cid"
 	"github.com/ipld/go-ipld-prime"
+	"github.com/ipld/go-ipld-prime/datamodel"
+	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
+	"github.com/ipld/go-ipld-prime/node/basicnode"
+	"github.com/ipld/go-ipld-prime/traversal"
+	"github.com/ipld/go-ipld-prime/traversal/selector"
 	"github.com/libp2p/go-libp2p-core/peer"
 	"golang.org/x/time/rate"
 )
@@ -17,6 +23,7 @@ type Syncer struct {
 	peerID      peer.ID
 	rateLimiter *rate.Limiter
 	sync        *Sync
+	ls          *ipld.LinkSystem
 	topicName   string
 }
 
@@ -34,6 +41,11 @@ func (s *Syncer) Sync(ctx context.Context, nextCid cid.Cid, sel ipld.Node) error
 		s.sync.setRateLimiter(s.peerID, s.rateLimiter)
 		// Remove rate limiter set above.
 		defer s.sync.clearRateLimiter(s.peerID)
+	}
+
+	// see if we already have the requested data first.
+	if s.has(ctx, nextCid, sel) {
+		return nil
 	}
 
 	for {
@@ -83,4 +95,46 @@ func (s *Syncer) Sync(ctx context.Context, nextCid cid.Cid, sel ipld.Node) error
 		}
 		return err
 	}
+}
+
+// has determines if a given cid and selector is in the linksystem for a syncer already.
+func (s *Syncer) has(ctx context.Context, nextCid cid.Cid, sel ipld.Node) bool {
+	getMissingLs := cidlink.DefaultLinkSystem()
+	// trusted because it'll be hashed/verified on the way into the link system when fetched.
+	getMissingLs.TrustedStorage = true
+	getMissingLs.StorageReadOpener = func(lc ipld.LinkContext, l ipld.Link) (io.Reader, error) {
+		r, err := s.ls.StorageReadOpener(lc, l)
+		if err == nil {
+			// Found block read opener, so return it.
+			return r, nil
+		}
+
+		return nil, fmt.Errorf("not available locally")
+	}
+
+	progress := traversal.Progress{
+		Cfg: &traversal.Config{
+			Ctx:                            ctx,
+			LinkSystem:                     getMissingLs,
+			LinkTargetNodePrototypeChooser: basicnode.Chooser,
+		},
+		Path: datamodel.NewPath([]datamodel.PathSegment{}),
+	}
+	csel, err := selector.CompileSelector(sel)
+	if err != nil {
+		return false
+	}
+
+	// get the direct node.
+	rootNode, err := getMissingLs.Load(ipld.LinkContext{}, cidlink.Link{Cid: nextCid}, basicnode.Prototype.Any)
+	if err != nil {
+		return false
+	}
+	if err := progress.WalkMatching(rootNode, csel, func(p traversal.Progress, n datamodel.Node) error {
+		return nil
+	}); err != nil {
+		return false
+	}
+	return true
+
 }
