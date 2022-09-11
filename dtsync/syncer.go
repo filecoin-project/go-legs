@@ -45,6 +45,8 @@ func (s *Syncer) Sync(ctx context.Context, nextCid cid.Cid, sel ipld.Node) error
 
 	// see if we already have the requested data first.
 	if s.has(ctx, nextCid, sel) {
+		inProgressSyncK := inProgressSyncKey{nextCid, s.peerID}
+		s.sync.signalSyncDone(inProgressSyncK, nil)
 		return nil
 	}
 
