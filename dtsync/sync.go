@@ -32,6 +32,7 @@ type Sync struct {
 	dtManager   dt.Manager
 	dtClose     dtCloseFunc
 	host        host.Host
+	ls          *ipld.LinkSystem
 	unsubEvents dt.Unsubscribe
 	unregHook   graphsync.UnregisterHookFunc
 
@@ -45,7 +46,7 @@ type Sync struct {
 
 // NewSyncWithDT creates a new Sync with a datatransfer.Manager provided by the
 // caller.
-func NewSyncWithDT(host host.Host, dtManager dt.Manager, gs graphsync.GraphExchange, blockHook func(peer.ID, cid.Cid)) (*Sync, error) {
+func NewSyncWithDT(host host.Host, dtManager dt.Manager, gs graphsync.GraphExchange, ls *ipld.LinkSystem, blockHook func(peer.ID, cid.Cid)) (*Sync, error) {
 	err := registerVoucher(dtManager, &Voucher{}, nil)
 	if err != nil {
 		return nil, err
@@ -54,6 +55,7 @@ func NewSyncWithDT(host host.Host, dtManager dt.Manager, gs graphsync.GraphExcha
 	s := &Sync{
 		host:         host,
 		dtManager:    dtManager,
+		ls:           ls,
 		rateLimiters: map[peer.ID]*rate.Limiter{},
 	}
 
@@ -75,6 +77,7 @@ func NewSync(host host.Host, ds datastore.Batching, lsys ipld.LinkSystem, blockH
 	s := &Sync{
 		host:         host,
 		dtManager:    dtManager,
+		ls:           &lsys,
 		dtClose:      dtClose,
 		rateLimiters: make(map[peer.ID]*rate.Limiter),
 	}
@@ -172,6 +175,7 @@ func (s *Sync) NewSyncer(peerID peer.ID, topicName string, rateLimiter *rate.Lim
 		sync:        s,
 		topicName:   topicName,
 		rateLimiter: rateLimiter,
+		ls:          s.ls,
 	}
 }
 
