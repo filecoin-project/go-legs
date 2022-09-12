@@ -106,12 +106,11 @@ func (s *Syncer) has(ctx context.Context, nextCid cid.Cid, sel ipld.Node) bool {
 	getMissingLs.TrustedStorage = true
 	getMissingLs.StorageReadOpener = func(lc ipld.LinkContext, l ipld.Link) (io.Reader, error) {
 		r, err := s.ls.StorageReadOpener(lc, l)
-		if err == nil {
-			// Found block read opener, so return it.
-			return r, nil
+		if err != nil {
+			return nil, fmt.Errorf("not available locally: %w", err)
 		}
-
-		return nil, fmt.Errorf("not available locally")
+		// Found block read opener, so return it.
+		return r, nil		
 	}
 
 	progress := traversal.Progress{
