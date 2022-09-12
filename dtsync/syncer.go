@@ -110,7 +110,7 @@ func (s *Syncer) has(ctx context.Context, nextCid cid.Cid, sel ipld.Node) bool {
 			return nil, fmt.Errorf("not available locally: %w", err)
 		}
 		// Found block read opener, so return it.
-		return r, nil		
+		return r, nil
 	}
 
 	progress := traversal.Progress{
