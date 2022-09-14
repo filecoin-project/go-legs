@@ -65,7 +65,12 @@ func (s *Syncer) Sync(ctx context.Context, nextCid cid.Cid, sel ipld.Node) error
 		}
 
 		// Wait for transfer finished signal.
-		err = <-syncDone
+		select {
+		case err = <-syncDone:
+		case <-ctx.Done():
+			s.sync.signalSyncDone(inProgressSyncK, nil)
+			err = <-syncDone
+		}
 		if err, ok := err.(rateLimitErr); ok {
 			// Wait until the rate limit bucket is fully refilled since this is
 			// a relatively heavy operation (essentially restarting the sync).
