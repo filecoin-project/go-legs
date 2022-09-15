@@ -17,6 +17,7 @@ require (
 	github.com/libp2p/go-libp2p-pubsub v0.7.0
 	github.com/multiformats/go-multiaddr v0.6.0
 	github.com/multiformats/go-multicodec v0.5.0
+	github.com/multiformats/go-multihash v0.2.0
 	github.com/multiformats/go-multistream v0.3.3
 	github.com/stretchr/testify v1.8.0
 	github.com/whyrusleeping/cbor-gen v0.0.0-20220514204315-f29c37e9c44c
@@ -108,7 +109,6 @@ require (
 	github.com/multiformats/go-multiaddr-dns v0.3.1 // indirect
 	github.com/multiformats/go-multiaddr-fmt v0.1.0 // indirect
 	github.com/multiformats/go-multibase v0.1.1 // indirect
-	github.com/multiformats/go-multihash v0.2.0 // indirect
 	github.com/multiformats/go-varint v0.0.6 // indirect
 	github.com/nxadm/tail v1.4.8 // indirect
 	github.com/onsi/ginkgo v1.16.5 // indirect
