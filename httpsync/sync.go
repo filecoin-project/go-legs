@@ -1,6 +1,7 @@
 package httpsync
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -22,6 +23,7 @@ import (
 	ic "github.com/libp2p/go-libp2p-core/crypto"
 	"github.com/libp2p/go-libp2p-core/peer"
 	"github.com/multiformats/go-multiaddr"
+	"github.com/multiformats/go-multihash"
 	"golang.org/x/time/rate"
 )
 
@@ -112,9 +114,8 @@ func (s *Syncer) Sync(ctx context.Context, nextCid cid.Cid, sel ipld.Node) error
 
 	cids, err := s.walkFetch(ctx, nextCid, xsel)
 	if err != nil {
-		msg := "failed to traverse requested dag"
-		log.Errorw(msg, "err", err, "root", nextCid)
-		return errors.New(msg)
+		log.Errorw("failed to traverse requested dag", "err", err, "root", nextCid)
+		return fmt.Errorf("failed to traverse requested dag: %w", err)
 	}
 
 	// We run the block hook to emulate the behavior of graphsync's
@@ -189,7 +190,7 @@ func (s *Syncer) walkFetch(ctx context.Context, rootCid cid.Cid, sel selector.Se
 		Path: datamodel.NewPath([]datamodel.PathSegment{}),
 	}
 	// get the direct node.
-	rootNode, err := getMissingLs.Load(ipld.LinkContext{}, cidlink.Link{Cid: rootCid}, basicnode.Prototype.Any)
+	rootNode, err := getMissingLs.Load(ipld.LinkContext{Ctx: ctx}, cidlink.Link{Cid: rootCid}, basicnode.Prototype.Any)
 	if err != nil {
 		log.Errorw("Failed to load node", "root", rootCid)
 		return nil, err
@@ -249,24 +250,30 @@ func (s *Syncer) fetch(ctx context.Context, rsrc string, cb func(io.Reader) erro
 
 // fetchBlock fetches an item into the datastore at c if not locally available.
 func (s *Syncer) fetchBlock(ctx context.Context, c cid.Cid) error {
-	n, err := s.sync.lsys.Load(ipld.LinkContext{}, cidlink.Link{Cid: c}, basicnode.Prototype.Any)
+	n, err := s.sync.lsys.Load(ipld.LinkContext{Ctx: ctx}, cidlink.Link{Cid: c}, basicnode.Prototype.Any)
 	// node is already present.
 	if n != nil && err == nil {
 		return nil
 	}
 
 	return s.fetch(ctx, c.String(), func(data io.Reader) error {
-		writer, committer, err := s.sync.lsys.StorageWriteOpener(ipld.LinkContext{})
+		writer, committer, err := s.sync.lsys.StorageWriteOpener(ipld.LinkContext{Ctx: ctx})
 		if err != nil {
 			log.Errorw("Failed to get write opener", "err", err)
 			return err
 		}
-		if _, err := io.Copy(writer, data); err != nil {
+		tee := io.TeeReader(data, writer)
+		sum, err := multihash.SumStream(tee, c.Prefix().MhType, c.Prefix().MhLength)
+		if err != nil {
 			return err
 		}
-		err = committer(cidlink.Link{Cid: c})
-		if err != nil {
-			log.Errorw("Failed to commit ")
+		if !bytes.Equal(c.Hash(), sum) {
+			err := fmt.Errorf("hash digest mismatch; expected %s but got %s", c.Hash().B58String(), sum.B58String())
+			log.Errorw("Failed to persist fetched block with mismatching digest", "cid", c, "err", err)
+			return err
+		}
+		if err = committer(cidlink.Link{Cid: c}); err != nil {
+			log.Errorw("Failed to commit", "err", err)
 			return err
 		}
 		return nil
