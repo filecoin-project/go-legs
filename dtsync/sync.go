@@ -36,6 +36,12 @@ type Sync struct {
 	unsubEvents dt.Unsubscribe
 	unregHook   graphsync.UnregisterHookFunc
 
+	// Used to signal CIDs that are found locally.
+	// Note, blockhook is called in 2 ways:
+	// 1. via graphsync hook registered here for blocks that are not found locally.
+	// 2. via Syncer.signalLocallyFoundCids for blockhooks thar are found locally.
+	blockHook func(peer.ID, cid.Cid)
+
 	// Map of CID of in-progress sync to sync done channel.
 	syncDoneChans map[inProgressSyncKey]chan<- error
 	syncDoneMutex sync.Mutex
@@ -57,6 +63,7 @@ func NewSyncWithDT(host host.Host, dtManager dt.Manager, gs graphsync.GraphExcha
 		dtManager:    dtManager,
 		ls:           ls,
 		rateLimiters: map[peer.ID]*rate.Limiter{},
+		blockHook:    blockHook,
 	}
 
 	if blockHook != nil {
@@ -80,6 +87,7 @@ func NewSync(host host.Host, ds datastore.Batching, lsys ipld.LinkSystem, blockH
 		ls:           &lsys,
 		dtClose:      dtClose,
 		rateLimiters: make(map[peer.ID]*rate.Limiter),
+		blockHook:    blockHook,
 	}
 
 	if blockHook != nil {
@@ -215,6 +223,16 @@ func (s *Sync) signalSyncDone(k inProgressSyncKey, err error) bool {
 	}
 	close(syncDone)
 	return true
+}
+
+// signalLocallyFoundCids calls the syncer blockhook if present with any CIDs that are
+// traversed during a sync but not transported using graphsync exchange.
+func (s *Sync) signalLocallyFoundCids(id peer.ID, cids []cid.Cid) {
+	if s.blockHook != nil {
+		for _, c := range cids {
+			s.blockHook(id, c)
+		}
+	}
 }
 
 type rateLimitErr struct {
