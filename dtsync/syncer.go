@@ -43,8 +43,17 @@ func (s *Syncer) Sync(ctx context.Context, nextCid cid.Cid, sel ipld.Node) error
 		defer s.sync.clearRateLimiter(s.peerID)
 	}
 
-	// see if we already have the requested data first.
-	if s.has(ctx, nextCid, sel) {
+	// See if we already have the requested data first.
+	// TODO: The check here is equivalent to "all or nothing": if a DAG is partially available
+	//       The entire thing will be re-downloaded even if we are missing only a single link.
+	//       Consider a further optimisation where we would only sync the portion of DAG that
+	//       is absent.
+	//       Hint: be careful with the selector; this can become tricky depending on what the
+	//             given selector is after. We could accept arguments that ask the user to
+	//             help with determining what the "next" CID would be if a DAG is partially
+	//             present. Similar to what SegmentSyncActions does.
+	if cids, ok := s.has(ctx, nextCid, sel); ok {
+		s.sync.signalLocallyFoundCids(s.peerID, cids)
 		inProgressSyncK := inProgressSyncKey{nextCid, s.peerID}
 		s.sync.signalSyncDone(inProgressSyncK, nil)
 		return nil
@@ -90,8 +99,8 @@ func (s *Syncer) Sync(ctx context.Context, nextCid cid.Cid, sel ipld.Node) error
 			// toward rate limiting.
 			s.rateLimiter.Allow()
 
-			// Set the nextCid to be the cid that we stopped at becasuse of rate
-			// limitting. This lets us pick up where we left off
+			// Set the nextCid to be the cid that we stopped at because of rate
+			// limiting. This lets us pick up where we left off
 			nextCid = err.stoppedAtCid
 			continue
 		}
@@ -99,17 +108,23 @@ func (s *Syncer) Sync(ctx context.Context, nextCid cid.Cid, sel ipld.Node) error
 	}
 }
 
-// has determines if a given cid and selector is in the linksystem for a syncer already.
-func (s *Syncer) has(ctx context.Context, nextCid cid.Cid, sel ipld.Node) bool {
+// has determines if a given CID and selector is stored in the linksystem for a syncer already.
+//
+// If stored, returns true along with the list of CIDs that were encountered during traversal
+// in order of traversal. Otherwise, returns false with no CIDs.
+func (s *Syncer) has(ctx context.Context, nextCid cid.Cid, sel ipld.Node) ([]cid.Cid, bool) {
 	getMissingLs := cidlink.DefaultLinkSystem()
 	// trusted because it'll be hashed/verified on the way into the link system when fetched.
 	getMissingLs.TrustedStorage = true
+
+	var traversed []cid.Cid
 	getMissingLs.StorageReadOpener = func(lc ipld.LinkContext, l ipld.Link) (io.Reader, error) {
 		r, err := s.ls.StorageReadOpener(lc, l)
 		if err != nil {
 			return nil, fmt.Errorf("not available locally: %w", err)
 		}
 		// Found block read opener, so return it.
+		traversed = append(traversed, l.(cidlink.Link).Cid)
 		return r, nil
 	}
 
@@ -123,19 +138,18 @@ func (s *Syncer) has(ctx context.Context, nextCid cid.Cid, sel ipld.Node) bool {
 	}
 	csel, err := selector.CompileSelector(sel)
 	if err != nil {
-		return false
+		return nil, false
 	}
 
 	// get the direct node.
 	rootNode, err := getMissingLs.Load(ipld.LinkContext{}, cidlink.Link{Cid: nextCid}, basicnode.Prototype.Any)
 	if err != nil {
-		return false
+		return nil, false
 	}
 	if err := progress.WalkMatching(rootNode, csel, func(p traversal.Progress, n datamodel.Node) error {
 		return nil
 	}); err != nil {
-		return false
+		return nil, false
 	}
-	return true
-
+	return traversed, true
 }
