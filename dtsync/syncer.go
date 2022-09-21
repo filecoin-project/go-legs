@@ -68,7 +68,7 @@ func (s *Syncer) Sync(ctx context.Context, nextCid cid.Cid, sel ipld.Node) error
 		select {
 		case err = <-syncDone:
 		case <-ctx.Done():
-			s.sync.signalSyncDone(inProgressSyncK, nil)
+			s.sync.signalSyncDone(inProgressSyncK, ctx.Err())
 			err = <-syncDone
 		}
 		if err, ok := err.(rateLimitErr); ok {
