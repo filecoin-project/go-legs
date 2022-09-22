@@ -846,6 +846,11 @@ func (h *handler) handleAsync(ctx context.Context, nextCid cid.Cid, syncer Synce
 			defer h.latestSyncMu.Unlock()
 			defer h.subscriber.asyncWG.Done()
 
+			if ctx.Err() != nil {
+				log.Warnw("Abandoned pending sync", "err", ctx.Err(), "publisher", h.peerID)
+				return
+			}
+
 			// Wait for the parent goroutine to assign pending CID and unlock.
 			h.qlock.Lock()
 			c := h.pendingCid
