@@ -14,6 +14,7 @@ import (
 	"github.com/ipld/go-ipld-prime/node/basicnode"
 	"github.com/ipld/go-ipld-prime/traversal"
 	"github.com/ipld/go-ipld-prime/traversal/selector"
+	corepeer "github.com/libp2p/go-libp2p-core/peer"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"golang.org/x/time/rate"
 )
@@ -67,7 +68,7 @@ func (s *Syncer) Sync(ctx context.Context, nextCid cid.Cid, sel ipld.Node) error
 		log.Debugw("Starting data channel for message source", "cid", nextCid, "source_peer", s.peerID)
 
 		v := Voucher{&nextCid}
-		_, err := s.sync.dtManager.OpenPullDataChannel(ctx, s.peerID, &v, nextCid, sel)
+		_, err := s.sync.dtManager.OpenPullDataChannel(ctx, corepeer.ID(s.peerID), &v, nextCid, sel)
 		if err != nil {
 			s.sync.signalSyncDone(inProgressSyncK, nil)
 			return fmt.Errorf("cannot open data channel: %w", err)

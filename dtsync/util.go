@@ -17,6 +17,7 @@ import (
 	gsimpl "github.com/ipfs/go-graphsync/impl"
 	gsnet "github.com/ipfs/go-graphsync/network"
 	"github.com/ipld/go-ipld-prime"
+	corepeer "github.com/libp2p/go-libp2p-core/peer"
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/peer"
 )
@@ -58,8 +59,11 @@ func (lsc legStorageConfiguration) configureTransport(chid dt.ChannelID, voucher
 }
 
 func registerVoucher(dtManager dt.Manager, v *Voucher, allowPeer func(peer.ID) bool) error {
+	cpw := func(cpi corepeer.ID) bool {
+		return allowPeer(peer.ID(cpi))
+	}
 	val := &legsValidator{
-		allowPeer: allowPeer,
+		allowPeer: cpw,
 	}
 	err := dtManager.RegisterVoucherType(v, val)
 	if err != nil {
@@ -85,7 +89,7 @@ func makeDataTransfer(host host.Host, ds datastore.Batching, lsys ipld.LinkSyste
 	gs := gsimpl.New(ctx, gsNet, lsys)
 
 	dtNet := dtnetwork.NewFromLibp2pHost(host)
-	tp := gstransport.NewTransport(host.ID(), gs)
+	tp := gstransport.NewTransport(corepeer.ID(host.ID()), gs)
 
 	dtRestartConfig := datatransfer.ChannelRestartConfig(channelmonitor.Config{
 		AcceptTimeout:   time.Minute,

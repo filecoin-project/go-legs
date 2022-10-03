@@ -13,6 +13,7 @@ import (
 	logging "github.com/ipfs/go-log/v2"
 	"github.com/ipld/go-ipld-prime"
 	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
+	corepeer "github.com/libp2p/go-libp2p-core/peer"
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"golang.org/x/time/rate"
@@ -110,15 +111,15 @@ func (s *Sync) setRateLimiter(peerID peer.ID, rateLimiter *rate.Limiter) {
 	s.rateMutex.Unlock()
 }
 
-func (s *Sync) getRateLimiter(peerID peer.ID) *rate.Limiter {
+func (s *Sync) getRateLimiter(peerID corepeer.ID) *rate.Limiter {
 	s.rateMutex.Lock()
-	limiter := s.rateLimiters[peerID]
+	limiter := s.rateLimiters[peer.ID(peerID)]
 	s.rateMutex.Unlock()
 	return limiter
 }
 
-func (s *Sync) addRateLimiting(bFn graphsync.OnIncomingBlockHook, rateLimiter func(peer.ID) *rate.Limiter, gs graphsync.GraphExchange) graphsync.OnIncomingBlockHook {
-	return func(p peer.ID, responseData graphsync.ResponseData, blockData graphsync.BlockData, hookActions graphsync.IncomingBlockHookActions) {
+func (s *Sync) addRateLimiting(bFn graphsync.OnIncomingBlockHook, rateLimiter func(corepeer.ID) *rate.Limiter, gs graphsync.GraphExchange) graphsync.OnIncomingBlockHook {
+	return func(p corepeer.ID, responseData graphsync.ResponseData, blockData graphsync.BlockData, hookActions graphsync.IncomingBlockHookActions) {
 		isLocalBlock := blockData.BlockSizeOnWire() == 0
 
 		if !isLocalBlock {
@@ -140,8 +141,8 @@ func (s *Sync) addRateLimiting(bFn graphsync.OnIncomingBlockHook, rateLimiter fu
 }
 
 func addIncomingBlockHook(bFn graphsync.OnIncomingBlockHook, blockHook func(peer.ID, cid.Cid)) graphsync.OnIncomingBlockHook {
-	return func(p peer.ID, responseData graphsync.ResponseData, blockData graphsync.BlockData, hookActions graphsync.IncomingBlockHookActions) {
-		blockHook(p, blockData.Link().(cidlink.Link).Cid)
+	return func(p corepeer.ID, responseData graphsync.ResponseData, blockData graphsync.BlockData, hookActions graphsync.IncomingBlockHookActions) {
+		blockHook(peer.ID(p), blockData.Link().(cidlink.Link).Cid)
 		if bFn != nil {
 			bFn(p, responseData, blockData, hookActions)
 		}
@@ -288,7 +289,7 @@ func (s *Sync) onEvent(event dt.Event, channelState dt.ChannelState) {
 	// It is not necessary to return the channelState CID, since we already
 	// know it is the correct on since it was used to look up this syncDone
 	// channel.
-	if !s.signalSyncDone(inProgressSyncKey{channelState.BaseCID(), channelState.OtherPeer()}, err) {
+	if !s.signalSyncDone(inProgressSyncKey{channelState.BaseCID(), peer.ID(channelState.OtherPeer())}, err) {
 		log.Errorw("Could not find channel for completed transfer notice", "cid", channelState.BaseCID())
 		return
 	}

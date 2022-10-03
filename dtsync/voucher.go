@@ -6,7 +6,7 @@ import (
 	datatransfer "github.com/filecoin-project/go-data-transfer"
 	"github.com/ipfs/go-cid"
 	"github.com/ipld/go-ipld-prime"
-	"github.com/libp2p/go-libp2p/core/peer"
+	corepeer "github.com/libp2p/go-libp2p-core/peer"
 	cborgen "github.com/whyrusleeping/cbor-gen"
 )
 
@@ -47,13 +47,13 @@ func (v *VoucherResult) Type() datatransfer.TypeIdentifier {
 type legsValidator struct {
 	//ctx context.Context
 	//ValidationsReceived chan receivedValidation
-	allowPeer func(peer.ID) bool
+	allowPeer func(corepeer.ID) bool
 }
 
 func (vl *legsValidator) ValidatePush(
 	_ bool,
 	_ datatransfer.ChannelID,
-	_ peer.ID,
+	_ corepeer.ID,
 	_ datatransfer.Voucher,
 	_ cid.Cid,
 	_ ipld.Node) (datatransfer.VoucherResult, error) {
@@ -65,7 +65,7 @@ func (vl *legsValidator) ValidatePush(
 func (vl *legsValidator) ValidatePull(
 	_ bool,
 	_ datatransfer.ChannelID,
-	peerID peer.ID,
+	peerID corepeer.ID,
 	voucher datatransfer.Voucher,
 	_ cid.Cid,
 	_ ipld.Node) (datatransfer.VoucherResult, error) {
