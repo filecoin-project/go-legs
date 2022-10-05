@@ -7,7 +7,7 @@ require (
 	github.com/hashicorp/go-multierror v1.1.1
 	github.com/ipfs/go-cid v0.3.2
 	github.com/ipfs/go-datastore v0.6.0
-	github.com/ipfs/go-graphsync v0.13.1
+	github.com/ipfs/go-graphsync v0.13.2
 	github.com/ipfs/go-log/v2 v2.5.1
 	github.com/ipld/go-ipld-prime v0.18.0
 	github.com/libp2p/go-libp2p v0.23.2
