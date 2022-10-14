@@ -123,7 +123,7 @@ func (p *publisher) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		http.Error(w, "unable to load data for cid", http.StatusInternalServerError)
-		log.Errorw("Failed to load requested block", "err", err)
+		log.Errorw("Failed to load requested block", "err", err, "cid", c)
 		return
 	}
 	// marshal to json and serve.

@@ -34,6 +34,8 @@ var log = logging.Logger("go-legs")
 // pubsub messages will remain in the peerstore. This is twice the default
 // provider poll interval.
 const (
+	announceCacheSize = 64
+
 	defaultAddrTTL       = 48 * time.Hour
 	tempAddrTTL          = 24 * time.Hour // must be long enough for ad chain to sync
 	defaultSegDepthLimit = -1             // Segmented sync disabled.
@@ -47,6 +49,10 @@ const (
 // messages is not allowed to be processed. This is only used internally, and
 // pre-allocated here as it may occur frequently.
 var errSourceNotAllowed = errors.New("message source not allowed")
+
+// errAlreadySeenCid is teh error returned when an announce message is for a
+// CID has already been announced by a previous announce message.
+var errAlreadySeenCid = errors.New("announcement for already seen CID")
 
 // AllowPeerFunc is the signature of a function given to Subscriber that
 // determines whether to allow or reject messages originating from a peer
@@ -80,7 +86,6 @@ type Subscriber struct {
 	topic     *pubsub.Topic
 	topicName string
 
-	allowPeer     AllowPeerFunc
 	handlers      map[peer.ID]*handler
 	handlersMutex sync.Mutex
 
@@ -129,6 +134,11 @@ type Subscriber struct {
 
 	rateLimiterFor RateLimiterFor
 	resendAnnounce bool
+
+	allowPeer     AllowPeerFunc
+	announceCache *stringLRU
+	// announceMutex protects announceCache and allowPeer.
+	announceMutex sync.Mutex
 }
 
 // SyncFinished notifies an OnSyncFinished reader that a specified peer
@@ -272,6 +282,8 @@ func NewSubscriber(host host.Host, ds datastore.Batching, lsys ipld.LinkSystem, 
 		segDepthLimit:  cfg.segDepthLimit,
 		rateLimiterFor: cfg.rateLimiterFor,
 		resendAnnounce: cfg.resendAnnounce,
+
+		announceCache: newStringLRU(announceCacheSize),
 	}
 
 	// Start watcher to read pubsub messages.
@@ -308,7 +320,7 @@ func (s *Subscriber) SetLatestSync(peerID peer.ID, latestSync cid.Cid) error {
 	if latestSync == cid.Undef {
 		return errors.New("cannot set latest sync to undefined value")
 	}
-	hnd, err := s.getOrCreateHandler(peerID, true)
+	hnd, err := s.getOrCreateHandler(peerID)
 	if err != nil {
 		return err
 	}
@@ -324,8 +336,8 @@ func (s *Subscriber) SetLatestSync(peerID peer.ID, latestSync cid.Cid) error {
 // allows messages from all peers. Calling SetAllowPeer replaces any previously
 // configured AllowPeerFunc.
 func (s *Subscriber) SetAllowPeer(allowPeer AllowPeerFunc) {
-	s.handlersMutex.Lock()
-	defer s.handlersMutex.Unlock()
+	s.announceMutex.Lock()
+	defer s.announceMutex.Unlock()
 	s.allowPeer = allowPeer
 }
 
@@ -518,7 +530,7 @@ func (s *Subscriber) Sync(ctx context.Context, peerID peer.ID, nextCid cid.Cid, 
 	}
 
 	// Check for existing handler. If none, create one if allowed.
-	hnd, err := s.getOrCreateHandler(peerID, true)
+	hnd, err := s.getOrCreateHandler(peerID)
 	if err != nil {
 		return cid.Undef, err
 	}
@@ -539,7 +551,6 @@ func (s *Subscriber) Sync(ctx context.Context, peerID peer.ID, nextCid cid.Cid, 
 	if updateLatest {
 		hnd.subscriber.latestSyncHander.SetLatestSync(hnd.peerID, nextCid)
 		hnd.subscriber.inEvents <- SyncFinished{Cid: nextCid, PeerID: hnd.peerID, SyncedCids: syncedCids}
-		log.Infow("Updating latest sync")
 	}
 
 	// The sync succeeded, so let's remember this address in the appropriate
@@ -580,16 +591,9 @@ func (s *Subscriber) distributeEvents() {
 }
 
 // getOrCreateHandler creates a handler for a specific peer
-func (s *Subscriber) getOrCreateHandler(peerID peer.ID, force bool) (*handler, error) {
+func (s *Subscriber) getOrCreateHandler(peerID peer.ID) (*handler, error) {
 	s.handlersMutex.Lock()
 	defer s.handlersMutex.Unlock()
-
-	// Check callback, if needed, to see if peer ID allowed.
-	if s.allowPeer != nil && !force {
-		if !s.allowPeer(peerID) {
-			return nil, errSourceNotAllowed
-		}
-	}
 
 	expires := time.Now().Add(s.idleHandlerTTL)
 
@@ -600,7 +604,7 @@ func (s *Subscriber) getOrCreateHandler(peerID peer.ID, force bool) (*handler, e
 		return hnd, nil
 	}
 
-	log.Infow("Creating new handler for publisher", "peer", peerID)
+	log.Debugw("Creating new handler for publisher", "peer", peerID)
 	hnd = &handler{
 		subscriber: s,
 		peerID:     peerID,
@@ -697,10 +701,7 @@ func (s *Subscriber) watch(ctx context.Context) {
 			log.Infow("Handling pubsub announce", "peer", srcPeer)
 		}
 
-		if s.filterIPs {
-			addrs = mautil.FilterPrivateIPs(addrs)
-		}
-		err = s.announce(ctx, m.Cid, srcPeer, addrs)
+		err = s.announce(ctx, m.Cid, srcPeer, addrs, false)
 		if err != nil {
 			log.Errorw("Cannot process message", "err", err)
 			continue
@@ -714,35 +715,40 @@ func (s *Subscriber) watch(ctx context.Context) {
 // pubsub. If resendAnnounce is enabled, then the message is resent over pubsub
 // with the original peerID encoded into the message extra data.
 func (s *Subscriber) Announce(ctx context.Context, nextCid cid.Cid, peerID peer.ID, peerAddrs []multiaddr.Multiaddr) error {
-	if s.filterIPs {
-		peerAddrs = mautil.FilterPrivateIPs(peerAddrs)
+	return s.announce(ctx, nextCid, peerID, peerAddrs, true)
+}
+
+func (s *Subscriber) announceCheck(peerID peer.ID, nextCid cid.Cid) error {
+	s.announceMutex.Lock()
+	defer s.announceMutex.Unlock()
+
+	// Check callback to see if peer ID allowed.
+	if s.allowPeer != nil && !s.allowPeer(peerID) {
+		return errSourceNotAllowed
 	}
 
-	err := s.announce(ctx, nextCid, peerID, peerAddrs)
-	if err != nil {
-		return err
-	}
-
-	if s.resendAnnounce {
-		err = s.republish(ctx, nextCid, peerID, peerAddrs)
-		if err != nil {
-			log.Errorw("Cannot republish announce", "err", err)
-			return nil
-		}
-		log.Infow("Re-published direct announce message in pubsub channel", "cid", nextCid, "originPeer", peerID)
+	// Check if a previous announce for this CID was already seen.
+	if s.announceCache.update(nextCid.String()) {
+		return errAlreadySeenCid
 	}
 
 	return nil
 }
 
-func (s *Subscriber) announce(ctx context.Context, nextCid cid.Cid, peerID peer.ID, peerAddrs []multiaddr.Multiaddr) error {
-	hnd, err := s.getOrCreateHandler(peerID, false)
+func (s *Subscriber) announce(ctx context.Context, nextCid cid.Cid, peerID peer.ID, peerAddrs []multiaddr.Multiaddr, direct bool) error {
+	err := s.announceCheck(peerID, nextCid)
 	if err != nil {
-		if err == errSourceNotAllowed {
-			log.Infow("Ignored announcement", "reason", err, "peer", peerID)
-			return nil
-		}
+		log.Infow("Ignored announcement", "reason", err, "peer", peerID)
+		return nil
+	}
+
+	hnd, err := s.getOrCreateHandler(peerID)
+	if err != nil {
 		return err
+	}
+
+	if s.filterIPs {
+		peerAddrs = mautil.FilterPrivateIPs(peerAddrs)
 	}
 
 	syncer, _, err := s.makeSyncer(peerID, peerAddrs, s.addrTTL, nil)
@@ -753,6 +759,15 @@ func (s *Subscriber) announce(ctx context.Context, nextCid cid.Cid, peerID peer.
 	// Start a new goroutine to handle this message instead of having a
 	// persistent goroutine for each peer.
 	hnd.handleAsync(ctx, nextCid, syncer)
+
+	if direct && s.resendAnnounce {
+		err = s.republish(ctx, nextCid, peerID, peerAddrs)
+		if err != nil {
+			log.Errorw("Cannot republish announce", "err", err)
+			return nil
+		}
+		log.Infow("Re-published direct announce message in pubsub channel", "cid", nextCid, "originPeer", peerID)
+	}
 
 	return nil
 }
@@ -864,18 +879,21 @@ func (h *handler) handleAsync(ctx context.Context, nextCid cid.Cid, syncer Synce
 			// needs it while we wait to send on the events chan.
 			syncedCids, err := h.handle(ctx, c, h.subscriber.dss, true, syncer, h.subscriber.generalBlockHook, h.subscriber.segDepthLimit)
 			if err != nil {
+				// Failed to handle the sync, so allow another announce for the same CID.
+				h.subscriber.announceMutex.Lock()
+				h.subscriber.announceCache.remove(c.String())
+				h.subscriber.announceMutex.Unlock()
 				// Log error for now.
-				log.Errorw("Cannot process message", "err", err, "peer", h.peerID)
+				log.Errorw("Cannot process message", "err", err, "publisher", h.peerID)
 				return
 			}
 
 			// Update latest head seen.
-			log.Infow("Updating latest sync")
 			h.subscriber.latestSyncHander.SetLatestSync(h.peerID, c)
 			h.subscriber.inEvents <- SyncFinished{Cid: c, PeerID: h.peerID, SyncedCids: syncedCids}
 		}()
 	} else {
-		log.Infow("Pending update replaced by new", "previous_cid", h.pendingCid, "new_cid", nextCid)
+		log.Infow("Pending announce replaced by new", "previous_cid", h.pendingCid, "new_cid", nextCid, "publisher", h.peerID)
 	}
 	// Set the CID to be handled by the waiting goroutine.
 	h.pendingCid = nextCid
