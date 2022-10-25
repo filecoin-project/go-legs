@@ -248,7 +248,7 @@ func (s *Sync) onEvent(event dt.Event, channelState dt.ChannelState) {
 	switch channelState.Status() {
 	case dt.Completed:
 		// Tell the waiting handler that the sync has finished successfully.
-		log.Infow("datatransfer completed successfully", "cid", channelState.BaseCID(), "peer", channelState.OtherPeer())
+		log.Debugw("datatransfer completed successfully", "cid", channelState.BaseCID(), "peer", channelState.OtherPeer())
 	case dt.Cancelled:
 		// The request was canceled; inform waiting handler.
 		err = fmt.Errorf("datatransfer cancelled")

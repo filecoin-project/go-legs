@@ -54,7 +54,7 @@ func TestAnnounceReplace(t *testing.T) {
 	// Store the whole chain in source node
 	chainLnks := test.MkChain(srcLnkS, true)
 
-	hnd, err := sub.getOrCreateHandler(srcHost.ID(), true)
+	hnd, err := sub.getOrCreateHandler(srcHost.ID())
 	if err != nil {
 		t.Fatal(err)
 	}

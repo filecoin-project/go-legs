@@ -177,6 +177,7 @@ type DefaultLatestSyncHandler struct {
 }
 
 func (h *DefaultLatestSyncHandler) SetLatestSync(p peer.ID, c cid.Cid) {
+	log.Infow("Updating latest sync", "cid", c, "peer", p)
 	h.m.Store(p, c)
 }
 
