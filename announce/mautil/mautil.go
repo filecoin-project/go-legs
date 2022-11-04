@@ -1,4 +1,4 @@
-// Package mautil provider multiaddr utility functions.
+// Package mautil provides multiaddr utility functions.
 package mautil
 
 import (

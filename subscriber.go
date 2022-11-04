@@ -1,17 +1,15 @@
 package legs
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"sync"
 	"time"
 
+	"github.com/filecoin-project/go-legs/announce"
 	"github.com/filecoin-project/go-legs/dtsync"
-	"github.com/filecoin-project/go-legs/gpubsub"
 	"github.com/filecoin-project/go-legs/httpsync"
-	"github.com/filecoin-project/go-legs/mautil"
 	"github.com/hashicorp/go-multierror"
 	"github.com/ipfs/go-cid"
 	"github.com/ipfs/go-datastore"
@@ -19,7 +17,6 @@ import (
 	"github.com/ipld/go-ipld-prime"
 	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
 	"github.com/ipld/go-ipld-prime/traversal/selector"
-	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/core/peerstore"
@@ -34,8 +31,6 @@ var log = logging.Logger("go-legs")
 // pubsub messages will remain in the peerstore. This is twice the default
 // provider poll interval.
 const (
-	announceCacheSize = 64
-
 	defaultAddrTTL       = 48 * time.Hour
 	tempAddrTTL          = 24 * time.Hour // must be long enough for ad chain to sync
 	defaultSegDepthLimit = -1             // Segmented sync disabled.
@@ -53,12 +48,6 @@ var errSourceNotAllowed = errors.New("message source not allowed")
 // errAlreadySeenCid is teh error returned when an announce message is for a
 // CID has already been announced by a previous announce message.
 var errAlreadySeenCid = errors.New("announcement for already seen CID")
-
-// AllowPeerFunc is the signature of a function given to Subscriber that
-// determines whether to allow or reject messages originating from a peer
-// passed into the function. Returning true or false indicates that messages
-// from that peer are allowed rejected, respectively.
-type AllowPeerFunc func(peer.ID) bool
 
 // BlockHookFunc is the signature of a function that is called when a received.
 type BlockHookFunc func(peer.ID, cid.Cid, SegmentSyncActions)
@@ -80,11 +69,7 @@ type Subscriber struct {
 	dss  ipld.Node
 	host host.Host
 
-	addrTTL   time.Duration
-	filterIPs bool
-	psub      *pubsub.Subscription
-	topic     *pubsub.Topic
-	topicName string
+	addrTTL time.Duration
 
 	handlers      map[peer.ID]*handler
 	handlersMutex sync.Mutex
@@ -107,11 +92,9 @@ type Subscriber struct {
 
 	// closing signals that the Subscriber is closing.
 	closing chan struct{}
-	// cancelps cancels pubsub.
-	cancelps context.CancelFunc
 	// closeOnce ensures that the Close only happens once.
 	closeOnce sync.Once
-	// watchDone signals that the pubsub watch function exited.
+	// watchDone signals that the watch function exited.
 	watchDone chan struct{}
 	asyncWG   sync.WaitGroup
 
@@ -133,12 +116,8 @@ type Subscriber struct {
 	segDepthLimit int64
 
 	rateLimiterFor RateLimiterFor
-	resendAnnounce bool
 
-	allowPeer     AllowPeerFunc
-	announceCache *stringLRU
-	// announceMutex protects announceCache and allowPeer.
-	announceMutex sync.Mutex
+	receiver *announce.Receiver
 }
 
 // SyncFinished notifies an OnSyncFinished reader that a specified peer
@@ -204,29 +183,11 @@ func NewSubscriber(host host.Host, ds datastore.Batching, lsys ipld.LinkSystem, 
 		return nil, err
 	}
 
-	ctx, cancelPubsub := context.WithCancel(context.Background())
-
-	var pubsubTopic *pubsub.Topic
-	if cfg.topic == nil {
-		pubsubTopic, err = gpubsub.MakePubsub(ctx, host, topic)
-		if err != nil {
-			cancelPubsub()
-			return nil, err
-		}
-		cfg.topic = pubsubTopic
-	}
-	psub, err := cfg.topic.Subscribe()
-	if err != nil {
-		cancelPubsub()
-		return nil, err
-	}
-
 	scopedBlockHookMutex, scopedBlockHook, blockHook := wrapBlockHook()
 
 	var dtSync *dtsync.Sync
 	if cfg.dtManager != nil {
 		if ds != nil {
-			cancelPubsub()
 			return nil, fmt.Errorf("datastore cannot be used with DtManager option")
 		}
 		dtSync, err = dtsync.NewSyncWithDT(host, cfg.dtManager, cfg.graphExchange, &lsys, blockHook)
@@ -234,13 +195,11 @@ func NewSubscriber(host host.Host, ds datastore.Batching, lsys ipld.LinkSystem, 
 		dtSync, err = dtsync.NewSync(host, ds, lsys, blockHook)
 	}
 	if err != nil {
-		cancelPubsub()
 		return nil, err
 	}
 
 	httpPeerstore, err := pstoremem.NewPeerstore()
 	if err != nil {
-		cancelPubsub()
 		return nil, err
 	}
 
@@ -249,22 +208,22 @@ func NewSubscriber(host host.Host, ds datastore.Batching, lsys ipld.LinkSystem, 
 		latestSyncHandler = &DefaultLatestSyncHandler{}
 	}
 
+	rcvr, err := announce.NewReceiver(host, topic,
+		announce.WithAllowPeer(cfg.allowPeer),
+		announce.WithFilterIPs(cfg.filterIPs),
+		announce.WithResend(cfg.resendAnnounce),
+		announce.WithTopic(cfg.topic))
+
 	s := &Subscriber{
 		dss:  dss,
 		host: host,
 
 		addrTTL:   cfg.addrTTL,
-		filterIPs: cfg.filterIPs,
-		psub:      psub,
-		topic:     cfg.topic,
-		topicName: cfg.topic.String(),
 		closing:   make(chan struct{}),
-		cancelps:  cancelPubsub,
 		watchDone: make(chan struct{}),
 
-		allowPeer: cfg.allowPeer,
-		handlers:  make(map[peer.ID]*handler),
-		inEvents:  make(chan SyncFinished, 1),
+		handlers: make(map[peer.ID]*handler),
+		inEvents: make(chan SyncFinished, 1),
 
 		dtSync:       dtSync,
 		httpSync:     httpsync.NewSync(lsys, cfg.httpClient, blockHook),
@@ -281,13 +240,11 @@ func NewSubscriber(host host.Host, ds datastore.Batching, lsys ipld.LinkSystem, 
 
 		segDepthLimit:  cfg.segDepthLimit,
 		rateLimiterFor: cfg.rateLimiterFor,
-		resendAnnounce: cfg.resendAnnounce,
 
-		announceCache: newStringLRU(announceCacheSize),
+		receiver: rcvr,
 	}
-
-	// Start watcher to read pubsub messages.
-	go s.watch(ctx)
+	// Start watcher to read announce messages.
+	go s.watch()
 	// Start distributor to send SyncFinished messages to interested parties.
 	go s.distributeEvents()
 	// Start goroutine to remove idle publisher handlers.
@@ -335,10 +292,8 @@ func (s *Subscriber) SetLatestSync(peerID peer.ID, latestSync cid.Cid) error {
 // allow or reject messages from a peer. Setting nil removes any filtering and
 // allows messages from all peers. Calling SetAllowPeer replaces any previously
 // configured AllowPeerFunc.
-func (s *Subscriber) SetAllowPeer(allowPeer AllowPeerFunc) {
-	s.announceMutex.Lock()
-	defer s.announceMutex.Unlock()
-	s.allowPeer = allowPeer
+func (s *Subscriber) SetAllowPeer(allowPeer announce.AllowPeerFunc) {
+	s.receiver.SetAllowPeer(allowPeer)
 }
 
 // Close shuts down the Subscriber.
@@ -354,22 +309,16 @@ func (s *Subscriber) doClose() error {
 	// Cancel idle handler cleaner.
 	close(s.closing)
 
-	// Cancel pubsub and Wait for pubsub watcher to exit.
-	s.psub.Cancel()
+	// Close receiver and wait for watch to exit.
+	s.receiver.Close()
 	<-s.watchDone
+
+	// Wait for any syncs to complete.
 	s.asyncWG.Wait()
 
 	var err, errs error
 	if err = s.dtSync.Close(); err != nil {
 		errs = multierror.Append(errs, err)
-	}
-
-	// If Subscriber owns the pubsub topic, then close it.
-	if s.topic != nil {
-		if err = s.topic.Close(); err != nil {
-			log.Errorw("Failed to close pubsub topic", "err", err)
-			errs = multierror.Append(errs, err)
-		}
 	}
 
 	// Dismiss any event readers.
@@ -379,9 +328,6 @@ func (s *Subscriber) doClose() error {
 	}
 	s.outEventsChans = nil
 	s.outEventsMutex.Unlock()
-
-	// Shutdown pubsub services.
-	s.cancelps()
 
 	// Stop the distribution goroutine.
 	close(s.inEvents)
@@ -435,6 +381,12 @@ func (s *Subscriber) RemoveHandler(peerID peer.ID) bool {
 	delete(s.handlers, peerID)
 
 	return true
+}
+
+// SyncReceiver makes sure that the Receiver has handled any pending announce
+// messages that existed at the point this function was called.
+func (s *Subscriber) SyncReceiver() {
+	s.receiver.SyncNext()
 }
 
 // Sync performs a one-off explicit sync with the given peer for a specific CID
@@ -640,149 +592,45 @@ func (s *Subscriber) idleHandlerCleaner() {
 	}
 }
 
-// watch reads messages from a pubsub topic subscription and passes the message
-// to the handler that is responsible for the peer that originally sent the
-// message. If the handler does not yet exist, then the allowPeer callback is
-// consulted to determine if the peer's messages are allowed. If allowed, a new
-// handler is created. Otherwise, the message is ignored.
-func (s *Subscriber) watch(ctx context.Context) {
+// watch fetches announce messages from the Reciever.
+func (s *Subscriber) watch() {
+	defer close(s.watchDone)
+
+	// Cancel any pending messages if this function exits.
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
 	for {
-		msg, err := s.psub.Next(ctx)
+		amsg, err := s.receiver.Next(context.Background())
 		if err != nil {
-			if ctx.Err() != nil || err == pubsub.ErrSubscriptionCancelled {
-				// This is a normal result of shutting down the Subscriber.
-				log.Debug("Canceled watching pubsub subscription")
-			} else {
-				log.Errorw("Error reading from pubsub", "err", err)
-				// TODO: restart subscription.
-			}
+			// This is a normal result of shutting down the Receiver.
+			log.Infow("Done handling announce messages", "reason", err)
 			break
 		}
 
-		srcPeer, err := peer.IDFromBytes(msg.From)
+		hnd, err := s.getOrCreateHandler(amsg.PeerID)
 		if err != nil {
+			log.Errorw("Cannot create handler for announce", "err", err)
 			continue
 		}
 
-		// Decode CID and originator addresses from message.
-		m := dtsync.Message{}
-		if err = m.UnmarshalCBOR(bytes.NewBuffer(msg.Data)); err != nil {
-			log.Errorw("Could not decode pubsub message", "err", err)
-			continue
-		}
-
-		// Read publisher addresses from message.
-		var addrs []multiaddr.Multiaddr
-		if len(m.Addrs) != 0 {
-			addrs, err = m.GetAddrs()
-			if err != nil {
-				log.Errorw("Could not decode pubsub message", "err", err)
-				continue
-			}
-		}
-
-		// If message has original peer set, then this is a republished message.
-		if m.OrigPeer != "" {
-			// Ignore re-published announce from this host.
-			if srcPeer == s.host.ID() {
-				log.Debug("Ignored rebuplished announce from self")
-				continue
-			}
-
-			// Read the original publisher.
-			relayPeer := srcPeer
-			srcPeer, err = peer.Decode(m.OrigPeer)
-			if err != nil {
-				log.Errorw("Cannot read peerID from republished announce", "err", err)
-				continue
-			}
-			log.Infow("Handling re-published pubsub announce", "originPeer", srcPeer, "relayPeer", relayPeer)
-		} else {
-			log.Infow("Handling pubsub announce", "peer", srcPeer)
-		}
-
-		err = s.announce(ctx, m.Cid, srcPeer, addrs, false)
+		syncer, _, err := s.makeSyncer(amsg.PeerID, amsg.Addrs, s.addrTTL, nil)
 		if err != nil {
-			log.Errorw("Cannot process message", "err", err)
+			log.Errorw("Cannot make syncer for announce", "err", err)
 			continue
 		}
+
+		// Start a new goroutine to handle this message instead of having a
+		// persistent goroutine for each peer.
+		hnd.handleAsync(ctx, amsg.Cid, syncer)
 	}
-
-	close(s.watchDone)
 }
 
-// Announce handles a direct announce message, that has not arrived over
-// pubsub. If resendAnnounce is enabled, then the message is resent over pubsub
+// Announce handles a direct announce message, that was not arrived over
+// pubsub. The message is resent over pubsub if the Receiver is configured to do so.
 // with the original peerID encoded into the message extra data.
 func (s *Subscriber) Announce(ctx context.Context, nextCid cid.Cid, peerID peer.ID, peerAddrs []multiaddr.Multiaddr) error {
-	return s.announce(ctx, nextCid, peerID, peerAddrs, true)
-}
-
-func (s *Subscriber) announceCheck(peerID peer.ID, nextCid cid.Cid) error {
-	s.announceMutex.Lock()
-	defer s.announceMutex.Unlock()
-
-	// Check callback to see if peer ID allowed.
-	if s.allowPeer != nil && !s.allowPeer(peerID) {
-		return errSourceNotAllowed
-	}
-
-	// Check if a previous announce for this CID was already seen.
-	if s.announceCache.update(nextCid.String()) {
-		return errAlreadySeenCid
-	}
-
-	return nil
-}
-
-func (s *Subscriber) announce(ctx context.Context, nextCid cid.Cid, peerID peer.ID, peerAddrs []multiaddr.Multiaddr, direct bool) error {
-	err := s.announceCheck(peerID, nextCid)
-	if err != nil {
-		log.Infow("Ignored announcement", "reason", err, "peer", peerID)
-		return nil
-	}
-
-	hnd, err := s.getOrCreateHandler(peerID)
-	if err != nil {
-		return err
-	}
-
-	if s.filterIPs {
-		peerAddrs = mautil.FilterPrivateIPs(peerAddrs)
-	}
-
-	syncer, _, err := s.makeSyncer(peerID, peerAddrs, s.addrTTL, nil)
-	if err != nil {
-		return err
-	}
-
-	// Start a new goroutine to handle this message instead of having a
-	// persistent goroutine for each peer.
-	hnd.handleAsync(ctx, nextCid, syncer)
-
-	if direct && s.resendAnnounce {
-		err = s.republish(ctx, nextCid, peerID, peerAddrs)
-		if err != nil {
-			log.Errorw("Cannot republish announce", "err", err)
-			return nil
-		}
-		log.Infow("Re-published direct announce message in pubsub channel", "cid", nextCid, "originPeer", peerID)
-	}
-
-	return nil
-}
-
-func (s *Subscriber) republish(ctx context.Context, nextCid cid.Cid, peerID peer.ID, addrs []multiaddr.Multiaddr) error {
-	msg := dtsync.Message{
-		Cid:      nextCid,
-		OrigPeer: peerID.String(),
-	}
-	msg.SetAddrs(addrs)
-	msgBuf := bytes.NewBuffer(nil)
-	if err := msg.MarshalCBOR(msgBuf); err != nil {
-		return err
-	}
-	return s.topic.Publish(ctx, msgBuf.Bytes())
+	return s.receiver.Direct(ctx, nextCid, peerID, peerAddrs)
 }
 
 func (s *Subscriber) makeSyncer(peerID peer.ID, peerAddrs []multiaddr.Multiaddr, addrTTL time.Duration, rateLimiter *rate.Limiter) (Syncer, bool, error) {
@@ -826,7 +674,7 @@ func (s *Subscriber) makeSyncer(peerID peer.ID, peerAddrs []multiaddr.Multiaddr,
 		peerStore.AddAddrs(peerID, peerAddrs, addrTTL)
 	}
 
-	return s.dtSync.NewSyncer(peerID, s.topicName, rateLimiter), false, nil
+	return s.dtSync.NewSyncer(peerID, s.receiver.TopicName(), rateLimiter), false, nil
 }
 
 func firstHTTPAddr(peerAddrs []multiaddr.Multiaddr) multiaddr.Multiaddr {
@@ -880,9 +728,7 @@ func (h *handler) handleAsync(ctx context.Context, nextCid cid.Cid, syncer Synce
 			syncedCids, err := h.handle(ctx, c, h.subscriber.dss, true, syncer, h.subscriber.generalBlockHook, h.subscriber.segDepthLimit)
 			if err != nil {
 				// Failed to handle the sync, so allow another announce for the same CID.
-				h.subscriber.announceMutex.Lock()
-				h.subscriber.announceCache.remove(c.String())
-				h.subscriber.announceMutex.Unlock()
+				h.subscriber.receiver.UncacheCid(c)
 				// Log error for now.
 				log.Errorw("Cannot process message", "err", err, "publisher", h.peerID)
 				return

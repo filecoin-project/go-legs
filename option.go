@@ -7,6 +7,7 @@ import (
 	"time"
 
 	dt "github.com/filecoin-project/go-data-transfer"
+	"github.com/filecoin-project/go-legs/announce"
 	"github.com/ipfs/go-cid"
 	"github.com/ipfs/go-graphsync"
 	"github.com/ipld/go-ipld-prime/traversal/selector"
@@ -18,7 +19,7 @@ import (
 // config contains all options for configuring Subscriber.
 type config struct {
 	addrTTL   time.Duration
-	allowPeer AllowPeerFunc
+	allowPeer announce.AllowPeerFunc
 	filterIPs bool
 
 	topic *pubsub.Topic
@@ -54,7 +55,7 @@ func (c *config) apply(opts []Option) error {
 
 // AllowPeer sets the function that determines whether to allow or reject
 // messages from a peer.
-func AllowPeer(allowPeer AllowPeerFunc) Option {
+func AllowPeer(allowPeer announce.AllowPeerFunc) Option {
 	return func(c *config) error {
 		c.allowPeer = allowPeer
 		return nil

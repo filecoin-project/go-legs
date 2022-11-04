@@ -113,12 +113,14 @@ func TestAnnounceReplace(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Log("Sent announce for last CID", lastCid)
+	sub.SyncReceiver()
+
 	// Check that the pending CID is set to the last one announced.
 	hnd.qlock.Lock()
 	pendingCid = hnd.pendingCid
 	hnd.qlock.Unlock()
 	if pendingCid != lastCid {
-		t.Fatal("wrong pending cid")
+		t.Fatalf("wrong pending cid, expected %s got %s", lastCid.String(), pendingCid.String())
 	}
 
 	// Unblock the first handler goroutine
@@ -210,6 +212,7 @@ func TestAnnounce_LearnsHttpPublisherAddr(t *testing.T) {
 	// data was synced via the sync call and not via the earlier background sync via announce.
 	err = sub.Announce(ctx, oneC, pubh.ID(), []multiaddr.Multiaddr{pub.Address()})
 	require.NoError(t, err)
+	sub.SyncReceiver()
 
 	// Now assert that we can sync another CID because, the subscriber should have learned the
 	// address of publisher via earlier announce.

@@ -1,7 +1,7 @@
-package gpubsub
+package gossiptopic
 
 import (
-	log2 "github.com/ipfs/go-log/v2"
+	logging "github.com/ipfs/go-log/v2"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/core/protocol"
@@ -12,7 +12,7 @@ var _ pubsub.RawTracer = (*loggingTracer)(nil)
 // loggingTracer is a pubsub.RawTracer that logs the internal operations of the pubsub subsystem
 // for debugging purposes with debug log level.
 type loggingTracer struct {
-	log *log2.ZapEventLogger
+	log *logging.ZapEventLogger
 }
 
 func (l *loggingTracer) AddPeer(p peer.ID, proto protocol.ID) {

@@ -3,7 +3,7 @@
 //
 // TODO: Convert Message into IPLD schema and use bindnode for serialization.
 
-package dtsync
+package gossiptopic
 
 import (
 	"fmt"
@@ -12,16 +12,16 @@ import (
 	cbg "github.com/whyrusleeping/cbor-gen"
 )
 
-func (t *Message) MarshalCBOR(w io.Writer) error {
+func (m *Message) MarshalCBOR(w io.Writer) error {
 	var err error
 
-	if t == nil {
+	if m == nil {
 		_, err = w.Write(cbg.CborNull)
 		return err
 	}
 
 	var lengthBufMessage []byte
-	if t.OrigPeer == "" {
+	if m.OrigPeer == "" {
 		lengthBufMessage = []byte{131}
 	} else {
 		lengthBufMessage = []byte{132}
@@ -32,20 +32,20 @@ func (t *Message) MarshalCBOR(w io.Writer) error {
 
 	scratch := make([]byte, 9)
 
-	// Encode t.Cid.
-	if err = cbg.WriteCidBuf(scratch, w, t.Cid); err != nil {
-		return fmt.Errorf("failed to write cid field t.Cid: %w", err)
+	// Encode m.Cid.
+	if err = cbg.WriteCidBuf(scratch, w, m.Cid); err != nil {
+		return fmt.Errorf("failed to write cid field m.Cid: %w", err)
 	}
 
-	// Encode t.Addrs.
-	if len(t.Addrs) > cbg.MaxLength {
-		return fmt.Errorf("slice value in field t.Addrs was too long")
+	// Encode m.Addrs.
+	if len(m.Addrs) > cbg.MaxLength {
+		return fmt.Errorf("slice value in field m.Addrs was too long")
 	}
 
-	if err = cbg.WriteMajorTypeHeaderBuf(scratch, w, cbg.MajArray, uint64(len(t.Addrs))); err != nil {
+	if err = cbg.WriteMajorTypeHeaderBuf(scratch, w, cbg.MajArray, uint64(len(m.Addrs))); err != nil {
 		return err
 	}
-	for _, v := range t.Addrs {
+	for _, v := range m.Addrs {
 		if len(v) > cbg.ByteArrayMaxLen {
 			return fmt.Errorf("byte array in field v was too long")
 		}
@@ -59,40 +59,40 @@ func (t *Message) MarshalCBOR(w io.Writer) error {
 		}
 	}
 
-	if len(t.ExtraData) > cbg.ByteArrayMaxLen {
-		return fmt.Errorf("byte array in field t.ExtraData was too long")
+	if len(m.ExtraData) > cbg.ByteArrayMaxLen {
+		return fmt.Errorf("byte array in field m.ExtraData was too long")
 	}
 
-	if err = cbg.WriteMajorTypeHeaderBuf(scratch, w, cbg.MajByteString, uint64(len(t.ExtraData))); err != nil {
+	if err = cbg.WriteMajorTypeHeaderBuf(scratch, w, cbg.MajByteString, uint64(len(m.ExtraData))); err != nil {
 		return err
 	}
 
-	if _, err = w.Write(t.ExtraData[:]); err != nil {
+	if _, err = w.Write(m.ExtraData[:]); err != nil {
 		return err
 	}
 
 	// OrigPeer is empty so do not encode it.
-	if len(t.OrigPeer) == 0 {
+	if len(m.OrigPeer) == 0 {
 		return nil
 	}
 
-	// Encode t.OrigPeer.
-	if len(t.OrigPeer) > cbg.MaxLength {
-		return fmt.Errorf("value in field t.OrigPeer was too long")
+	// Encode m.OrigPeer.
+	if len(m.OrigPeer) > cbg.MaxLength {
+		return fmt.Errorf("value in field m.OrigPeer was too long")
 	}
 
-	if err = cbg.WriteMajorTypeHeaderBuf(scratch, w, cbg.MajTextString, uint64(len(t.OrigPeer))); err != nil {
+	if err = cbg.WriteMajorTypeHeaderBuf(scratch, w, cbg.MajTextString, uint64(len(m.OrigPeer))); err != nil {
 		return err
 	}
-	if _, err = io.WriteString(w, string(t.OrigPeer)); err != nil {
+	if _, err = io.WriteString(w, string(m.OrigPeer)); err != nil {
 		return err
 	}
 
 	return nil
 }
 
-func (t *Message) UnmarshalCBOR(r io.Reader) error {
-	*t = Message{}
+func (m *Message) UnmarshalCBOR(r io.Reader) error {
+	*m = Message{}
 
 	br := cbg.GetPeeker(r)
 	scratch := make([]byte, 8)
@@ -116,20 +116,20 @@ func (t *Message) UnmarshalCBOR(r io.Reader) error {
 		hasOrigPeer = true
 	}
 
-	// Decode t.Cid.
-	t.Cid, err = cbg.ReadCid(br)
+	// Decode m.Cid.
+	m.Cid, err = cbg.ReadCid(br)
 	if err != nil {
-		return fmt.Errorf("failed to read cid field t.Cid: %w", err)
+		return fmt.Errorf("failed to read cid field m.Cid: %w", err)
 	}
 
-	// Decode t.Addrs.
+	// Decode m.Addrs.
 	maj, extra, err = cbg.CborReadHeaderBuf(br, scratch)
 	if err != nil {
 		return err
 	}
 
 	if extra > cbg.MaxLength {
-		return fmt.Errorf("t.Addrs: array too large (%d)", extra)
+		return fmt.Errorf("m.Addrs: array too large (%d)", extra)
 	}
 
 	if maj != cbg.MajArray {
@@ -137,7 +137,7 @@ func (t *Message) UnmarshalCBOR(r io.Reader) error {
 	}
 
 	if extra > 0 {
-		t.Addrs = make([][]uint8, extra)
+		m.Addrs = make([][]uint8, extra)
 	}
 
 	for i := 0; i < int(extra); i++ {
@@ -154,15 +154,15 @@ func (t *Message) UnmarshalCBOR(r io.Reader) error {
 		}
 
 		if extra > 0 {
-			t.Addrs[i] = make([]uint8, extra)
+			m.Addrs[i] = make([]uint8, extra)
 		}
 
-		if _, err = io.ReadFull(br, t.Addrs[i][:]); err != nil {
+		if _, err = io.ReadFull(br, m.Addrs[i][:]); err != nil {
 			return err
 		}
 	}
 
-	// Decode t.ExtraData.
+	// Decode m.ExtraData.
 	maj, extra, err = cbg.CborReadHeaderBuf(br, scratch)
 	if err != nil {
 		return err
@@ -176,10 +176,10 @@ func (t *Message) UnmarshalCBOR(r io.Reader) error {
 	}
 
 	if extra > 0 {
-		t.ExtraData = make([]uint8, extra)
+		m.ExtraData = make([]uint8, extra)
 	}
 
-	if _, err = io.ReadFull(br, t.ExtraData[:]); err != nil {
+	if _, err = io.ReadFull(br, m.ExtraData[:]); err != nil {
 		return err
 	}
 
@@ -188,12 +188,12 @@ func (t *Message) UnmarshalCBOR(r io.Reader) error {
 		return nil
 	}
 
-	// Decode t.OrigPeer.
+	// Decode m.OrigPeer.
 	sval, err := cbg.ReadString(br)
 	if err != nil {
 		return err
 	}
-	t.OrigPeer = string(sval)
+	m.OrigPeer = string(sval)
 
 	return nil
 }
