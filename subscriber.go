@@ -40,15 +40,6 @@ const (
 	defaultIdleHandlerTTL = time.Hour
 )
 
-// errSourceNotAllowed is the error returned when a message source peer's
-// messages is not allowed to be processed. This is only used internally, and
-// pre-allocated here as it may occur frequently.
-var errSourceNotAllowed = errors.New("message source not allowed")
-
-// errAlreadySeenCid is teh error returned when an announce message is for a
-// CID has already been announced by a previous announce message.
-var errAlreadySeenCid = errors.New("announcement for already seen CID")
-
 // BlockHookFunc is the signature of a function that is called when a received.
 type BlockHookFunc func(peer.ID, cid.Cid, SegmentSyncActions)
 
@@ -213,6 +204,9 @@ func NewSubscriber(host host.Host, ds datastore.Batching, lsys ipld.LinkSystem, 
 		announce.WithFilterIPs(cfg.filterIPs),
 		announce.WithResend(cfg.resendAnnounce),
 		announce.WithTopic(cfg.topic))
+	if err != nil {
+		return nil, err
+	}
 
 	s := &Subscriber{
 		dss:  dss,

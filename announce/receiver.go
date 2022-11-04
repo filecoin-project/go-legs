@@ -19,11 +19,7 @@ import (
 
 var log = logging.Logger("assigntheindexer")
 
-const (
-	announceCacheSize = 64
-	// directConnectTicks makes pubsub check it's connected to direct peers every N seconds.
-	directConnectTicks = 30
-)
+const announceCacheSize = 64
 
 // AllowPeerFunc is the signature of a function given to Subscriber that
 // determines whether to allow or reject messages originating from a peer
