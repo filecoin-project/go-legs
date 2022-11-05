@@ -205,8 +205,8 @@ github.com/filecoin-project/go-statemachine v1.0.2/go.mod h1:jZdXXiHa61n4NmgWFG4
 github.com/filecoin-project/go-statestore v0.1.0/go.mod h1:LFc9hD+fRxPqiHiaqUEZOinUJB4WARkRfNl10O7kTnI=
 github.com/filecoin-project/go-statestore v0.2.0 h1:cRRO0aPLrxKQCZ2UOQbzFGn4WDNdofHZoGPjfNaAo5Q=
 github.com/filecoin-project/go-statestore v0.2.0/go.mod h1:8sjBYbS35HwPzct7iT4lIXjLlYyPor80aU7t7a/Kspo=
-github.com/filecoin-project/storetheindex v0.4.30-0.20221104235040-aaade86cbf81 h1:ksxIZYuGJ7gq9ZbHPOq28IDfGUNGac3A00ZVlP5vvDM=
-github.com/filecoin-project/storetheindex v0.4.30-0.20221104235040-aaade86cbf81/go.mod h1:Hk0zeTDSOt851Q3yz5+fV73adLaXLwLj09M7HeunM+c=
+github.com/filecoin-project/storetheindex v0.4.30-0.20221105025004-0fa9d7332d58 h1:ZuRxyzyqRjWpY6cJPv5QYv3jRoM4H05a/ywY/gVBSTE=
+github.com/filecoin-project/storetheindex v0.4.30-0.20221105025004-0fa9d7332d58/go.mod h1:Hk0zeTDSOt851Q3yz5+fV73adLaXLwLj09M7HeunM+c=
 github.com/flynn/go-shlex v0.0.0-20150515145356-3f9db97f8568/go.mod h1:xEzjJPgXI435gkrCt3MPfRiAkVrwSbHsst4LCFVfpJc=
 github.com/flynn/noise v1.0.0 h1:DlTHqmzmvcEiKj+4RYo/imoswx/4r6iBlCMfVtrMXpQ=
 github.com/flynn/noise v1.0.0/go.mod h1:xbMo+0i6+IGbYdJhF31t2eR1BIU0CYc12+BNAKwUTag=

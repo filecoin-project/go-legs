@@ -4,7 +4,7 @@ go 1.18
 
 require (
 	github.com/filecoin-project/go-data-transfer v1.15.2
-	github.com/filecoin-project/storetheindex v0.4.30-0.20221104235040-aaade86cbf81
+	github.com/filecoin-project/storetheindex v0.4.30-0.20221105025004-0fa9d7332d58
 	github.com/hashicorp/go-multierror v1.1.1
 	github.com/ipfs/go-cid v0.3.2
 	github.com/ipfs/go-datastore v0.6.0
