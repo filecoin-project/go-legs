@@ -113,12 +113,21 @@ func TestAnnounceReplace(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Log("Sent announce for last CID", lastCid)
-	sub.SyncReceiver()
 
-	// Check that the pending CID is set to the last one announced.
-	hnd.qlock.Lock()
-	pendingCid = hnd.pendingCid
-	hnd.qlock.Unlock()
+	// Check that the pending CID is set to the last one announced. Need to
+	// check in retry loop because there is no signal to indicate when the
+	// announce handler goroutine delivered the announce to Subscriber for
+	// handling.
+	for i := 0; i < 10; i++ {
+		hnd.qlock.Lock()
+		pendingCid = hnd.pendingCid
+		hnd.qlock.Unlock()
+		if pendingCid == lastCid {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
 	if pendingCid != lastCid {
 		t.Fatalf("wrong pending cid, expected %s got %s", lastCid.String(), pendingCid.String())
 	}
@@ -212,7 +221,14 @@ func TestAnnounce_LearnsHttpPublisherAddr(t *testing.T) {
 	// data was synced via the sync call and not via the earlier background sync via announce.
 	err = sub.Announce(ctx, oneC, pubh.ID(), []multiaddr.Multiaddr{pub.Address()})
 	require.NoError(t, err)
-	sub.SyncReceiver()
+
+	watcher, cncl := sub.OnSyncFinished()
+	defer cncl()
+	select {
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("timed out waiting for sync to finish")
+	case <-watcher:
+	}
 
 	// Now assert that we can sync another CID because, the subscriber should have learned the
 	// address of publisher via earlier announce.

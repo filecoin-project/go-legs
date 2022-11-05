@@ -377,12 +377,6 @@ func (s *Subscriber) RemoveHandler(peerID peer.ID) bool {
 	return true
 }
 
-// SyncReceiver makes sure that the Receiver has handled any pending announce
-// messages that existed at the point this function was called.
-func (s *Subscriber) SyncReceiver() {
-	s.receiver.SyncNext()
-}
-
 // Sync performs a one-off explicit sync with the given peer for a specific CID
 // and updates the latest synced link to it. Completing sync may take a
 // significant amount of time, so Sync should generally be run in its own
