@@ -114,27 +114,13 @@ func TestAnnounceReplace(t *testing.T) {
 	}
 	t.Log("Sent announce for last CID", lastCid)
 
-	// Check that the pending CID is set to the last one announced. Exit the
-	// loop when the CID has not changed. Need to check in retry loop because
-	// there is no signal to indicate when the announce handler goroutine
-	// delivered the announce to Subscriber for handling.
-	var prevCid cid.Cid
-	for sameCount := 0; sameCount < 5; {
+	// Check that the pending CID gets set to the last one announced.
+	require.Eventually(t, func() bool {
 		hnd.qlock.Lock()
 		pendingCid = hnd.pendingCid
 		hnd.qlock.Unlock()
-		if prevCid == pendingCid {
-			sameCount++
-		} else {
-			sameCount = 0
-		}
-		prevCid = pendingCid
-		time.Sleep(10 * time.Millisecond)
-	}
-
-	if pendingCid != lastCid {
-		t.Fatalf("wrong pending cid, expected %s got %s", lastCid.String(), pendingCid.String())
-	}
+		return pendingCid == lastCid
+	}, time.Second, 10*time.Millisecond)
 
 	// Unblock the first handler goroutine
 	hnd.syncMutex.Unlock()
