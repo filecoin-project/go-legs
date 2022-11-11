@@ -1,4 +1,4 @@
-package legs
+package announce
 
 import "container/list"
 

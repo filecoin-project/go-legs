@@ -1,8 +1,9 @@
-package mautil
+package mautil_test
 
 import (
 	"testing"
 
+	"github.com/filecoin-project/go-legs/mautil"
 	"github.com/multiformats/go-multiaddr"
 	"github.com/stretchr/testify/require"
 )
@@ -30,7 +31,7 @@ func TestFilterPrivateIPs(t *testing.T) {
 	expected = append(expected, maddrs[3])
 	expected = append(expected, maddrs[5])
 
-	filtered := FilterPrivateIPs(maddrs)
+	filtered := mautil.FilterPrivateIPs(maddrs)
 	if len(filtered) != len(expected) {
 		t.Fatalf("wrong number of addrs after filtering, expected %d got %d", len(expected), len(filtered))
 	}
@@ -41,7 +42,7 @@ func TestFilterPrivateIPs(t *testing.T) {
 		}
 	}
 
-	filtered = FilterPrivateIPs(nil)
+	filtered = mautil.FilterPrivateIPs(nil)
 	if filtered != nil {
 		t.Fatal("expected nil")
 	}
@@ -49,7 +50,7 @@ func TestFilterPrivateIPs(t *testing.T) {
 
 func TestFilterPrivateIPs_DoesNotPanicOnNilAddr(t *testing.T) {
 	original := []multiaddr.Multiaddr{nil}
-	got := FilterPrivateIPs(original)
+	got := mautil.FilterPrivateIPs(original)
 	// According to the function documentation, it should return the original slice.
 	require.Equal(t, original, got)
 }

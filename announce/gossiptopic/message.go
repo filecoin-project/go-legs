@@ -1,4 +1,4 @@
-package dtsync
+package gossiptopic
 
 import (
 	"errors"

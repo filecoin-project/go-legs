@@ -10,7 +10,7 @@ import (
 	"time"
 
 	dt "github.com/filecoin-project/go-data-transfer"
-	"github.com/filecoin-project/go-legs/gpubsub"
+	"github.com/filecoin-project/go-legs/announce/gossiptopic"
 	"github.com/filecoin-project/go-legs/p2p/protocol/head"
 	"github.com/hashicorp/go-multierror"
 	"github.com/ipfs/go-cid"
@@ -42,22 +42,19 @@ func NewPublisher(host host.Host, ds datastore.Batching, lsys ipld.LinkSystem, t
 		return nil, err
 	}
 
-	var cancel context.CancelFunc
+	var cancelPubsub context.CancelFunc
 	t := cfg.topic
 	if t == nil {
-		var ctx context.Context
-		ctx, cancel = context.WithCancel(context.Background())
-		t, err = gpubsub.MakePubsub(ctx, host, topic)
+		t, cancelPubsub, err = gossiptopic.MakeTopic(host, topic)
 		if err != nil {
-			cancel()
 			return nil, err
 		}
 	}
 
 	dtManager, _, dtClose, err := makeDataTransfer(host, ds, lsys, cfg.allowPeer)
 	if err != nil {
-		if cancel != nil {
-			cancel()
+		if cancelPubsub != nil {
+			cancelPubsub()
 		}
 		return nil, err
 	}
@@ -66,7 +63,7 @@ func NewPublisher(host host.Host, ds datastore.Batching, lsys ipld.LinkSystem, t
 	startHeadPublisher(host, topic, headPublisher)
 
 	p := &publisher{
-		cancelPubSub:  cancel,
+		cancelPubSub:  cancelPubsub,
 		dtManager:     dtManager,
 		dtClose:       dtClose,
 		headPublisher: headPublisher,
@@ -100,22 +97,19 @@ func NewPublisherFromExisting(dtManager dt.Manager, host host.Host, topic string
 		return nil, err
 	}
 
-	var cancel context.CancelFunc
+	var cancelPubsub context.CancelFunc
 	t := cfg.topic
 	if t == nil {
-		var ctx context.Context
-		ctx, cancel = context.WithCancel(context.Background())
-		t, err = gpubsub.MakePubsub(ctx, host, topic)
+		t, cancelPubsub, err = gossiptopic.MakeTopic(host, topic)
 		if err != nil {
-			cancel()
 			return nil, err
 		}
 	}
 
 	err = configureDataTransferForLegs(context.Background(), dtManager, lsys, cfg.allowPeer)
 	if err != nil {
-		if cancel != nil {
-			cancel()
+		if cancelPubsub != nil {
+			cancelPubsub()
 		}
 		return nil, fmt.Errorf("cannot configure datatransfer: %w", err)
 	}
@@ -123,7 +117,7 @@ func NewPublisherFromExisting(dtManager dt.Manager, host host.Host, topic string
 	startHeadPublisher(host, topic, headPublisher)
 
 	p := &publisher{
-		cancelPubSub:  cancel,
+		cancelPubSub:  cancelPubsub,
 		headPublisher: headPublisher,
 		host:          host,
 		topic:         t,
@@ -153,7 +147,7 @@ func (p *publisher) UpdateRootWithAddrs(ctx context.Context, c cid.Cid, addrs []
 		return err
 	}
 	log.Debugf("Publishing CID and addresses in pubsub channel: %s", c)
-	msg := Message{
+	msg := gossiptopic.Message{
 		Cid:       c,
 		ExtraData: p.extraData,
 	}
@@ -180,15 +174,16 @@ func (p *publisher) Close() error {
 			}
 		}
 
-		t := time.AfterFunc(shutdownTime, p.cancelPubSub)
-		if err = p.topic.Close(); err != nil {
-			log.Errorw("Failed to close pubsub topic", "err", err)
-			errs = multierror.Append(errs, err)
-		}
-
-		t.Stop()
+		// If publisher owns the pubsub Topic, then leave topic and shutdown Pubsub.
 		if p.cancelPubSub != nil {
-			p.cancelPubSub()
+			t := time.AfterFunc(shutdownTime, p.cancelPubSub)
+			if err = p.topic.Close(); err != nil {
+				log.Errorw("Failed to close pubsub topic", "err", err)
+				errs = multierror.Append(errs, err)
+			}
+			if t.Stop() {
+				p.cancelPubSub()
+			}
 		}
 	})
 	return errs

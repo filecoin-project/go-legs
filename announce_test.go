@@ -76,21 +76,13 @@ func TestAnnounceReplace(t *testing.T) {
 	t.Log("Sent announce for first CID", firstCid)
 	// This first announce should start the handler goroutine and clear the
 	// pending cid.
-	var i int
 	var pendingCid cid.Cid
-	for {
-		time.Sleep(time.Millisecond)
+	require.Eventually(t, func() bool {
 		hnd.qlock.Lock()
 		pendingCid = hnd.pendingCid
 		hnd.qlock.Unlock()
-		if pendingCid == cid.Undef {
-			break
-		}
-		i++
-		if i > 100 {
-			t.Fatal("timed out waiting for handler to clear pending cid")
-		}
-	}
+		return pendingCid == cid.Undef
+	}, 2*time.Second, 10*time.Millisecond)
 
 	// Announce two more times.
 	c := chainLnks[1].(cidlink.Link).Cid
@@ -113,13 +105,14 @@ func TestAnnounceReplace(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Log("Sent announce for last CID", lastCid)
-	// Check that the pending CID is set to the last one announced.
-	hnd.qlock.Lock()
-	pendingCid = hnd.pendingCid
-	hnd.qlock.Unlock()
-	if pendingCid != lastCid {
-		t.Fatal("wrong pending cid")
-	}
+
+	// Check that the pending CID gets set to the last one announced.
+	require.Eventually(t, func() bool {
+		hnd.qlock.Lock()
+		pendingCid = hnd.pendingCid
+		hnd.qlock.Unlock()
+		return pendingCid == lastCid
+	}, 2*time.Second, 10*time.Millisecond)
 
 	// Unblock the first handler goroutine
 	hnd.syncMutex.Unlock()
@@ -210,6 +203,14 @@ func TestAnnounce_LearnsHttpPublisherAddr(t *testing.T) {
 	// data was synced via the sync call and not via the earlier background sync via announce.
 	err = sub.Announce(ctx, oneC, pubh.ID(), []multiaddr.Multiaddr{pub.Address()})
 	require.NoError(t, err)
+
+	watcher, cncl := sub.OnSyncFinished()
+	defer cncl()
+	select {
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for sync to finish")
+	case <-watcher:
+	}
 
 	// Now assert that we can sync another CID because, the subscriber should have learned the
 	// address of publisher via earlier announce.
