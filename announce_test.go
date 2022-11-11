@@ -207,7 +207,7 @@ func TestAnnounce_LearnsHttpPublisherAddr(t *testing.T) {
 	watcher, cncl := sub.OnSyncFinished()
 	defer cncl()
 	select {
-	case <-time.After(100 * time.Millisecond):
+	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for sync to finish")
 	case <-watcher:
 	}
