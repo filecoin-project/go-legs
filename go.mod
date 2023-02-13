@@ -71,7 +71,7 @@ require (
 	github.com/ipfs/go-ipld-format v0.4.0 // indirect
 	github.com/ipfs/go-ipld-legacy v0.1.1 // indirect
 	github.com/ipfs/go-log v1.0.5 // indirect
-	github.com/ipfs/go-merkledag v0.6.0 // indirect
+	github.com/ipfs/go-merkledag v0.8.1 // indirect
 	github.com/ipfs/go-peertaskqueue v0.7.1 // indirect
 	github.com/ipfs/go-unixfs v0.4.3 // indirect
 	github.com/ipfs/go-verifcid v0.0.2 // indirect
