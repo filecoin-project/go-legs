@@ -3,6 +3,7 @@ package head
 import (
 	"context"
 	"fmt"
+	"github.com/pkg/errors"
 	"io"
 	"net"
 	"net/http"
@@ -68,17 +69,17 @@ func QueryRootCid(ctx context.Context, host host.Host, topic string, peerID peer
 					// If protocol ID is wrong, then try the old "double-slashed" protocol ID.
 					//
 					// TODO: remove this code when all providers have upgraded.
-					switch err.(type) {
-					case multistream.ErrNotSupported[string]:
-						oldProtoID := protocol.ID("/legs/head/" + topic + "/0.0.1")
-						conn, err = gostream.Dial(ctx, host, peerID, oldProtoID)
-						if err != nil {
-							return nil, err
-						}
-						log.Infow("Peer head CID server uses old protocol ID", "peer", peerID, "proto", oldProtoID)
-					default:
+					if !errors.Is(err, multistream.ErrNotSupported[protocol.ID]{
+						Protos: []protocol.ID{deriveProtocolID(topic)},
+					}) {
 						return nil, err
 					}
+					oldProtoID := protocol.ID("/legs/head/" + topic + "/0.0.1")
+					conn, err = gostream.Dial(ctx, host, peerID, oldProtoID)
+					if err != nil {
+						return nil, err
+					}
+					log.Infow("Peer head CID server uses old protocol ID", "peer", peerID, "proto", oldProtoID)
 				}
 				return conn, err
 			},
